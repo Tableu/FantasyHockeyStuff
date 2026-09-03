@@ -105,13 +105,15 @@ ACTIVE_SOURCE_SHEETS = [sheet for _label, sheet, _nick in ACTIVE_SOURCES]
 STALE_SOURCE_SHEETS = [
     "Steve Laidlaw", "Scott Cullen", "Bangers Fantasy Hockey", "KUBOTA",
 ]
-ORPHANED_UTILITY_SHEETS = ["Fleaflicker"]
-# MISC3 used to live here too, but it's not actually orphaned -- it's the paste-raw-names-into-
-# column-C-and-see-what-doesn't-match-NamesMasterList/fixnames diagnostic tool (see
-# fill_positions' POSITIONS_MANUAL_EXTRA_COL docstring for the other half of this workflow:
-# adding a name MISC3 flags "NO MATCH" for onto the master list itself). Kept, and never
-# touched by this script (like NameFix's own alias columns and Cheat Sheet's cells) -- it's a
-# manual workflow tool, not something to regenerate.
+ORPHANED_UTILITY_SHEETS = []
+# MISC3 and Fleaflicker used to live here, but neither is actually orphaned -- both are the
+# same paste-raw-names-into-column-C-and-see-what-doesn't-match-NamesMasterList/fixnames
+# diagnostic tool (Fleaflicker's own copy also has PLAYER/POS/TEAM paste columns C:E, for
+# checking a Fleaflicker ADP export specifically) (see fill_positions'
+# POSITIONS_MANUAL_EXTRA_COL docstring for the other half of this workflow: adding a name one
+# of these flags "NO MATCH" for onto the master list itself). Kept, and never touched by this
+# script (like NameFix's own alias columns and Cheat Sheet's cells) -- they're manual workflow
+# tools, not something to regenerate.
 # Per user instruction: Dom (The Athletic)'s sheet (still named 'Yahoo / Fantrax', see
 # ACTIVE_SOURCES above) is retired -- they'll add that source back in manually later. ESPN's
 # raw position-reference tab is retired too -- it was always vestigial, kept only for
