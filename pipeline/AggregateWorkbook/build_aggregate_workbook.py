@@ -1635,10 +1635,24 @@ if __name__ == "__main__":
 
     last_col = rebuild_all_projections(wb, "AllProjections_S", SKATER_AP_CATEGORIES, SKATER_AP_CONDITIONAL_TARGETS)
     set_defined_name(wb, "AllProj", f"AllProjections_S!$A:${cl(last_col)}")
+    # AllProjCats/AllProjNames are the row-4-header / column-A-name ranges every Player
+    # Values MATCH() lookup keys off of -- unlike AllProj above, nothing was resizing these
+    # after rebuild_all_projections started varying the sheet's width with ACTIVE_SOURCES,
+    # so they stayed pinned at whatever range they last had under the old (wider, 12-source)
+    # layout. That silently truncated MATCH's search area mid-category-block: any category
+    # landing past the stale cutoff (confirmed live: SHP/SOG/FOW/FOL/HIT/BLK for skaters)
+    # could never be found, leaving every Player Values row blank in that column -- while
+    # earlier categories (G/A/PIM/PPP, well inside the stale range) kept working, masking the
+    # bug as "some columns" rather than "everything broke". Resized here every run so the
+    # lookup range always matches the sheet rebuild_all_projections just produced.
+    set_defined_name(wb, "AllProjCats", f"AllProjections_S!$A$4:${cl(last_col)}$4")
+    set_defined_name(wb, "AllProjNames", f"AllProjections_S!$A$1:$A${wb['AllProjections_S'].max_row}")
     log.info("AllProjections_S: rebuilt, %d categories, ends at column %s", len(SKATER_AP_CATEGORIES), cl(last_col))
 
     last_col = rebuild_all_projections(wb, "AllProjections_G", GOALIE_AP_CATEGORIES, GOALIE_AP_CONDITIONAL_TARGETS)
     set_defined_name(wb, "AllGProj", f"AllProjections_G!$A:${cl(last_col)}")
+    set_defined_name(wb, "AllGProjCats", f"AllProjections_G!$A$4:${cl(last_col)}$4")
+    set_defined_name(wb, "AllGProjNames", f"AllProjections_G!$A$1:$A${wb['AllProjections_G'].max_row}")
     log.info("AllProjections_G: rebuilt, %d categories, ends at column %s", len(GOALIE_AP_CATEGORIES), cl(last_col))
 
     goalie_set = master["goalie_names"]
