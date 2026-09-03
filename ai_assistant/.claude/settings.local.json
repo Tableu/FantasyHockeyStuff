@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "nhlstats"
+  ],
+  "enableAllProjectMcpServers": true
+}

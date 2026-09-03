@@ -1,0 +1,11 @@
+# Dependencies for the read-only SQL Server MCP server used by the (not-yet-built) AI
+# fantasy hockey assistant -- separate from requirements.txt, which is the ingestion
+# pipeline's own dependencies. Nothing in nhl_pipeline imports these.
+#
+# microsoft_sql_server_mcp declares "mcp>=1.0.0" but its code (as of package version
+# 0.1.0) is only actually compatible with the older mcp SDK Server API
+# (@app.list_resources() etc.) -- installing the current mcp release (2.1.1 as of this
+# writing) breaks it at import time with AttributeError: 'Server' object has no attribute
+# 'list_resources'. Pin mcp==1.9.4, which was verified working.
+microsoft_sql_server_mcp==0.1.0
+mcp==1.9.4

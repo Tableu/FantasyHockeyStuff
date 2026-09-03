@@ -1,0 +1,5 @@
+googleSheetsCredentials.json
+databaseCredentials.txt
+AggregateWorkbook/Sheets/
+__pycache__/
+*.pyc
