@@ -17,11 +17,21 @@ def _to_float(value):
     return float(value) if value not in (None, "") else None
 
 
+def _to_signed_int(value):
+    """'+/-' values are exported with a leading straight quote (e.g. "'-13", "'17") -- a
+    spreadsheet text-format marker, not part of the number -- that plain _to_int/_to_float
+    can't parse."""
+    if value in (None, ""):
+        return None
+    return _to_int(value.lstrip("'"))
+
+
 def rows(sheets_dir: Path):
     with open(sheets_dir / FILENAME, encoding="utf-8-sig", newline="") as f:
         for r in csv.DictReader(f):
             is_goalie = r["Position"] == "G"
             if is_goalie:
+                ga, sv = _to_int(r["GA"]), _to_int(r["SV"])
                 stats = {
                     "GamesPlayed": _to_int(r["GP"]),
                     "Wins": _to_int(r["W"]),
@@ -29,6 +39,10 @@ def rows(sheets_dir: Path):
                     "OvertimeLosses": _to_int(r["OTL"]),
                     "SavePercentage": _to_float(r["SV%"]),
                     "GoalsAgainstAverage": _to_float(r["GAA"]),
+                    "GoalsAgainst": ga,
+                    "Saves": sv,
+                    # not in the sheet directly -- the only source of truth available.
+                    "ShotsAgainst": (ga + sv) if ga is not None and sv is not None else None,
                 }
             else:
                 fow, fol = _to_float(r["FOW"]), _to_float(r["FOL"])
@@ -42,6 +56,9 @@ def rows(sheets_dir: Path):
                     "Blocks": _to_int(r["BLK"]),
                     "PenaltyMinutes": _to_int(r["PIM"]),
                     "FaceoffWinPct": round(fow / (fow + fol), 4) if fow and (fow + fol) else None,
+                    "PlusMinus": _to_signed_int(r["'+/-"]),
+                    "FaceoffWins": _to_int(fow),
+                    "FaceoffLosses": _to_int(fol),
                 }
             yield {
                 "raw_name": r["Player"],

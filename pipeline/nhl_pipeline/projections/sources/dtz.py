@@ -36,5 +36,10 @@ def rows(sheets_dir: Path):
                     "PenaltyMinutes": _to_int(r["PIM"]),
                     "AverageTOIMinutes": _to_float(r["Total TOI"]),
                     "FaceoffWinPct": faceoff_pct,
+                    "PlusMinus": _to_int(r["+/-"]),
+                    "PowerPlayGoals": _to_int(r["PPG"]),
+                    "PowerPlayAssists": _to_int(r["PPA"]),
+                    "FaceoffWins": _to_int(fow),
+                    "FaceoffLosses": _to_int(fol),
                 },
             }

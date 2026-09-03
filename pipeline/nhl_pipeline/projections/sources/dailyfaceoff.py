@@ -27,14 +27,20 @@ def rows(sheets_dir: Path):
         for r in csv.DictReader(f):
             is_goalie = r["Pos"] == "G"
             if is_goalie:
+                gs, ga, sv = _to_int(r["GS"]), _to_int(r["GA"]), _to_int(r["SV"])
                 stats = {
-                    "GamesPlayed": _to_int(r["GS"]),
+                    "GamesPlayed": gs,
                     "Wins": _to_int(r["W"]),
                     "Losses": _to_int(r["L"]),
                     "OvertimeLosses": _to_int(r["T/O"]),
                     "Shutouts": _to_int(r["SO"]),
                     "SavePercentage": _to_float(r["SV%"]),
                     "GoalsAgainstAverage": _to_float(r["GAA"]),
+                    "GamesStarted": gs,
+                    "GoalsAgainst": ga,
+                    "Saves": sv,
+                    # not in the sheet directly -- the only source of truth available.
+                    "ShotsAgainst": (ga + sv) if ga is not None and sv is not None else None,
                 }
             else:
                 stats = {
@@ -48,6 +54,10 @@ def rows(sheets_dir: Path):
                     "Blocks": _to_int(r["BLK"]),
                     "PenaltyMinutes": _to_int(r["PIM"]),
                     "AverageTOIMinutes": _to_float(r["ATOI"]),
+                    "PlusMinus": _to_int(r["(+/-)"]),
+                    "PowerPlayGoals": _to_int(r["PPG"]),
+                    "PowerPlayAssists": _to_int(r["PPA"]),
+                    "FaceoffWins": _to_int(r["FOW"]),
                 }
             yield {
                 "raw_name": r["Player"],

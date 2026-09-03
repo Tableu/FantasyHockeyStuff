@@ -17,14 +17,18 @@ import logging
 from nhl_pipeline import config, db
 from nhl_pipeline.ingest.season import ensure_season
 from nhl_pipeline.projections import importer
-from nhl_pipeline.projections.sources import dailyfaceoff, dtz, fantrax, lineup_experts
+from nhl_pipeline.projections.sources import (
+    apples_ginos_blake, apples_ginos_nate, dailyfaceoff, dtz, fantrax, lineup_experts,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("import_projections")
 
-SHEETS_DIR = config.PROJECT_ROOT / "Sheets"
+# AggregateWorkbook/Sheets/, not a bare "Sheets/" off the repo root -- that's where every
+# source file actually lives (see AggregateWorkbook/Sheets' explicit .gitignore entry).
+SHEETS_DIR = config.PROJECT_ROOT / "AggregateWorkbook" / "Sheets"
 
-# All four sheets in Sheets/ are 2026-27 projections, a season that hasn't started yet and so
+# All sheets in Sheets/ are 2026-27 projections, a season that hasn't started yet and so
 # isn't in Reference.Seasons via the normal ingestion path (season_config.json/ensure_season
 # only ever run for the season currently being ingested). Ensured here instead.
 PROJECTIONS_SEASON_CFG = {"SeasonID_NHL": 20262027, "DisplayName": "2026-27"}
@@ -34,6 +38,8 @@ SOURCES = [
     ("Dailyfaceoff", dailyfaceoff, "dailyfaceoff espn.csv"),
     ("Lineup Experts", lineup_experts, "Lineup Experts Hockey Fantasy Draft Cheat Sheet"),
     ("Fantrax", fantrax, "Fantrax 2026-27 Fantasy Projections, 'The List' sheet"),
+    ("Apples & Ginos - Blake", apples_ginos_blake, "Apples & Ginos 2026-27 NHL Skater Projections - Blake"),
+    ("Apples & Ginos - Nate", apples_ginos_nate, "Apples & Ginos 2026-27 NHL Skater Projections - Nate"),
 ]
 
 
@@ -46,7 +52,14 @@ def main():
 
     for source_name, module, description in SOURCES:
         log.info("Importing %s...", source_name)
-        importer.import_rows(cursor, source_name, season_id, module.rows(SHEETS_DIR), description)
+        try:
+            importer.import_rows(cursor, source_name, season_id, module.rows(SHEETS_DIR), description)
+        except FileNotFoundError as exc:
+            # Fantrax's own source file is retired (see ACTIVE_SOURCES in
+            # build_aggregate_workbook.py) -- not present in Sheets/ until it's manually
+            # added back, so a missing file here shouldn't abort every other source's import.
+            log.warning("Skipping %s: %s", source_name, exc)
+            continue
         conn.commit()
 
     log.info("Done.")
