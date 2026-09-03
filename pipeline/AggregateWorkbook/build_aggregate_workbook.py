@@ -105,7 +105,13 @@ ACTIVE_SOURCE_SHEETS = [sheet for _label, sheet, _nick in ACTIVE_SOURCES]
 STALE_SOURCE_SHEETS = [
     "Steve Laidlaw", "Scott Cullen", "Bangers Fantasy Hockey", "KUBOTA",
 ]
-ORPHANED_UTILITY_SHEETS = ["MISC3", "Fleaflicker"]
+ORPHANED_UTILITY_SHEETS = ["Fleaflicker"]
+# MISC3 used to live here too, but it's not actually orphaned -- it's the paste-raw-names-into-
+# column-C-and-see-what-doesn't-match-NamesMasterList/fixnames diagnostic tool (see
+# fill_positions' POSITIONS_MANUAL_EXTRA_COL docstring for the other half of this workflow:
+# adding a name MISC3 flags "NO MATCH" for onto the master list itself). Kept, and never
+# touched by this script (like NameFix's own alias columns and Cheat Sheet's cells) -- it's a
+# manual workflow tool, not something to regenerate.
 # Per user instruction: Dom (The Athletic)'s sheet (still named 'Yahoo / Fantrax', see
 # ACTIVE_SOURCES above) is retired -- they'll add that source back in manually later. ESPN's
 # raw position-reference tab is retired too -- it was always vestigial, kept only for
@@ -553,6 +559,10 @@ def clear_adp_other(ws):
 # Phase 3: Positions
 # ---------------------------------------------------------------------------
 
+POSITIONS_MANUAL_EXTRA_COL = "Q"
+POSITIONS_MANUAL_EXTRA_HEADER = "ADD MISSING PLAYER NAMES BELOW (not overwritten by rebuild)"
+
+
 def fill_positions(ws, master):
     """D/E/F (Yahoo/Fantrax/ESPN) are written as plain PositionCode values, not formulas --
     each one is already resolved per-platform straight from the database (Fantasy.
@@ -560,7 +570,17 @@ def fill_positions(ws, master):
     (Reference.Players, present for every player) when a platform has no eligibility row for
     them. This is what actually fixes the blank-VORP/PRNK bug: no more multi-tab INDEX/MATCH
     fallback chain that silently comes up empty when a name doesn't match verbatim. G
-    (Fleaflicker) stays blank -- no platform-wide Fleaflicker data exists."""
+    (Fleaflicker) stays blank -- no platform-wide Fleaflicker data exists.
+
+    Column Q (POSITIONS_MANUAL_EXTRA_COL) is a standing, never-cleared manual-entry area: when
+    a user's own imported spreadsheet has a player the database doesn't know about at all (so
+    NameFix's dropdown and MISC3's "NO MATCH" check, both keyed off NamesMasterList, can never
+    recognize that name no matter what alias they type), they type the name into Q here and it
+    gets spliced onto the end of the real database-driven block in column A every run --
+    deduped against the database's own names, in whatever order they were typed. This does NOT
+    wire the player into any projection/stat pipeline (those all come from the database) --
+    it only makes the bare name matchable. NamesMasterList/TeamPOS are resized to cover the
+    extended range at the call site, same as AllProj/AllProjCats are for AllProjections_S/G."""
     clear_data_rows(ws, 2, ws.max_row, first_col=1, last_col=7)
     all_names = master["skater_names"] + master["goalie_names"]
     primary_pos = master["primary_pos"]
@@ -578,7 +598,24 @@ def fill_positions(ws, master):
         ws.cell(row=r, column=5, value=fantrax_pos.get(name) or primary_pos.get(name))  # E Fantrax
         ws.cell(row=r, column=6, value=espn_pos.get(name) or primary_pos.get(name))     # F ESPN
         r += 1
-    return r - 2, all_names
+
+    known = set(all_names)
+    extra_col = ci(POSITIONS_MANUAL_EXTRA_COL)
+    ws.cell(row=1, column=extra_col, value=POSITIONS_MANUAL_EXTRA_HEADER)
+    seen_extra, n_extra = set(), 0
+    for er in range(2, ws.max_row + 1):
+        name = ws.cell(row=er, column=extra_col).value
+        if not isinstance(name, str) or not name.strip():
+            continue
+        name = name.strip()
+        if name in known or name in seen_extra:
+            continue
+        seen_extra.add(name)
+        ws.cell(row=r, column=1, value=name)  # B..G left blank -- no database backing
+        r += 1
+        n_extra += 1
+
+    return r - 2, all_names, n_extra
 
 
 def pick_team(master, name):
@@ -1631,8 +1668,17 @@ if __name__ == "__main__":
     clear_adp_other(wb["ADPother"])
     log.info("ADPother: cleared (no Fleaflicker source)")
 
-    n, all_names = fill_positions(wb["Positions"], master)
-    log.info("Positions: %d rows", n)
+    n, all_names, n_extra = fill_positions(wb["Positions"], master)
+    log.info("Positions: %d rows (%d from the database + %d manually-added extra name(s))",
+              n, len(all_names), n_extra)
+    # NamesMasterList/TeamPOS are Positions' own name-matching contract to the rest of the
+    # workbook (NameFix's dropdown, MISC3's NO MATCH check, every VLOOKUP(...,TeamPOS,...))
+    # and, like AllProj/AllProjCats, were never being resized to match this sheet's actual row
+    # count -- silently stale (and, now, silently missing the whole manual-extra-names block
+    # above) the moment the database's roster size changed from whatever run last set them.
+    last_pos_row = 1 + n
+    set_defined_name(wb, "NamesMasterList", f"Positions!$A$2:$A${last_pos_row}")
+    set_defined_name(wb, "TeamPOS", f"Positions!$A$1:$C${last_pos_row}")
 
     n = refresh_allprojections_names(wb["AllProjections_S"], master["skater_names"])
     log.info("AllProjections_S: %d skater rows", n)
