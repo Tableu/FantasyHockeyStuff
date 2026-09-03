@@ -1552,6 +1552,19 @@ def rebuild_available(ws, pv_ws, pv_sheet_name, last_pv_row, value_col_letter, v
             ws, anchor_row, anchor_col, 7, rank_cols[rank_idx], pv_sheet_name,
             pv_first, pv_last, out_cols, hdr)
 
+    # values.update (what wb.save() sends) never touches a cell's format, so these formula
+    # writes silently inherit whatever format each cell already had -- which turned out to be
+    # none at all here (confirmed live: VAL/VORP showing 10+ raw decimal places instead of the
+    # template's "0.00"), however that happened over this workbook's history. Reapplied
+    # explicitly every run rather than trusted to already be right. Row range covers all 3
+    # position-block row-bands (4-10/14-20/24-30) in one shot -- the gaps between them (11-13,
+    # 21-23) get formatted too, harmlessly, since nothing occupies those rows in this sheet.
+    ws.set_number_format(2, ci("A"), 31, ci("A"), "0.0")
+    ws.set_number_format(4, ci("G"), 30, ci("H"), "0.00")
+    ws.set_number_format(4, ci("I"), 30, ci("I"), "0.0")
+    ws.set_number_format(4, ci("M"), 30, ci("N"), "0.00")
+    ws.set_number_format(4, ci("O"), 30, ci("O"), "0.0")
+
 
 if __name__ == "__main__":
     log.info("Loading source data from the database...")

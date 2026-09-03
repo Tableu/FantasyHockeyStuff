@@ -167,6 +167,29 @@ class CompatWorksheet:
         self._gs.unmerge_cells(range_str)
         self._merges = [r for r in self._merges if r != range_str]
 
+    def set_number_format(self, first_row, first_col, last_row, last_col, pattern):
+        """Applies a NUMBER format (e.g. "0.00") to a rectangular range, fired immediately
+        like delete_cols/unmerge_cells above rather than staged with the value writes --
+        values.update (what wb.save() sends) only ever touches a cell's value, never its
+        format, so a freshly-written formula silently inherits whatever format (often none,
+        i.e. full float precision) that cell already had. Needed for any sheet this module
+        actively rewrites where the underlying template's format can't be trusted to already
+        be correct (confirmed empirically: Available - Cats/Pts' VAL/VORP columns had no
+        format at all in RESULT despite the template having one, apparently lost somewhere
+        in this workbook's history) -- callers that only ever fill an already-correctly-
+        formatted template range don't need this."""
+        self._gs.spreadsheet.batch_update({"requests": [{
+            "repeatCell": {
+                "range": {
+                    "sheetId": self.sheet_id,
+                    "startRowIndex": first_row - 1, "endRowIndex": last_row,
+                    "startColumnIndex": first_col - 1, "endColumnIndex": last_col,
+                },
+                "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": pattern}}},
+                "fields": "userEnteredFormat.numberFormat",
+            }
+        }]})
+
 
 class CompatWorkbook:
     def __init__(self, gc, spreadsheet):
