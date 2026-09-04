@@ -37,7 +37,7 @@ SOURCES = [
     ("DtZ", dtz, "DtZ 2026-2027 NHL Fantasy Projections"),
     ("Dailyfaceoff", dailyfaceoff, "dailyfaceoff espn.csv"),
     ("Lineup Experts", lineup_experts, "Lineup Experts Hockey Fantasy Draft Cheat Sheet"),
-    ("Fantrax", fantrax, "Fantrax 2026-27 Fantasy Projections, 'The List' sheet"),
+    ("Dom", fantrax, "Fantrax 2026-27 Fantasy Projections, 'The List' sheet"),
     ("Apples & Ginos - Blake", apples_ginos_blake, "Apples & Ginos 2026-27 NHL Skater Projections - Blake"),
     ("Apples & Ginos - Nate", apples_ginos_nate, "Apples & Ginos 2026-27 NHL Skater Projections - Nate"),
 ]
