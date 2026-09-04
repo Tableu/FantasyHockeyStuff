@@ -562,7 +562,12 @@ def clear_adp_other(ws):
 # ---------------------------------------------------------------------------
 
 POSITIONS_MANUAL_EXTRA_COL = "Q"
-POSITIONS_MANUAL_EXTRA_HEADER = "ADD MISSING PLAYER NAMES BELOW (not overwritten by rebuild)"
+POSITIONS_MANUAL_EXTRA_HEADER = "ADD MISSING NAMES"
+# Short on purpose -- Q1's overflow room is only Q:T (~228px) before column U's "SKATERS"
+# label (a leftover dead filter header, see the SNames/GNames comment on
+# _repatch_shifted_positions_refs) blocks it and the full sentence clips. The long-form
+# explanation lives in a cell note on Q1 instead (set once, live -- this function doesn't
+# manage notes) rather than in the header text itself.
 
 
 def fill_positions(ws, master):
