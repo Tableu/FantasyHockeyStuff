@@ -135,14 +135,28 @@ def _active_sources(cursor) -> list:
     return [(name, name, _source_nick(name)) for name in names]
 
 
+# Import 1/2/3 -- a human pastes their own projections directly into one of these (following
+# its header row -- the same unified RAW_SOURCE_HEADERS every source's sheet uses, so a pasted
+# stat lands under the same category codes CatsAll/CatWeights already use elsewhere, e.g. "P"
+# not "PTS") when they have a projection source not worth a full database import. Fixed nicks
+# (not derived from a database name, since there isn't one) so they stay stable across runs.
+# Unlike every database-driven source, fill_source_sheet is NEVER called for one of these (see
+# main below) -- these three are the one place in this whole script something manual and
+# persistent is supposed to survive a rerun untouched; ensure_raw_source_sheet/
+# ensure_source_named_ranges still apply, so a missing one gets its scaffold recreated and its
+# Proj<nick>* named ranges stay pointed at it, exactly like a database-driven source.
+MANUAL_SOURCES = [
+    ("Import 1", "Import 1", "i1"),
+    ("Import 2", "Import 2", "i2"),
+    ("Import 3", "Import 3", "i3"),
+]
+
 # Sheet titles never copied over from the template when bootstrapping RESULT, and pruned from
 # RESULT itself if already present (see gsheets_io.open_result_workbook/_prune_dropped_sheets).
-# Import 1/2/3 -- the old user-maintained "paste your own projections here" sheets -- are
-# retired now that a new source only needs to be imported into the database to be picked up
-# automatically (see _active_sources above); nothing else currently belongs on this list, since
-# every previously-stale/retired/orphaned tab this used to name has already been removed from
+# Nothing currently belongs on this list -- every previously-stale/retired/orphaned tab this
+# used to name (including, at one point, Import 1/2/3 themselves) has already been removed from
 # the template directly rather than merely filtered out of the copy.
-DROP_SHEETS = {"Import 1", "Import 2", "Import 3"}
+DROP_SHEETS = set()
 
 
 def header_map(ws, row=1):
@@ -315,20 +329,25 @@ def _primary_positions(cursor) -> dict:
 
 def load_master_data(cursor) -> dict:
     global ACTIVE_SOURCES, DB_EXPORTED_SOURCES, ACTIVE_SOURCE_SHEETS
-    ACTIVE_SOURCES = _active_sources(cursor)
+    db_sources = _active_sources(cursor)
+    ACTIVE_SOURCES = db_sources + MANUAL_SOURCES
     DB_EXPORTED_SOURCES = {label for label, _sheet, _nick in ACTIVE_SOURCES}
     ACTIVE_SOURCE_SHEETS = [sheet for _label, sheet, _nick in ACTIVE_SOURCES]
 
-    # {source_name: {"skaters": {...}, "goalies": {...}}} for every currently active source --
-    # a source with no goalie rows at all (e.g. a skater-only export) just gets an empty
-    # goalies dict back, same outcome as never querying it, so nothing here needs to know in
-    # advance which sources carry which position.
+    # {source_name: {"skaters": {...}, "goalies": {...}}} -- database-driven sources only
+    # (db_sources, not ACTIVE_SOURCE_SHEETS -- querying Projections.SkaterProjections for
+    # "Import 1" would just waste a round trip for a guaranteed-empty result, since it isn't a
+    # SourceName that table has ever heard of). A source with no goalie rows at all (e.g. a
+    # skater-only export) just gets an empty goalies dict back, same outcome as never querying
+    # it, so nothing here needs to know in advance which sources carry which position. main()
+    # below is what actually knows to skip fill_source_sheet for MANUAL_SOURCES -- their sheets
+    # simply aren't in this dict, so master["sources"][name] would KeyError if it tried.
     sources = {
         name: {
             "skaters": _skater_projection_rows(cursor, name),
             "goalies": _goalie_projection_rows(cursor, name),
         }
-        for name in ACTIVE_SOURCE_SHEETS
+        for name, _sheet, _nick in db_sources
     }
 
     # a name never appears as both skater and goalie across sources in this data; if it did,
@@ -1646,11 +1665,13 @@ if __name__ == "__main__":
     log.info("Settings: defaulted Playoffs Schedule to %s - %s (last 3 weeks of season)", playoff_start, playoff_end)
 
     for name, _sheet, nick in ACTIVE_SOURCES:
-        data = master["sources"][name]
         ws = ensure_raw_source_sheet(wb, name)
-        n = fill_source_sheet(ws, data["skaters"], data["goalies"])
+        if name in master["sources"]:
+            n = fill_source_sheet(ws, master["sources"][name]["skaters"], master["sources"][name]["goalies"])
+            log.info("%s: %d rows", name, n)
+        else:
+            log.info("%s: manual source, left untouched", name)
         ensure_source_named_ranges(wb, name, nick)
-        log.info("%s: %d rows", name, n)
 
     n = fill_adp_yahoo(wb["ADPYahoo"], master["yahoo_adp"])
     log.info("ADPYahoo: %d rows", n)
