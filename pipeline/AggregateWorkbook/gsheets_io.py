@@ -190,6 +190,30 @@ class CompatWorksheet:
             }
         }]})
 
+    def set_data_validation(self, row, col, source_range_a1):
+        """Sets a dropdown (ONE_OF_RANGE validation) on one cell, sourced from
+        source_range_a1 (e.g. "'AllProjections_S'!$A$5:$A$745" -- a sheet-qualified A1 range,
+        not a named range: named ranges can go stale/get corrupted into #REF! by a
+        copyTo/duplicate operation the same way any other formula reference can, which is
+        exactly the failure this exists to fix -- see rebuild_source_comparison, where this is
+        called fresh every run with the CURRENT player-name range instead of trusting
+        whatever validation rule happened to survive from before). Fired immediately, like
+        set_number_format above, since values.update never touches validation rules."""
+        self._gs.spreadsheet.batch_update({"requests": [{
+            "setDataValidation": {
+                "range": {
+                    "sheetId": self.sheet_id,
+                    "startRowIndex": row - 1, "endRowIndex": row,
+                    "startColumnIndex": col - 1, "endColumnIndex": col,
+                },
+                "rule": {
+                    "condition": {"type": "ONE_OF_RANGE", "values": [{"userEnteredValue": f"={source_range_a1}"}]},
+                    "strict": True,
+                    "showCustomUi": True,
+                },
+            }
+        }]})
+
 
 class CompatWorkbook:
     def __init__(self, gc, spreadsheet):

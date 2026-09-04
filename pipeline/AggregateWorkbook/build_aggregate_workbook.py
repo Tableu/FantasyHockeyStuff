@@ -819,21 +819,32 @@ def rebuild_player_values(ws, all_names, goalie_names, last_col_letter,
 # is now a one-line edit to ACTIVE_SOURCE_SHEETS, not a manual Excel surgery session.
 # ---------------------------------------------------------------------------
 
-def rebuild_source_comparison(ws):
-    """SourceComparison lets a user pick one skater and one goalie (A2/A16 -- preserved
-    as-is, whatever sample name is currently there) and see + average their stats across
-    every source. Its per-source row block was hardcoded to 12 rows (one per historical
-    source, referencing Settings!S4:S15 by row) the same way SourceCheck's columns used to
-    be hardcoded to 12 -- same fix, applied to rows instead of columns: regenerate the block
-    to exactly len(ACTIVE_SOURCES) rows every run. Unlike SourceCheck's old self-referencing
-    formulas, this sheet's INDEX/MATCH lookups already reference their own row via $B{r} (an
-    absolute-column/relative-row ref), so there's no column-letter-style shift bug here --
-    the only thing that needed fixing was the row *count*. Rewritten from scratch (not
-    row-inserted/deleted) to sidestep openpyxl's lack of formula-text adjustment entirely.
-    The category header row (row 1, columns D onward -- SKATERS' own, never moves) and the
-    GOALIES section's equivalent (which does move, since the goalie block shifts up as the
-    skater block shrinks) are pure static config unrelated to which sources exist -- read
-    once and carried over as-is. Row 1 itself is never touched at all."""
+def rebuild_source_comparison(wb):
+    """SourceComparison lets a user pick one skater and one goalie (A2/A{goalie_name_row} --
+    preserved as-is, whatever sample name is currently there) and see + average their stats
+    across every source. Its per-source row block was hardcoded to 12 rows (one per
+    historical source, referencing Settings!S4:S15 by row) the same way SourceCheck's columns
+    used to be hardcoded to 12 -- same fix, applied to rows instead of columns: regenerate the
+    block to exactly len(ACTIVE_SOURCES) rows every run. Unlike SourceCheck's old
+    self-referencing formulas, this sheet's INDEX/MATCH lookups already reference their own
+    row via $B{r} (an absolute-column/relative-row ref), so there's no column-letter-style
+    shift bug here -- the only thing that needed fixing was the row *count*. Rewritten from
+    scratch (not row-inserted/deleted) to sidestep openpyxl's lack of formula-text adjustment
+    entirely. The category header row (row 1, columns D onward -- SKATERS' own, never moves)
+    and the GOALIES section's equivalent (which does move, since the goalie block shifts up as
+    the skater block shrinks) are pure static config unrelated to which sources exist -- read
+    once and carried over as-is. Row 1 itself is never touched at all.
+
+    A2/A{goalie_name_row} are meant to be interactive: a dropdown limited to real player
+    names, not free text. Found live with a #REF! condition on the skater cell (the copyTo/
+    duplicate corruption this whole workbook has hit before, see set_defined_names) and no
+    validation at all on the goalie cell -- reset here every run, the same self-correcting
+    approach as ensure_raw_source_sheet's header refresh, rather than a one-time manual patch
+    that would just silently rot again. Sourced from AllProjections_S/G's own name column
+    (rows 5+, skipping their average/stdev summary rows) rather than the shared AllProjNames/
+    AllGProjNames named ranges, so a stale/corrupted named range can't take this dropdown down
+    with it and this sheet stays independently interactive."""
+    ws = wb["SourceComparison"]
     n = len(ACTIVE_SOURCES)
     last_cat_col = ws.max_column
 
@@ -902,6 +913,9 @@ def rebuild_source_comparison(ws):
     for c in range(3, last_cat_col + 1):
         letter = cl(c)
         ws.cell(row=goalie_name_row, column=c, value=f"=IFERROR(AVERAGE({letter}{goalie_src_first}:{letter}{goalie_src_last}),)")
+
+    ws.set_data_validation(2, 1, f"'AllProjections_S'!$A$5:$A${wb['AllProjections_S'].max_row}")
+    ws.set_data_validation(goalie_name_row, 1, f"'AllProjections_G'!$A$5:$A${wb['AllProjections_G'].max_row}")
 
     return goalie_src_last
 
@@ -1815,7 +1829,7 @@ if __name__ == "__main__":
     n = rebuild_source_check(wb, all_names)
     log.info("SourceCheck: rebuilt, %d row(s), %d active source column(s)", n, len(ACTIVE_SOURCE_SHEETS))
 
-    n = rebuild_source_comparison(wb["SourceComparison"])
+    n = rebuild_source_comparison(wb)
     log.info("SourceComparison: rebuilt, ends at row %d", n)
 
     rebuild_vorp(wb["CVals/Vorp"], "Player Values - Cats", last_row, "RosterF", "RosterD", "RosterG")
