@@ -272,9 +272,6 @@ def _skater_projection_rows(cursor, source_name: str, display_names: dict) -> di
     for row in cursor.fetchall():
         out[display_names.get(row.PlayerID, row.FullName)] = {
             "Team": row.Team, "Pos": row.PositionCode, "GP": row.GamesPlayed,
-            # dtz.py stores the CSV's season-total 'Total TOI' under this column name
-            # (a pre-existing upstream mislabeling, not fixed here) -- SKATER_FIELDS' own
-            # TOI/GP division to derive ATOI still works correctly given that.
             "TOI": float(row.AverageTOIMinutes) if row.AverageTOIMinutes is not None else None,
             "G": row.Goals, "A": row.Assists, "PTS": row.Points,
             "PPP": row.PowerPlayPoints, "SHP": row.ShortHandedPoints,
@@ -430,19 +427,28 @@ def load_master_data(cursor) -> dict:
 # regardless of source (the database schema doesn't vary per source, only which fields a given
 # source actually populates does) -- SKATER_FIELDS/GOALIE_FIELDS below is the one place that
 # shape is named, as {display header -> dict key or a (dict key, transform) pair for the couple
-# of fields that need one, e.g. ATOI from TOI/GP}. Both the header row (just the ordered key
-# list) and every source's actual data row (built by evaluating this same map) come from it, so
-# there's exactly one field list to keep in sync with the database's own columns -- not a
-# separate header list per source, and not one hand-kept list duplicating what write_row's
-# dict literals already said. (The database itself has no reference table naming these fields'
-# short codes -- Projections.Sources only names the source, not its columns -- so this map, not
-# a query, is the actual source of truth; a genuinely new stat would still need a line added
-# here once, the same as it needing new SkaterProjections/GoalieProjections columns first.)
+# of fields that need one}. Both the header row (just the ordered key list) and every source's
+# actual data row (built by evaluating this same map) come from it, so there's exactly one
+# field list to keep in sync with the database's own columns -- not a separate header list per
+# source, and not one hand-kept list duplicating what write_row's dict literals already said.
+# (The database itself has no reference table naming these fields' short codes --
+# Projections.Sources only names the source, not its columns -- so this map, not a query, is
+# the actual source of truth; a genuinely new stat would still need a line added here once, the
+# same as it needing new SkaterProjections/GoalieProjections columns first.)
 # ---------------------------------------------------------------------------
 
 SKATER_FIELDS = {
     "Team": "Team", "Pos": "Pos", "GP": "GP",
-    "ATOI": lambda s: (s["TOI"] / s["GP"]) if s.get("TOI") and s.get("GP") else None,
+    # AverageTOIMinutes (Projections.SkaterProjections) is already a per-game average for
+    # every source (confirmed live: Aaron Ekblad's DB row is ~22 for all six sources, not a
+    # season total for any of them) -- so this is a straight passthrough, not TOI/GP. A prior
+    # version of this map divided by GP here on the theory that dtz.py's CSV column (named
+    # "Total TOI") held a season total needing recovery; dtz.py just does
+    # _to_float(r["Total TOI"]) with no division of its own, and the DB value it actually
+    # produces is per-game-sized, so that theory didn't hold -- the extra /GP was quietly
+    # shrinking every source's ATOI by two orders of magnitude (found live: SourceComparison
+    # showing ~0.22 instead of ~22 minutes).
+    "ATOI": "TOI",
     "G": "G", "A": "A", "P": "PTS", "+/-": "PM", "PIM": "PIM",
     "PPG": "PPG", "PPA": "PPA", "PPP": "PPP", "SHP": "SHP", "SOG": "SOG",
     "FOW": "FOW", "FOL": "FOL", "HIT": "HIT", "BLK": "BLK",
