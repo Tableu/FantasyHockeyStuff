@@ -357,6 +357,74 @@ def load_master_data(cursor) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 0.6: raw source sheet scaffolding
+#
+# The template no longer carries a copy of the currently-active raw per-source tabs (removed
+# per user instruction, since fill_dtz/fill_lineup_experts/fill_dailyfaceoff/fill_apples_ginos
+# below overwrite their content completely every run anyway -- the template copy was pure
+# leftover clutter). Those functions still assume the sheet already exists (wb["Dailyfaceoff"]
+# etc, no creation logic) -- true for any RESULT this script has already run against, but not
+# for a from-scratch bootstrap (e.g. next season's brand-new RESULT workbook), which would
+# otherwise crash with a KeyError the first time a fill_* call reaches for a sheet the template
+# never had. ensure_raw_source_sheet recreates that scaffold on demand: the header row, and the
+# same paste-and-check A/B match-formula pair every raw source tab has (identical to MISC3/
+# Fleaflicker's own pattern) -- just no data rows, which fill_* writes immediately after.
+# ---------------------------------------------------------------------------
+
+RAW_SOURCE_HEADERS = {
+    "Dailyfaceoff": [
+        "Player", "Team", "Pos", "GP", "G", "A", "P", "+/-", "PIM", "PPG", "PPA", "PPP", "SOG",
+        "ATOI", "FOW", "BLK", "HIT", "GS", "W", "L", "OTL", "SO", "SV", "SV%", "GA", "GAA", "SA",
+    ],
+    "DatsyukToZetterberg": [
+        "Player", "Age", "Pos", "Team", "Salary", "GP", "ATOI", "G", "A", "P", "PPG", "PPA",
+        "PPP", "SHG", "SHA", "SHP", "HIT", "BLK", "PIM", "FOW", "FOL", "SOG", "+/-", "W", "L",
+        "OTL", "GA", "SA", "SV", "SV%",
+    ],
+    "LineupExperts": [
+        "player", "team-pos", "GP", "G", "A", "P", "+/-", "SOG", "PIM", "HIT", "BLK", "PPP",
+        "GA", "GAA", "SV", "SV%", "W", "L", "OTL", "SO",
+    ],
+    "Apples & Ginos - Blake": [
+        "Name", "Team", "Proj Pos", "GP", "G", "A", "P", "PPP", "SOG", "HIT", "BLK", "PIM",
+        "S%", "ATOI",
+    ],
+    "Apples & Ginos - Nate": [
+        "Name", "Team", "Proj Pos", "GP", "G", "A", "P", "PPP", "SOG", "HIT", "BLK", "PIM",
+        "S%", "ATOI",
+    ],
+}
+RAW_SOURCE_SCAFFOLD_ROWS = 1000  # matches these tabs' own historical row count
+
+
+def ensure_raw_source_sheet(wb, title):
+    """Returns wb[title] -- creating it fresh via CompatWorkbook.add_worksheet (scaffold only,
+    no player data; the caller's fill_* writes that immediately after) if a from-scratch
+    bootstrap didn't get a copy from the template. Idempotent and a no-op in the normal case,
+    where the sheet already exists."""
+    if title in wb.sheetnames:
+        return wb[title]
+    headers = RAW_SOURCE_HEADERS[title]
+    ws = wb.add_worksheet(title, rows=RAW_SOURCE_SCAFFOLD_ROWS, cols=2 + len(headers))
+    ws.cell(row=1, column=1, value=(
+        '=COUNTA(C2:C)&" PLAYERS"&CHAR(10)&COUNTIFS(A2:A,"<>NO MATCH",A2:A,"?*")&" ON MASTER"'
+    ))
+    ws.cell(row=1, column=2, value=(
+        '=SUM(B2:B)&" MATCHED"&char(10)&COUNTIF(B2:B,"?*")&" FIXED"&CHAR(10)&'
+        'COUNTIF(A2:A,"NO MATCH")&" NO MATCH"'
+    ))
+    for i, h in enumerate(headers):
+        ws.cell(row=1, column=3 + i, value=h)
+    for r in range(2, RAW_SOURCE_SCAFFOLD_ROWS + 1):
+        ws.cell(row=r, column=1, value=f'=IF(C{r}="","",if(B{r}=1,C{r},if(B{r}="","NO MATCH",B{r})))')
+        ws.cell(row=r, column=2, value=(
+            f'=IFNA(IF(COUNTIF(NamesMasterList,C{r}),1,VLOOKUP(C{r},fixnames,2,FALSE)),)'
+        ))
+    log.info("%s: created missing sheet from scratch (template no longer carries a copy)", title)
+    return ws
+
+
+# ---------------------------------------------------------------------------
 # Phase 1: raw per-source tabs
 # ---------------------------------------------------------------------------
 
@@ -1621,19 +1689,19 @@ if __name__ == "__main__":
     settings_ws.cell(row=20, column=3, value=playoff_end)
     log.info("Settings: defaulted Playoffs Schedule to %s - %s (last 3 weeks of season)", playoff_start, playoff_end)
 
-    n = fill_dtz(wb["DatsyukToZetterberg"], master["dtz"])
+    n = fill_dtz(ensure_raw_source_sheet(wb, "DatsyukToZetterberg"), master["dtz"])
     log.info("DatsyukToZetterberg: %d rows", n)
 
-    n = fill_lineup_experts(wb["LineupExperts"], master["lx_s"], master["lx_g"])
+    n = fill_lineup_experts(ensure_raw_source_sheet(wb, "LineupExperts"), master["lx_s"], master["lx_g"])
     log.info("LineupExperts: %d rows", n)
 
-    n = fill_dailyfaceoff(wb["Dailyfaceoff"], master["dfo_s"], master["dfo_g"])
+    n = fill_dailyfaceoff(ensure_raw_source_sheet(wb, "Dailyfaceoff"), master["dfo_s"], master["dfo_g"])
     log.info("Dailyfaceoff: %d rows", n)
 
-    n = fill_apples_ginos(wb["Apples & Ginos - Blake"], master["agb_s"])
+    n = fill_apples_ginos(ensure_raw_source_sheet(wb, "Apples & Ginos - Blake"), master["agb_s"])
     log.info("Apples & Ginos - Blake: %d rows", n)
 
-    n = fill_apples_ginos(wb["Apples & Ginos - Nate"], master["agn_s"])
+    n = fill_apples_ginos(ensure_raw_source_sheet(wb, "Apples & Ginos - Nate"), master["agn_s"])
     log.info("Apples & Ginos - Nate: %d rows", n)
 
     n = fill_adp_yahoo(wb["ADPYahoo"], master["yahoo_adp"])

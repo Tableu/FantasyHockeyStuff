@@ -212,6 +212,26 @@ class CompatWorkbook:
         del self._sheets[ws.title]
         self._order.remove(ws.title)
 
+    def add_worksheet(self, title, rows=1000, cols=26):
+        """Creates a brand-new, empty sheet (not copied from anywhere -- unlike every sheet
+        open_result_workbook wires up, which all come from SOURCE via copyTo) and returns its
+        CompatWorksheet, registered the same way so subsequent wb[title] lookups find it. For a
+        caller that needs a sheet the template doesn't carry a copy of at all (see
+        ensure_raw_source_sheet in build_aggregate_workbook.py) -- ordinary missing-sheet
+        bootstrapping from a template still goes through open_result_workbook."""
+        resp = self._sh.batch_update({"requests": [{
+            "addSheet": {"properties": {
+                "title": title,
+                "gridProperties": {"rowCount": rows, "columnCount": cols},
+            }}
+        }]})
+        props = resp["replies"][0]["addSheet"]["properties"]
+        gs_ws = gspread.Worksheet(self._sh, props, self._sh.id, self._sh.client)
+        cws = CompatWorksheet(self, gs_ws, props["sheetId"])
+        self._sheets[title] = cws
+        self._order.append(title)
+        return cws
+
     def save(self):
         self._grow_sheets_as_needed()
 
@@ -345,13 +365,29 @@ def open_result_workbook(source_spreadsheet_id, result_spreadsheet_id, drop_shee
     source_meta = source_sh.fetch_sheet_metadata()
     source_props_by_title = {s["properties"]["title"]: s["properties"] for s in source_meta["sheets"]}
     source_order = [s["properties"]["title"] for s in source_meta["sheets"]]
-    keep_sheets = [t for t in source_order if t not in drop_sheets]
 
     # _prune_dropped_sheets already has to fetch RESULT's metadata to check for anything to
     # prune, and returns it when nothing was pruned -- reused directly instead of this
     # function fetching the exact same metadata again with a second round trip.
     result_meta = _prune_dropped_sheets(result_sh, drop_sheets) or result_sh.fetch_sheet_metadata()
-    result_titles = {s["properties"]["title"] for s in result_meta["sheets"]}
+    result_order = [s["properties"]["title"] for s in result_meta["sheets"]]
+    result_titles = set(result_order)
+
+    # keep_sheets: every SOURCE sheet not dropped, in SOURCE's own order, PLUS any sheet RESULT
+    # already has that SOURCE no longer carries at all (and that isn't itself dropped) --
+    # e.g. an active raw-source tab the template stopped keeping a copy of once this script
+    # started owning its content completely every run (see ensure_raw_source_sheet in
+    # build_aggregate_workbook.py). Without this, such a sheet would be invisible to `wb`
+    # entirely (missing from keep_sheets means never wired up below) even though RESULT
+    # genuinely has it -- and a caller reaching for it via ensure_raw_source_sheet would then
+    # try to create a duplicate and fail, since Sheets rejects two sheets sharing a title.
+    # A sheet neither SOURCE nor RESULT currently has stays correctly absent from wb -- that's
+    # what lets ensure_raw_source_sheet tell "RESULT already has this" apart from "this needs
+    # to be created fresh" (a genuinely new RESULT bootstrapped after SOURCE stopped carrying
+    # a copy at all).
+    keep_sheets = [t for t in source_order if t not in drop_sheets]
+    keep_sheets += [t for t in result_order if t not in drop_sheets and t not in source_props_by_title]
+
     missing = [t for t in keep_sheets if t not in result_titles]
 
     if missing:
