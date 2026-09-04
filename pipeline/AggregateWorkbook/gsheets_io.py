@@ -676,20 +676,41 @@ def _split_ref(ref):
 
 
 def set_defined_name(wb, name, new_ref):
-    sheet_title, range_part = _split_ref(new_ref)
-    sheet_id = wb[sheet_title].sheet_id
-    grid_range = a1_range_to_grid_range(range_part.replace("$", ""), sheet_id)
+    set_defined_names(wb, {name: new_ref})
 
-    existing_id = wb._named_range_ids.get(name)
-    if existing_id:
-        request = {
-            "updateNamedRange": {
-                "namedRange": {"namedRangeId": existing_id, "name": name, "range": grid_range},
-                "fields": "range",
-            }
-        }
-        wb._sh.batch_update({"requests": [request]})
-    else:
-        request = {"addNamedRange": {"namedRange": {"name": name, "range": grid_range}}}
-        resp = wb._sh.batch_update({"requests": [request]})
-        wb._named_range_ids[name] = resp["replies"][0]["addNamedRange"]["namedRange"]["namedRangeId"]
+
+def set_defined_names(wb, mapping):
+    """Like set_defined_name, but for many names at once, in as few real API round trips as
+    possible -- one batch_update covers the whole mapping (chunked at 300 requests, same limit
+    _bootstrap_named_ranges already chunks at) instead of one per name. Firing set_defined_name
+    in a loop (confirmed empirically: 24 calls across 8 sources' 3 named ranges each, on top of
+    the ~22 already scattered through build_aggregate_workbook.py) is exactly the kind of load
+    that trips the Sheets API's per-minute write quota -- see _bootstrap_named_ranges' own
+    docstring, which hit the same wall at >60 addNamedRange calls in a minute -- and the
+    resulting throttling/backoff is what actually made a run slow, not the request work itself."""
+    requests = []
+    for name, new_ref in mapping.items():
+        sheet_title, range_part = _split_ref(new_ref)
+        sheet_id = wb[sheet_title].sheet_id
+        grid_range = a1_range_to_grid_range(range_part.replace("$", ""), sheet_id)
+
+        existing_id = wb._named_range_ids.get(name)
+        if existing_id:
+            requests.append({
+                "updateNamedRange": {
+                    "namedRange": {"namedRangeId": existing_id, "name": name, "range": grid_range},
+                    "fields": "range",
+                }
+            })
+        else:
+            requests.append({"addNamedRange": {"namedRange": {"name": name, "range": grid_range}}})
+            add_names_in_order.append(name)
+
+    CHUNK = 300
+    for i in range(0, len(requests), CHUNK):
+        batch = requests[i : i + CHUNK]
+        resp = wb._sh.batch_update({"requests": batch})
+        for req, reply in zip(batch, resp["replies"]):
+            if "addNamedRange" in req:
+                name = req["addNamedRange"]["namedRange"]["name"]
+                wb._named_range_ids[name] = reply["addNamedRange"]["namedRange"]["namedRangeId"]

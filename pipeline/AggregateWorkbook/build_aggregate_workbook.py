@@ -18,7 +18,7 @@ imported into the database to be picked up automatically.)
 
 Reworked (regenerated from scratch every run, not preserved from SOURCE, and self-sufficient
 even for a from-scratch bootstrap that never saw these sheets before -- see
-ensure_raw_source_sheet/ensure_source_named_ranges): the raw per-source tabs, one per row
+ensure_raw_source_sheet/source_named_ranges): the raw per-source tabs, one per row
 Projections.Sources has for the current season (not a hardcoded list -- see _active_sources),
 Positions, AllProjections_S/G, Export, ADPYahoo/ADPFantrax/ADPother, Rankings!A, CVals/Vorp,
 FanPts/Vorp, CleanCat/CleanPts, Available - Cats/Pts, and Player Values - Cats/Pts' player
@@ -60,7 +60,7 @@ if _PIPELINE_ROOT not in sys.path:
 from openpyxl.utils import column_index_from_string as ci, get_column_letter as cl
 
 import gsheets_io
-from gsheets_io import set_defined_name
+from gsheets_io import set_defined_name, set_defined_names
 from nhl_pipeline import db as nhl_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -143,7 +143,7 @@ def _active_sources(cursor) -> list:
 # Unlike every database-driven source, fill_source_sheet is NEVER called for one of these (see
 # main below) -- these three are the one place in this whole script something manual and
 # persistent is supposed to survive a rerun untouched; ensure_raw_source_sheet/
-# ensure_source_named_ranges still apply, so a missing one gets its scaffold recreated and its
+# source_named_ranges still apply, so a missing one gets its scaffold recreated and its
 # Proj<nick>* named ranges stay pointed at it, exactly like a database-driven source.
 MANUAL_SOURCES = [
     ("Import 1", "Import 1", "i1"),
@@ -476,17 +476,25 @@ def ensure_raw_source_sheet(wb, title):
     return ws
 
 
-def ensure_source_named_ranges(wb, title, nick):
-    """(Re)points Proj<nick>/Proj<nick>Names/Proj<nick>Cats at `title` every run --
-    AllProjections_S/G's blending formulas (INDIRECT("Proj"&nick) etc, see
-    rebuild_all_projections) depend on these existing, but nothing copies them in from the
+def source_named_ranges(title, nick):
+    """{name: ref} for Proj<nick>/Proj<nick>Names/Proj<nick>Cats, which need to (re)point at
+    `title` every run -- AllProjections_S/G's blending formulas (INDIRECT("Proj"&nick) etc,
+    see rebuild_all_projections) depend on these existing, but nothing copies them in from the
     template anymore now that it carries no source sheets at all, so this script has to keep
-    them correct itself rather than relying on a one-time template-provided copy."""
+    them correct itself rather than relying on a one-time template-provided copy. Returns a
+    mapping rather than calling set_defined_name directly so the caller can batch every active
+    source's 3 entries into one set_defined_names call instead of 3*len(ACTIVE_SOURCES)
+    separate ones -- confirmed empirically to be enough individual API round trips (24 across
+    8 sources, on top of everything else set_defined_name is already called for) to trip
+    Sheets' per-minute write quota and visibly slow the run down via the resulting
+    throttling/backoff."""
     last_col = 2 + len(RAW_SOURCE_HEADERS)
     last_row = RAW_SOURCE_SCAFFOLD_ROWS
-    set_defined_name(wb, f"Proj{nick}", f"'{title}'!$A$1:${cl(last_col)}${last_row}")
-    set_defined_name(wb, f"Proj{nick}Names", f"'{title}'!$A$1:$A${last_row}")
-    set_defined_name(wb, f"Proj{nick}Cats", f"'{title}'!$A$1:${cl(last_col)}$1")
+    return {
+        f"Proj{nick}": f"'{title}'!$A$1:${cl(last_col)}${last_row}",
+        f"Proj{nick}Names": f"'{title}'!$A$1:$A${last_row}",
+        f"Proj{nick}Cats": f"'{title}'!$A$1:${cl(last_col)}$1",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1664,6 +1672,7 @@ if __name__ == "__main__":
     settings_ws.cell(row=20, column=3, value=playoff_end)
     log.info("Settings: defaulted Playoffs Schedule to %s - %s (last 3 weeks of season)", playoff_start, playoff_end)
 
+    source_ranges = {}
     for name, _sheet, nick in ACTIVE_SOURCES:
         ws = ensure_raw_source_sheet(wb, name)
         if name in master["sources"]:
@@ -1671,7 +1680,10 @@ if __name__ == "__main__":
             log.info("%s: %d rows", name, n)
         else:
             log.info("%s: manual source, left untouched", name)
-        ensure_source_named_ranges(wb, name, nick)
+        source_ranges.update(source_named_ranges(name, nick))
+    set_defined_names(wb, source_ranges)
+    log.info("Repointed %d Proj<nick>* named range(s) for %d active source(s) in one batch",
+              len(source_ranges), len(ACTIVE_SOURCES))
 
     n = fill_adp_yahoo(wb["ADPYahoo"], master["yahoo_adp"])
     log.info("ADPYahoo: %d rows", n)
