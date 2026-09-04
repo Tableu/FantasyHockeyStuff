@@ -214,6 +214,46 @@ class CompatWorksheet:
             }
         }]})
 
+    def set_cell_format(self, first_row, first_col, last_row, last_col, user_entered_format, fields):
+        """Applies an arbitrary userEnteredFormat (background color, text format/bold/font,
+        alignment, ...) to a rectangular range -- the general-purpose sibling of
+        set_number_format above, fired immediately for the same reason (values.update never
+        touches format). `fields` is the usual Sheets API field mask, e.g.
+        "backgroundColor,textFormat.bold" -- only pass what you're actually setting, since an
+        empty/unset key isn't the same as "leave whatever was already there alone"."""
+        self._gs.spreadsheet.batch_update({"requests": [{
+            "repeatCell": {
+                "range": {
+                    "sheetId": self.sheet_id,
+                    "startRowIndex": first_row - 1, "endRowIndex": last_row,
+                    "startColumnIndex": first_col - 1, "endColumnIndex": last_col,
+                },
+                "cell": {"userEnteredFormat": user_entered_format},
+                "fields": f"userEnteredFormat({fields})",
+            }
+        }]})
+
+    def update_borders(self, first_row, first_col, last_row, last_col, **borders):
+        """Sets outer/inner borders on a rectangular range in one shot (Sheets' updateBorders
+        request) -- the right primitive for a bordered block with thin dividers between rows,
+        which repeatCell can't express in a single call (repeatCell's border field always
+        means every cell's own four edges, so a shared inner edge would need setting from both
+        sides consistently; updateBorders instead thinks in terms of the block's outer edges
+        plus one shared inner grid, which is also how the Sheets UI itself presents border
+        options). Keys: top/bottom/left/right/innerHorizontal/innerVertical, each either None
+        (leave that edge alone) or a {"style": "SOLID"|"SOLID_MEDIUM"|..., "width": int} dict."""
+        request = {
+            "range": {
+                "sheetId": self.sheet_id,
+                "startRowIndex": first_row - 1, "endRowIndex": last_row,
+                "startColumnIndex": first_col - 1, "endColumnIndex": last_col,
+            },
+        }
+        for edge, spec in borders.items():
+            if spec is not None:
+                request[edge] = spec
+        self._gs.spreadsheet.batch_update({"requests": [{"updateBorders": request}]})
+
 
 class CompatWorkbook:
     def __init__(self, gc, spreadsheet):

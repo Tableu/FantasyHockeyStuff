@@ -505,7 +505,16 @@ def ensure_raw_source_sheet(wb, title):
     every stat column whose text happened to already match, leaving hundreds of rows of
     numbers with no player attached and every INDEX/MATCH-by-name lookup against them (e.g.
     SourceComparison) coming up blank. Rewriting the header row every run, not just at
-    creation, makes that class of drift self-correcting instead of a silent one-time trap."""
+    creation, makes that class of drift self-correcting instead of a silent one-time trap.
+
+    Basic cell formatting (bold Calibri 11 header row, Arial-bold column B specifically --
+    matching Dailyfaceoff/DtZ's long-established look, an inherited quirk faithfully kept
+    rather than "fixed" here; plain Calibri 11 for every data row) is likewise reapplied every
+    run, not just at creation -- a brand-new sheet from add_worksheet starts with zero
+    formatting at all (unlike every sheet copyTo'd in from a template, which brings its
+    template formatting along automatically), and this is the only thing that ever sets it.
+    Confirmed live as a real gap, not hypothetical: Lineup Experts and Import 1/2/3 (all
+    created this way, none ever copied from a template) had no formatting whatsoever."""
     if title in wb.sheetnames:
         ws = wb[title]
     else:
@@ -525,6 +534,16 @@ def ensure_raw_source_sheet(wb, title):
         log.info("%s: created new source sheet (RESULT never had this tab before)", title)
     for i, h in enumerate(RAW_SOURCE_HEADERS):
         ws.cell(row=1, column=3 + i, value=h)
+
+    last_col = 2 + len(RAW_SOURCE_HEADERS)
+    calibri11_bold = {"textFormat": {"fontFamily": "Calibri", "fontSize": 11, "bold": True}}
+    ws.set_cell_format(1, 1, 1, 1, calibri11_bold, "textFormat")
+    ws.set_cell_format(1, 2, 1, 2, {"textFormat": {"fontFamily": "Arial", "bold": True}}, "textFormat")
+    ws.set_cell_format(1, 3, 1, last_col, calibri11_bold, "textFormat")
+    ws.set_cell_format(
+        2, 1, RAW_SOURCE_SCAFFOLD_ROWS, last_col,
+        {"textFormat": {"fontFamily": "Calibri", "fontSize": 11}}, "textFormat",
+    )
     return ws
 
 
@@ -916,6 +935,39 @@ def rebuild_source_comparison(wb):
 
     ws.set_data_validation(2, 1, f"'AllProjections_S'!$A$5:$A${wb['AllProjections_S'].max_row}")
     ws.set_data_validation(goalie_name_row, 1, f"'AllProjections_G'!$A$5:$A${wb['AllProjections_G'].max_row}")
+
+    # Header/sample-row bold+background and the block borders below are cosmetic, but were
+    # found live to have drifted from the template's own SourceComparison: the SKATERS
+    # header+sample rows sit at a fixed row 1-2 regardless of source count, so their
+    # formatting (set once, presumably back when this sheet still came from the template)
+    # happened to survive every rebuild -- but the GOALIES header/sample rows' position moves
+    # with len(ACTIVE_SOURCES) (goalie_header_row/goalie_name_row above), and this function
+    # only ever wrote their *values* at the new position, never their format, so their
+    # distinctive green/orange background got left stranded at whatever row they used to be
+    # on while the new position just inherited plain formatting. Reapplied at the current
+    # position every run instead of trusting inherited state, the same self-correcting
+    # approach as the header-refresh/data-validation fixes above.
+    thin = {"style": "SOLID", "width": 1}
+    medium = {"style": "SOLID_MEDIUM", "width": 2}
+    orange_bg = {"red": 1, "green": 0.8980392, "blue": 0.6}
+    green_bg = {"red": 0.7137255, "green": 0.84313726, "blue": 0.65882355}
+    bold = {"textFormat": {"bold": True}}
+
+    ws.set_cell_format(1, 1, 1, last_cat_col, bold, "textFormat.bold")
+    ws.set_cell_format(2, 1, 2, last_cat_col, {**bold, "backgroundColor": orange_bg}, "textFormat.bold,backgroundColor")
+    ws.set_cell_format(goalie_header_row, 1, goalie_header_row, last_cat_col,
+                        {**bold, "backgroundColor": green_bg}, "textFormat.bold,backgroundColor")
+    ws.set_cell_format(goalie_name_row, 1, goalie_name_row, last_cat_col,
+                        {**bold, "backgroundColor": orange_bg}, "textFormat.bold,backgroundColor")
+
+    ws.update_borders(1, 1, skater_avg_row, last_cat_col,
+                       top=medium, bottom=medium, left=medium, right=thin, innerHorizontal=medium, innerVertical=thin)
+    ws.update_borders(skater_src_first, 1, skater_src_last, last_cat_col,
+                       top=medium, bottom=medium, left=medium, right=thin, innerHorizontal=thin, innerVertical=thin)
+    ws.update_borders(goalie_header_row, 1, goalie_name_row, last_cat_col,
+                       top=medium, bottom=medium, left=medium, right=thin, innerHorizontal=medium, innerVertical=thin)
+    ws.update_borders(goalie_src_first, 1, goalie_src_last, last_cat_col,
+                       top=medium, bottom=medium, left=medium, right=thin, innerHorizontal=thin, innerVertical=thin)
 
     return goalie_src_last
 
