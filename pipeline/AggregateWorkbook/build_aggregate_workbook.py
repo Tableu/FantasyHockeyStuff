@@ -600,8 +600,9 @@ def refresh_export_names(ws, names):
 # (see rebuild_all_projections). Rather than hardcode both variants' formula text here (which
 # is exactly the "have to change it in the script every run" the template cleanup was meant to
 # get away from), each sheet keeps two live reference rows -- a skater example at
-# skater_ref_row, a goalie example at goalie_ref_row -- sitting one blank column past the real
-# data block (e.g. Player Values - Cats' data ends at AL, so its reference rows live at AN:BY).
+# skater_ref_row, a goalie example at goalie_ref_row -- sitting well past the real data block
+# (see rebuild_player_values' ref_offset for exactly how far, and why it's not just "the next
+# column"; e.g. Player Values - Cats' data ends at AL, so its reference rows live at BG:CR).
 # Editing a formula there changes what every real player row gets, with no code change: this
 # function reads those two rows once, then row-shifts whichever one matches each player onto
 # their real row. The reference rows are seeded from this exact machinery's own previously-
@@ -670,7 +671,15 @@ def rebuild_player_values(ws, all_names, goalie_names, last_col_letter,
                            skater_ref_row=1, goalie_ref_row=2):
     goalie_set = set(goalie_names)
     last_col = ci(last_col_letter)
-    ref_offset = last_col + 1  # reference rows sit one blank column past the real data block
+    # Reference rows sit well past the real data block -- NOT just one column past last_col.
+    # Row 2's own header formula (=TRANSPOSE(CatsUsed) or CatsPtsUsed) declares a spill footprint
+    # as wide as its *named range's row count* (misc!D2:D29 / E2:E29, 28 rows each, the fixed
+    # 17-skater + 11-goalie category slot count from Settings) regardless of how few categories
+    # are actually in use right now -- confirmed live: with last_col=AL(38) a same-sheet offset
+    # of just +1 landed the reference rows at AN, which collided with that 28-wide spill's own
+    # reach (M through AN) and broke it (#REF! "would overwrite data in AN2"). +20 clears that
+    # with real margin on both sheets, not just past the current edge case.
+    ref_offset = last_col + 20
     skater_template = _read_template_row(ws, skater_ref_row, ref_offset, last_col)
     goalie_template = _read_template_row(ws, goalie_ref_row, ref_offset, last_col)
 
