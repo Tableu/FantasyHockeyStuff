@@ -561,13 +561,13 @@ def clear_adp_other(ws):
 # Phase 3: Positions
 # ---------------------------------------------------------------------------
 
-POSITIONS_MANUAL_EXTRA_COL = "Q"
-POSITIONS_MANUAL_EXTRA_HEADER = "ADD MISSING NAMES"
-# Short on purpose -- Q1's overflow room is only Q:T (~228px) before column U's "SKATERS"
-# label (a leftover dead filter header, see the SNames/GNames comment on
-# _repatch_shifted_positions_refs) blocks it and the full sentence clips. The long-form
-# explanation lives in a cell note on Q1 instead (set once, live -- this function doesn't
-# manage notes) rather than in the header text itself.
+POSITIONS_MANUAL_EXTRA_COL = "T"  # right beside the SKATERS/GOALIES/Included filter columns
+POSITIONS_MANUAL_EXTRA_HEADER = "ADD NAMES"
+# Short on purpose -- T is a narrow (~80px) column sitting directly against column U's
+# "SKATERS" label (a leftover dead filter header, see the SNames/GNames comment on
+# _repatch_shifted_positions_refs), so there's no overflow room at all past T's own width.
+# The long-form explanation lives in a cell note on T1 instead (set once, live -- this
+# function doesn't manage notes) rather than in the header text itself.
 
 
 def fill_positions(ws, master):
@@ -579,10 +579,10 @@ def fill_positions(ws, master):
     fallback chain that silently comes up empty when a name doesn't match verbatim. G
     (Fleaflicker) stays blank -- no platform-wide Fleaflicker data exists.
 
-    Column Q (POSITIONS_MANUAL_EXTRA_COL) is a standing, never-cleared manual-entry area: when
+    Column T (POSITIONS_MANUAL_EXTRA_COL) is a standing, never-cleared manual-entry area: when
     a user's own imported spreadsheet has a player the database doesn't know about at all (so
     NameFix's dropdown and MISC3's "NO MATCH" check, both keyed off NamesMasterList, can never
-    recognize that name no matter what alias they type), they type the name into Q here and it
+    recognize that name no matter what alias they type), they type the name into T here and it
     gets spliced onto the end of the real database-driven block in column A every run --
     deduped against the database's own names, in whatever order they were typed. This does NOT
     wire the player into any projection/stat pipeline (those all come from the database) --
