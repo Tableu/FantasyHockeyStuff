@@ -6,26 +6,29 @@ provided projection sources, using the live 'Aggregate Sheet Template (clean)' G
 for the phase functions below to run unmodified) -- no local .xlsx file is involved.
 
 SOURCE holds structure only -- every sheet's formulas, named ranges, and data validation, but
-no player/projection/schedule data (the original template, still at
-1qWbfN9TwDFWLR3bcCFKyIrqV8H7chSkHUgyJ33yjquI, is kept as a fallback but is no longer what this
-script bootstraps from). Sheets a human maintains directly and this script never writes to at
-all -- NameFix's alias table, MISC3/Fleaflicker/Import 1-3's paste-and-check columns, Cheat
+no player/projection/schedule data, and no raw per-source tabs at all (the original template,
+still at 1qWbfN9TwDFWLR3bcCFKyIrqV8H7chSkHUgyJ33yjquI, is kept as a fallback but is no longer
+what this script bootstraps from). Sheets a human maintains directly and this script never
+writes to at all -- NameFix's alias table, MISC3/Fleaflicker's paste-and-check columns, Cheat
 Sheet's ARRAY_CONSTRAIN spill, Rankings!B:I, Settings' scoring/roster config -- are exactly as
 blank/ready-to-use in SOURCE as they'd be after a human cleared last season's leftovers by
-hand; nothing about them changes here.
+hand; nothing about them changes here. (Import 1/2/3, the old "paste your own projections
+here" sheets, are retired -- see DROP_SHEETS -- now that a new source only needs to be
+imported into the database to be picked up automatically.)
 
-Reworked (regenerated from scratch every run, not preserved from SOURCE): the raw per-source
-tabs (DatsyukToZetterberg/LineupExperts/Dailyfaceoff/Apples & Ginos, matching our active stat
-sources -- Dom (The Athletic)/'Yahoo / Fantrax' and ESPN's position-reference tab are both
-retired, see ACTIVE_SOURCES and DROP_SHEETS), Positions, AllProjections_S/G, Export,
-ADPYahoo/ADPFantrax/ADPother, Rankings!A, CVals/Vorp, FanPts/Vorp, CleanCat/CleanPts,
-Available - Cats/Pts, and Player Values - Cats/Pts' player rows. Every reworked formula below
-is plain pre-2007-function arithmetic (SUMPRODUCT/INDEX/MATCH instead of FILTER/SORT/
-ARRAY_CONSTRAIN) -- not because native Sheets needs it (it doesn't), but because it was
-originally written to also run correctly if re-exported to Excel; kept as-is since it's
-already correct and there's no reason to churn it. SORTBY is used instead of SORT
-specifically to avoid SORT's sort_order argument meaning opposite things in Excel (1/-1) vs
-Sheets (TRUE/FALSE); descending sorts are done by sorting ascending on a negated key instead.
+Reworked (regenerated from scratch every run, not preserved from SOURCE, and self-sufficient
+even for a from-scratch bootstrap that never saw these sheets before -- see
+ensure_raw_source_sheet/ensure_source_named_ranges): the raw per-source tabs, one per row
+Projections.Sources has for the current season (not a hardcoded list -- see _active_sources),
+Positions, AllProjections_S/G, Export, ADPYahoo/ADPFantrax/ADPother, Rankings!A, CVals/Vorp,
+FanPts/Vorp, CleanCat/CleanPts, Available - Cats/Pts, and Player Values - Cats/Pts' player
+rows. Every reworked formula below is plain pre-2007-function arithmetic (SUMPRODUCT/INDEX/
+MATCH instead of FILTER/SORT/ARRAY_CONSTRAIN) -- not because native Sheets needs it (it
+doesn't), but because it was originally written to also run correctly if re-exported to Excel;
+kept as-is since it's already correct and there's no reason to churn it. SORTBY is used
+instead of SORT specifically to avoid SORT's sort_order argument meaning opposite things in
+Excel (1/-1) vs Sheets (TRUE/FALSE); descending sorts are done by sorting ascending on a
+negated key instead.
 
 Player Values - Cats/Pts is a hybrid: the *pattern* each player's row of formulas follows is
 authored directly in the sheet (two reference rows -- see rebuild_player_values), not
@@ -83,71 +86,63 @@ CREDENTIALS_PATH = Path(__file__).parent / "googleSheetsCredentials.json"
 TEAMS = 12  # Settings!C3, used by CleanCat's draft-pick-label formula
 SEASON_NHL_ID = 20262027
 
-# Single source of truth for "which sources actually exist" -- (Settings' Source-column
-# label, the source's real sheet name, its nick code). Everything downstream that needs the
-# active source list (rebuild_settings_sources, rebuild_source_check,
-# rebuild_source_comparison) derives it from here, so adding/removing a source later is a
-# one-line change followed by a rerun, not a hunt through several tables for every place that
-# used to hardcode the old list.
-# Dom (The Athletic)'s source (a Fantrax-formatted export, doms
-# 2026-27-Fantasy-Projections-Fantrax.xlsx -- not a Yahoo/Fantrax platform source; its sheet
-# was named 'Yahoo / Fantrax' after the sheet's own internal column labels, not who produces
-# it) is retired per user instruction -- they'll add it back in manually later -- so it's out
-# of this list entirely: not blended into AllProjections' weighted average, and its sheet is
-# in RETIRED_SOURCE_SHEETS below rather than bootstrapped/filled.
-# Import 1/2/3 are user-maintained, not database-driven -- no fill_ function writes to them
-# (see main below); a user pastes their own projections directly into the sheet, following
-# its own header row (a canonical column layout was set up directly on the live sheet and the
-# template -- see version control history around the date this comment was added -- so a
-# pasted stat lands under the same category codes CatsAll/CatWeights already use elsewhere,
-# e.g. "P" not "PTS", and the goalie block's games-count column is "GS" not a second "GP",
-# matching every other active source's own GS/GP convention so AllProjections_G's GP lookup
-# -- which always searches a sheet for a column literally headed "GP" -- doesn't collide with
-# the skater GP column earlier in the same row). Being in ACTIVE_SOURCES is what actually
-# blends them in: rebuild_settings_sources/rebuild_source_check/rebuild_misc_source_weights/
-# rebuild_all_projections all key off nick/label/sheet-name text generically, resolved at
-# formula-evaluation time via INDIRECT("Proj"&nick) -- nothing here needs Python-side access
-# to these sheets' contents the way a database-filled source's fill_ function would.
-ACTIVE_SOURCES = [
-    ("Dailyfaceoff", "Dailyfaceoff", "DFO"),
-    ("DatsyukToZetterberg", "DatsyukToZetterberg", "DtZ"),
-    ("LineupExperts", "LineupExperts", "LX"),
-    ("Apples & Ginos - Blake", "Apples & Ginos - Blake", "AGB"),
-    ("Apples & Ginos - Nate", "Apples & Ginos - Nate", "AGN"),
-    ("Import 1", "Import 1", "i1"),
-    ("Import 2", "Import 2", "i2"),
-    ("Import 3", "Import 3", "i3"),
-]
-DB_EXPORTED_SOURCES = {label for label, _sheet, _nick in ACTIVE_SOURCES}
-ACTIVE_SOURCE_SHEETS = [sheet for _label, sheet, _nick in ACTIVE_SOURCES]
+# "Which sources actually exist" is read from Projections.Sources every run, not hardcoded --
+# see _active_sources below, which populates the ACTIVE_SOURCES/DB_EXPORTED_SOURCES/
+# ACTIVE_SOURCE_SHEETS globals declared here as soon as load_master_data has a cursor. A source
+# that stops being imported drops out on the next run with no code change; one newly imported
+# (e.g. a source added mid-season) is picked up the same way -- except anything named in
+# DB_SOURCE_EXCLUDE, which the database has real data for but that isn't ready to blend in yet.
+# Everything downstream that needs the active source list (rebuild_settings_sources,
+# rebuild_source_check, rebuild_source_comparison, rebuild_all_projections,
+# rebuild_misc_source_weights) already reads these three names generically -- none of them
+# needed to change for this to become database-driven instead of a fixed list.
+# Dom (The Athletic)'s export -- imported, not ready to blend in yet (per user instruction).
+# Both names covered defensively: SourceID 4's SourceName changed from "Fantrax" to "Dom"
+# (same row, same Description) mid-development, so it isn't safe to assume which one is
+# current by the time this runs again.
+DB_SOURCE_EXCLUDE = {"Fantrax", "Dom"}
+ACTIVE_SOURCES = []
+DB_EXPORTED_SOURCES = set()
+ACTIVE_SOURCE_SHEETS = []
 
-# Sheet titles never copied over from the template when bootstrapping RESULT: last season's
-# stale/orphaned tabs this workflow doesn't use (see the removal functions this used to be,
-# now just a copy-time filter -- see gsheets_io.open_result_workbook). NameFix is NOT in this
-# set -- it's kept (see clear_namefix) so the "fixnames" named range it hosts still exists for
-# Import 1/2 and the active source tabs' IFNA(VLOOKUP(...,fixnames,...)) match-checker
-# formulas, which otherwise show #NAME? for referencing a name that doesn't exist at all.
-STALE_SOURCE_SHEETS = [
-    "Steve Laidlaw", "Scott Cullen", "Bangers Fantasy Hockey", "KUBOTA",
-]
-ORPHANED_UTILITY_SHEETS = []
-# MISC3 and Fleaflicker used to live here, but neither is actually orphaned -- both are the
-# same paste-raw-names-into-column-C-and-see-what-doesn't-match-NamesMasterList/fixnames
-# diagnostic tool (Fleaflicker's own copy also has PLAYER/POS/TEAM paste columns C:E, for
-# checking a Fleaflicker ADP export specifically) (see fill_positions'
-# POSITIONS_MANUAL_EXTRA_COL docstring for the other half of this workflow: adding a name one
-# of these flags "NO MATCH" for onto the master list itself). Kept, and never touched by this
-# script (like NameFix's own alias columns and Cheat Sheet's cells) -- they're manual workflow
-# tools, not something to regenerate.
-# Per user instruction: Dom (The Athletic)'s sheet (still named 'Yahoo / Fantrax', see
-# ACTIVE_SOURCES above) is retired -- they'll add that source back in manually later. ESPN's
-# raw position-reference tab is retired too -- it was always vestigial, kept only for
-# symmetry with the other raw source tabs (see the old fill_espn_positions' docstring in
-# version control): Positions!F gets ESPN position data straight from the database
-# (fill_positions) regardless, and no 'ESPN' nick has ever existed for AllProjections'
-# INDIRECT("Proj"&nick) contract to reach this tab through.
-RETIRED_SOURCE_SHEETS = ["Yahoo / Fantrax", "ESPN"]
-DROP_SHEETS = {*STALE_SOURCE_SHEETS, *ORPHANED_UTILITY_SHEETS, *RETIRED_SOURCE_SHEETS}
+_NICK_RE = re.compile(r"[^A-Za-z0-9]")
+
+
+def _source_nick(source_name):
+    """A short, named-range-safe identifier derived from the source's own database name
+    (Sheets named ranges can't contain spaces or punctuation) -- e.g. "Lineup Experts" ->
+    "LineupExperts", "Apples & Ginos - Blake" -> "ApplesGinosBlake". Deterministic, so a
+    newly-imported source never needs a nick manually assigned to it."""
+    return _NICK_RE.sub("", source_name)
+
+
+def _active_sources(cursor) -> list:
+    """[(source_name, source_name, nick), ...] for every source Projections.Sources has real
+    data for this season, alphabetical, minus DB_SOURCE_EXCLUDE. source_name doubles as both
+    the Settings!S label and the raw-source sheet's own title (see ensure_raw_source_sheet) --
+    one name to keep straight per source, not three hand-kept in sync."""
+    cursor.execute(
+        """
+        SELECT DISTINCT src.SourceName
+        FROM Projections.Sources src
+        JOIN Reference.Seasons se ON se.SeasonID = src.SeasonID
+        WHERE se.NHLSeasonID = ?
+        ORDER BY src.SourceName
+        """,
+        SEASON_NHL_ID,
+    )
+    names = [row.SourceName for row in cursor.fetchall() if row.SourceName not in DB_SOURCE_EXCLUDE]
+    return [(name, name, _source_nick(name)) for name in names]
+
+
+# Sheet titles never copied over from the template when bootstrapping RESULT, and pruned from
+# RESULT itself if already present (see gsheets_io.open_result_workbook/_prune_dropped_sheets).
+# Import 1/2/3 -- the old user-maintained "paste your own projections here" sheets -- are
+# retired now that a new source only needs to be imported into the database to be picked up
+# automatically (see _active_sources above); nothing else currently belongs on this list, since
+# every previously-stale/retired/orphaned tab this used to name has already been removed from
+# the template directly rather than merely filtered out of the copy.
+DROP_SHEETS = {"Import 1", "Import 2", "Import 3"}
 
 
 def header_map(ws, row=1):
@@ -231,7 +226,7 @@ def _skater_projection_rows(cursor, source_name: str) -> dict:
         out[row.FullName] = {
             "Team": row.Team, "Pos": row.PositionCode, "GP": row.GamesPlayed,
             # dtz.py stores the CSV's season-total 'Total TOI' under this column name
-            # (a pre-existing upstream mislabeling, not fixed here) -- fill_dtz's own
+            # (a pre-existing upstream mislabeling, not fixed here) -- SKATER_FIELDS' own
             # TOI/GP division to derive ATOI still works correctly given that.
             "TOI": float(row.AverageTOIMinutes) if row.AverageTOIMinutes is not None else None,
             "G": row.Goals, "A": row.Assists, "PTS": row.Points,
@@ -319,34 +314,40 @@ def _primary_positions(cursor) -> dict:
 
 
 def load_master_data(cursor) -> dict:
-    dtz = _skater_projection_rows(cursor, "DtZ")
-    lx_s = _skater_projection_rows(cursor, "Lineup Experts")
-    lx_g = _goalie_projection_rows(cursor, "Lineup Experts")
-    dfo_s = _skater_projection_rows(cursor, "Dailyfaceoff")
-    dfo_g = _goalie_projection_rows(cursor, "Dailyfaceoff")
-    # skaters only -- neither Apples & Ginos sheet carries goalie rows.
-    agb_s = _skater_projection_rows(cursor, "Apples & Ginos - Blake")
-    agn_s = _skater_projection_rows(cursor, "Apples & Ginos - Nate")
+    global ACTIVE_SOURCES, DB_EXPORTED_SOURCES, ACTIVE_SOURCE_SHEETS
+    ACTIVE_SOURCES = _active_sources(cursor)
+    DB_EXPORTED_SOURCES = {label for label, _sheet, _nick in ACTIVE_SOURCES}
+    ACTIVE_SOURCE_SHEETS = [sheet for _label, sheet, _nick in ACTIVE_SOURCES]
+
+    # {source_name: {"skaters": {...}, "goalies": {...}}} for every currently active source --
+    # a source with no goalie rows at all (e.g. a skater-only export) just gets an empty
+    # goalies dict back, same outcome as never querying it, so nothing here needs to know in
+    # advance which sources carry which position.
+    sources = {
+        name: {
+            "skaters": _skater_projection_rows(cursor, name),
+            "goalies": _goalie_projection_rows(cursor, name),
+        }
+        for name in ACTIVE_SOURCE_SHEETS
+    }
 
     # a name never appears as both skater and goalie across sources in this data; if it did,
     # treat as goalie (rarer, more specific signal) -- same rule aggregate_sources.py used.
-    # Dom (The Athletic)'s "Fantrax"-nick projection rows are intentionally not queried here at
-    # all -- see ACTIVE_SOURCES -- so a player known only from that source won't appear
-    # anywhere in RESULT until it's added back.
-    skater_names = set(dtz) | set(lx_s) | set(dfo_s) | set(agb_s) | set(agn_s)
-    goalie_names = set(lx_g) | set(dfo_g)
+    skater_names, goalie_names = set(), set()
+    for data in sources.values():
+        skater_names |= set(data["skaters"])
+        goalie_names |= set(data["goalies"])
     skater_names -= goalie_names
 
     master = {
-        "dtz": dtz, "lx_s": lx_s, "lx_g": lx_g,
-        "dfo_s": dfo_s, "dfo_g": dfo_g,
-        "agb_s": agb_s, "agn_s": agn_s,
+        "sources": sources,
         "skater_names": sorted(skater_names), "goalie_names": sorted(goalie_names),
     }
 
     # Fantasy-PLATFORM (Yahoo/Fantrax/ESPN the apps players draft on, Fantasy.PlayerPositions/
-    # PlayerADP) eligibility/ADP -- unrelated to Dom's "Fantrax"-nick stat projections above
-    # despite the name collision; feeds Positions!D/E/F and ADPYahoo/ADPFantrax, both kept.
+    # PlayerADP) eligibility/ADP -- unrelated to Dom's excluded stat-projection source above
+    # (see DB_SOURCE_EXCLUDE) despite the name collision with its former SourceName; feeds
+    # Positions!D/E/F and ADPYahoo/ADPFantrax, both kept.
     master["primary_pos"] = _primary_positions(cursor)
     master["yahoo_platform_pos"] = _platform_positions(cursor, "Yahoo")
     master["fantrax_platform_pos"] = _platform_positions(cursor, "Fantrax")
@@ -357,55 +358,87 @@ def load_master_data(cursor) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 0.6: raw source sheet scaffolding
+# Phase 0.6/1: raw source sheet scaffolding + fill (one sheet per active source, all built the
+# same generic way)
 #
-# The template no longer carries a copy of the currently-active raw per-source tabs (removed
-# per user instruction, since fill_dtz/fill_lineup_experts/fill_dailyfaceoff/fill_apples_ginos
-# below overwrite their content completely every run anyway -- the template copy was pure
-# leftover clutter). Those functions still assume the sheet already exists (wb["Dailyfaceoff"]
-# etc, no creation logic) -- true for any RESULT this script has already run against, but not
-# for a from-scratch bootstrap (e.g. next season's brand-new RESULT workbook), which would
-# otherwise crash with a KeyError the first time a fill_* call reaches for a sheet the template
-# never had. ensure_raw_source_sheet recreates that scaffold on demand: the header row, and the
-# same paste-and-check A/B match-formula pair every raw source tab has (identical to MISC3/
-# Fleaflicker's own pattern) -- just no data rows, which fill_* writes immediately after.
+# The template carries no raw per-source tabs at all now (removed per user instruction --
+# fill_source_sheet below overwrites their content completely every run anyway, so a template
+# copy was pure leftover clutter), and which sources exist isn't a hardcoded list either (see
+# _active_sources) -- so this script has to be fully self-sufficient per source: create the
+# sheet if RESULT doesn't have it yet, fill it, and (re)point its Proj<nick>/Names/Cats named
+# ranges at it every run, since nothing else provides any of that anymore.
+#
+# _skater_projection_rows/_goalie_projection_rows already return one uniform dict shape
+# regardless of source (the database schema doesn't vary per source, only which fields a given
+# source actually populates does) -- SKATER_FIELDS/GOALIE_FIELDS below is the one place that
+# shape is named, as {display header -> dict key or a (dict key, transform) pair for the couple
+# of fields that need one, e.g. ATOI from TOI/GP}. Both the header row (just the ordered key
+# list) and every source's actual data row (built by evaluating this same map) come from it, so
+# there's exactly one field list to keep in sync with the database's own columns -- not a
+# separate header list per source, and not one hand-kept list duplicating what write_row's
+# dict literals already said. (The database itself has no reference table naming these fields'
+# short codes -- Projections.Sources only names the source, not its columns -- so this map, not
+# a query, is the actual source of truth; a genuinely new stat would still need a line added
+# here once, the same as it needing new SkaterProjections/GoalieProjections columns first.)
 # ---------------------------------------------------------------------------
 
-RAW_SOURCE_HEADERS = {
-    "Dailyfaceoff": [
-        "Player", "Team", "Pos", "GP", "G", "A", "P", "+/-", "PIM", "PPG", "PPA", "PPP", "SOG",
-        "ATOI", "FOW", "BLK", "HIT", "GS", "W", "L", "OTL", "SO", "SV", "SV%", "GA", "GAA", "SA",
-    ],
-    "DatsyukToZetterberg": [
-        "Player", "Age", "Pos", "Team", "Salary", "GP", "ATOI", "G", "A", "P", "PPG", "PPA",
-        "PPP", "SHG", "SHA", "SHP", "HIT", "BLK", "PIM", "FOW", "FOL", "SOG", "+/-", "W", "L",
-        "OTL", "GA", "SA", "SV", "SV%",
-    ],
-    "LineupExperts": [
-        "player", "team-pos", "GP", "G", "A", "P", "+/-", "SOG", "PIM", "HIT", "BLK", "PPP",
-        "GA", "GAA", "SV", "SV%", "W", "L", "OTL", "SO",
-    ],
-    "Apples & Ginos - Blake": [
-        "Name", "Team", "Proj Pos", "GP", "G", "A", "P", "PPP", "SOG", "HIT", "BLK", "PIM",
-        "S%", "ATOI",
-    ],
-    "Apples & Ginos - Nate": [
-        "Name", "Team", "Proj Pos", "GP", "G", "A", "P", "PPP", "SOG", "HIT", "BLK", "PIM",
-        "S%", "ATOI",
-    ],
+SKATER_FIELDS = {
+    "Team": "Team", "Pos": "Pos", "GP": "GP",
+    "ATOI": lambda s: (s["TOI"] / s["GP"]) if s.get("TOI") and s.get("GP") else None,
+    "G": "G", "A": "A", "P": "PTS", "+/-": "PM", "PIM": "PIM",
+    "PPG": "PPG", "PPA": "PPA", "PPP": "PPP", "SHP": "SHP", "SOG": "SOG",
+    "FOW": "FOW", "FOL": "FOL", "HIT": "HIT", "BLK": "BLK",
 }
+GOALIE_FIELDS = {
+    "Team": "Team", "Pos": "Pos", "GP": "GP", "GS": "GS",
+    "W": "W", "L": "L", "OTL": "OTL", "SO": "SO",
+    "SV": "SV", "SV%": "SVPCT", "GA": "GA", "GAA": "GAA", "SA": "SA",
+}
+# Player first, then every field either map can produce, skater fields before goalie-only ones
+# (matches this sheet's own row layout: skater rows first, goalie rows after) -- order is
+# cosmetic (write_row looks columns up by header text, not position) but keeps a freshly
+# created sheet's header row readable.
+RAW_SOURCE_HEADERS = (
+    ["Player"] + list(SKATER_FIELDS) + [h for h in GOALIE_FIELDS if h not in SKATER_FIELDS]
+)
 RAW_SOURCE_SCAFFOLD_ROWS = 1000  # matches these tabs' own historical row count
+
+
+def _row_values(name, row, field_map):
+    out = {"Player": name}
+    for header, spec in field_map.items():
+        out[header] = spec(row) if callable(spec) else row.get(spec)
+    return out
+
+
+def fill_source_sheet(ws, skaters: dict, goalies: dict):
+    """Writes one source's skater rows (if any) then goalie rows (if any), using
+    SKATER_FIELDS/GOALIE_FIELDS' shared field set for every source uniformly -- write_row
+    already skips any header a given row's dict doesn't have a value for, so a skater-only
+    source (no GAA/SV%/... at all) or one missing a particular stat just leaves those cells
+    blank, exactly as when each source had its own hand-picked header list."""
+    hmap = header_map(ws)
+    clear_data_rows(ws, 2, ws.max_row, first_col=3)
+    r = 2
+    for name in sorted(skaters):
+        write_row(ws, r, hmap, _row_values(name, skaters[name], SKATER_FIELDS))
+        r += 1
+    for name in sorted(goalies):
+        write_row(ws, r, hmap, _row_values(name, goalies[name], GOALIE_FIELDS))
+        r += 1
+    return r - 2
 
 
 def ensure_raw_source_sheet(wb, title):
     """Returns wb[title] -- creating it fresh via CompatWorkbook.add_worksheet (scaffold only,
-    no player data; the caller's fill_* writes that immediately after) if a from-scratch
-    bootstrap didn't get a copy from the template. Idempotent and a no-op in the normal case,
-    where the sheet already exists."""
+    no player data; fill_source_sheet writes that immediately after) if RESULT has never had
+    this source's sheet before, whether because it's brand new (Projections.Sources just
+    started carrying it) or because this is a from-scratch bootstrap (e.g. next season's new
+    RESULT workbook). Idempotent and a no-op in the normal case, where the sheet already
+    exists."""
     if title in wb.sheetnames:
         return wb[title]
-    headers = RAW_SOURCE_HEADERS[title]
-    ws = wb.add_worksheet(title, rows=RAW_SOURCE_SCAFFOLD_ROWS, cols=2 + len(headers))
+    ws = wb.add_worksheet(title, rows=RAW_SOURCE_SCAFFOLD_ROWS, cols=2 + len(RAW_SOURCE_HEADERS))
     ws.cell(row=1, column=1, value=(
         '=COUNTA(C2:C)&" PLAYERS"&CHAR(10)&COUNTIFS(A2:A,"<>NO MATCH",A2:A,"?*")&" ON MASTER"'
     ))
@@ -413,104 +446,28 @@ def ensure_raw_source_sheet(wb, title):
         '=SUM(B2:B)&" MATCHED"&char(10)&COUNTIF(B2:B,"?*")&" FIXED"&CHAR(10)&'
         'COUNTIF(A2:A,"NO MATCH")&" NO MATCH"'
     ))
-    for i, h in enumerate(headers):
+    for i, h in enumerate(RAW_SOURCE_HEADERS):
         ws.cell(row=1, column=3 + i, value=h)
     for r in range(2, RAW_SOURCE_SCAFFOLD_ROWS + 1):
         ws.cell(row=r, column=1, value=f'=IF(C{r}="","",if(B{r}=1,C{r},if(B{r}="","NO MATCH",B{r})))')
         ws.cell(row=r, column=2, value=(
             f'=IFNA(IF(COUNTIF(NamesMasterList,C{r}),1,VLOOKUP(C{r},fixnames,2,FALSE)),)'
         ))
-    log.info("%s: created missing sheet from scratch (template no longer carries a copy)", title)
+    log.info("%s: created new source sheet (RESULT never had this tab before)", title)
     return ws
 
 
-# ---------------------------------------------------------------------------
-# Phase 1: raw per-source tabs
-# ---------------------------------------------------------------------------
-
-def fill_dtz(ws, dtz: dict):
-    hmap = header_map(ws)
-    clear_data_rows(ws, 2, ws.max_row, first_col=3)
-    r = 2
-    for name in sorted(dtz):
-        s = dtz[name]
-        salary = s.get("Salary")
-        write_row(ws, r, hmap, {
-            "Player": name, "Team": s["Team"], "Pos": s["Pos"],
-            "GP": s["GP"], "ATOI": (s["TOI"] / s["GP"]) if s.get("TOI") and s.get("GP") else None,
-            "G": s["G"], "A": s["A"], "P": s["PTS"], "PPP": s["PPP"], "SHP": s["SHP"],
-            "HIT": s["HIT"], "BLK": s["BLK"], "PIM": s["PIM"], "SOG": s["SOG"],
-            "FOW": s["FOW"], "FOL": s["FOL"], "+/-": s["PM"],
-            "PPG": s["PPG"], "PPA": s["PPA"],
-        })
-        r += 1
-    return r - 2
-
-
-def fill_lineup_experts(ws, lx_s: dict, lx_g: dict):
-    hmap = header_map(ws)
-    clear_data_rows(ws, 2, ws.max_row, first_col=3)
-    r = 2
-    for name in sorted(lx_s):
-        s = lx_s[name]
-        teampos = f"{s['Team']} - {s['Pos']}" if s["Team"] and s["Pos"] else None
-        write_row(ws, r, hmap, {
-            "player": name, "team-pos": teampos, "GP": s["GP"], "G": s["G"], "A": s["A"],
-            "P": s["PTS"], "+/-": s["PM"], "SOG": s["SOG"], "PIM": s["PIM"], "HIT": s["HIT"],
-            "BLK": s["BLK"],
-        })
-        r += 1
-    for name in sorted(lx_g):
-        g = lx_g[name]
-        teampos = f"{g['Team']} - {g['Pos']}" if g["Team"] and g["Pos"] else None
-        write_row(ws, r, hmap, {
-            "player": name, "team-pos": teampos, "GP": g["GP"], "GA": g["GA"], "GAA": g["GAA"],
-            "SV": g["SV"], "SV%": g["SVPCT"], "W": g["W"], "L": g["L"], "OTL": g["OTL"],
-        })
-        r += 1
-    return r - 2
-
-
-def fill_dailyfaceoff(ws, dfo_s: dict, dfo_g: dict):
-    hmap = header_map(ws)
-    clear_data_rows(ws, 2, ws.max_row, first_col=3)
-    r = 2
-    for name in sorted(dfo_s):
-        s = dfo_s[name]
-        write_row(ws, r, hmap, {
-            "Player": name, "Team": s["Team"], "Pos": s["Pos"], "GP": s["GP"],
-            "G": s["G"], "A": s["A"], "P": s["PTS"], "+/-": s["PM"], "PIM": s["PIM"],
-            "PPG": s["PPG"], "PPA": s["PPA"], "PPP": s["PPP"], "SOG": s["SOG"],
-            "FOW": s["FOW"], "BLK": s["BLK"], "HIT": s["HIT"],
-        })
-        r += 1
-    for name in sorted(dfo_g):
-        g = dfo_g[name]
-        write_row(ws, r, hmap, {
-            "Player": name, "Team": g["Team"], "Pos": g["Pos"], "GP": g["GP"], "GS": g["GS"],
-            "W": g["W"], "L": g["L"], "OTL": g["OTL"], "SO": g["SO"], "SV": g["SV"],
-            "SV%": g["SVPCT"], "GA": g["GA"], "GAA": g["GAA"], "SA": g["SA"],
-        })
-        r += 1
-    return r - 2
-
-
-def fill_apples_ginos(ws, stats: dict):
-    """Shared by both Apples & Ginos tabs (Blake/Nate) -- same header layout, skaters only.
-    No +/-/PPG/PPA/FOW/FOL/Pos columns on this template, so those stay unwritten."""
-    hmap = header_map(ws)
-    clear_data_rows(ws, 2, ws.max_row, first_col=3)
-    r = 2
-    for name in sorted(stats):
-        s = stats[name]
-        write_row(ws, r, hmap, {
-            "Name": name, "Team": s["Team"], "GP": s["GP"],
-            "G": s["G"], "A": s["A"], "P": s["PTS"], "PPP": s["PPP"],
-            "SOG": s["SOG"], "HIT": s["HIT"], "BLK": s["BLK"], "PIM": s["PIM"],
-            "ATOI": (s["TOI"] / s["GP"]) if s.get("TOI") and s.get("GP") else None,
-        })
-        r += 1
-    return r - 2
+def ensure_source_named_ranges(wb, title, nick):
+    """(Re)points Proj<nick>/Proj<nick>Names/Proj<nick>Cats at `title` every run --
+    AllProjections_S/G's blending formulas (INDIRECT("Proj"&nick) etc, see
+    rebuild_all_projections) depend on these existing, but nothing copies them in from the
+    template anymore now that it carries no source sheets at all, so this script has to keep
+    them correct itself rather than relying on a one-time template-provided copy."""
+    last_col = 2 + len(RAW_SOURCE_HEADERS)
+    last_row = RAW_SOURCE_SCAFFOLD_ROWS
+    set_defined_name(wb, f"Proj{nick}", f"'{title}'!$A$1:${cl(last_col)}${last_row}")
+    set_defined_name(wb, f"Proj{nick}Names", f"'{title}'!$A$1:$A${last_row}")
+    set_defined_name(wb, f"Proj{nick}Cats", f"'{title}'!$A$1:${cl(last_col)}$1")
 
 
 # ---------------------------------------------------------------------------
@@ -617,10 +574,10 @@ def fill_positions(ws, master):
 
 
 def pick_team(master, name):
-    for key in ("dfo_s", "dfo_g", "lx_s", "lx_g", "dtz", "agb_s", "agn_s"):
-        d = master[key]
-        if name in d and d[name].get("Team"):
-            return d[name]["Team"]
+    for data in master["sources"].values():
+        for players in (data["skaters"], data["goalies"]):
+            if name in players and players[name].get("Team"):
+                return players[name]["Team"]
     return None
 
 
@@ -1272,12 +1229,11 @@ def rebuild_schedule_info(wb, cursor, season_nhl_id):
 
 
 def rebuild_settings_sources(ws):
-    """Regenerates Settings' Source/Nick/Weight table (S:U, rows 4-15) from ACTIVE_SOURCES,
-    compacted into rows 4..3+len(ACTIVE_SOURCES) with weight 1, every row after that cleared
-    -- rather than leaving the active sources scattered across their original rows,
-    interspersed with blanked-out retired ones (the 6 retired 2025-26 sources, see
-    remove_stale_source_sheets, plus Import 1/Import 2, manual-paste placeholders that were
-    never exported from the database).
+    """Regenerates Settings' Source/Nick/Weight table (S:U, rows 4-15) from ACTIVE_SOURCES
+    (itself database-derived every run, see _active_sources -- not a fixed list), compacted
+    into rows 4..3+len(ACTIVE_SOURCES) with weight 1, every row after that cleared -- rather
+    than leaving whatever's currently active scattered across old rows, interspersed with
+    blanked-out entries for sources that have since stopped being imported.
 
     Only clears/writes cell VALUES in S:U, never deletes rows: Settings' rows 4-15 also hold
     unrelated category-weight data in columns E:J at the same row numbers, which delete_rows
@@ -1689,20 +1645,12 @@ if __name__ == "__main__":
     settings_ws.cell(row=20, column=3, value=playoff_end)
     log.info("Settings: defaulted Playoffs Schedule to %s - %s (last 3 weeks of season)", playoff_start, playoff_end)
 
-    n = fill_dtz(ensure_raw_source_sheet(wb, "DatsyukToZetterberg"), master["dtz"])
-    log.info("DatsyukToZetterberg: %d rows", n)
-
-    n = fill_lineup_experts(ensure_raw_source_sheet(wb, "LineupExperts"), master["lx_s"], master["lx_g"])
-    log.info("LineupExperts: %d rows", n)
-
-    n = fill_dailyfaceoff(ensure_raw_source_sheet(wb, "Dailyfaceoff"), master["dfo_s"], master["dfo_g"])
-    log.info("Dailyfaceoff: %d rows", n)
-
-    n = fill_apples_ginos(ensure_raw_source_sheet(wb, "Apples & Ginos - Blake"), master["agb_s"])
-    log.info("Apples & Ginos - Blake: %d rows", n)
-
-    n = fill_apples_ginos(ensure_raw_source_sheet(wb, "Apples & Ginos - Nate"), master["agn_s"])
-    log.info("Apples & Ginos - Nate: %d rows", n)
+    for name, _sheet, nick in ACTIVE_SOURCES:
+        data = master["sources"][name]
+        ws = ensure_raw_source_sheet(wb, name)
+        n = fill_source_sheet(ws, data["skaters"], data["goalies"])
+        ensure_source_named_ranges(wb, name, nick)
+        log.info("%s: %d rows", name, n)
 
     n = fill_adp_yahoo(wb["ADPYahoo"], master["yahoo_adp"])
     log.info("ADPYahoo: %d rows", n)
