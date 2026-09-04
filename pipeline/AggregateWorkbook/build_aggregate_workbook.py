@@ -1,27 +1,39 @@
 #!/usr/bin/env python
 """Builds the 'Aggregate Fantasy Hockey Projections 2026-27' Google Sheet (RESULT) from the
-provided projection sources, using the live 'Aggregate Sheet Template' Google Sheet
+provided projection sources, using the live 'Aggregate Sheet Template (clean)' Google Sheet
 (SOURCE) as the structural template. Both are read/written entirely through the Sheets API
 (via gsheets_io.py, an adapter exposing just enough of openpyxl's Workbook/Worksheet surface
 for the phase functions below to run unmodified) -- no local .xlsx file is involved.
 
-Kept unchanged (per user instruction): Settings, Player Values - Cats/Pts,
-Available - Cats/Pts, Cheat Sheet - Cats/Pts, Import 1/2, SourceCheck, SourceComparison
-(these tabs' own formulas are never edited -- only their upstream data is refreshed, and
-their machinery is preserved by keeping the same defined-name contract: AllProj/AllGProj,
-TeamPOS, VorpAll/PtsVorpAll, RanksAll, CleanCat*/CleanPts*, CatsAll/CatWeights/UsedSRCs*).
+SOURCE holds structure only -- every sheet's formulas, named ranges, and data validation, but
+no player/projection/schedule data (the original template, still at
+1qWbfN9TwDFWLR3bcCFKyIrqV8H7chSkHUgyJ33yjquI, is kept as a fallback but is no longer what this
+script bootstraps from). Sheets a human maintains directly and this script never writes to at
+all -- NameFix's alias table, MISC3/Fleaflicker/Import 1-3's paste-and-check columns, Cheat
+Sheet's ARRAY_CONSTRAIN spill, Rankings!B:I, Settings' scoring/roster config -- are exactly as
+blank/ready-to-use in SOURCE as they'd be after a human cleared last season's leftovers by
+hand; nothing about them changes here.
 
-Reworked: the raw per-source tabs (now DatsyukToZetterberg/LineupExperts/Dailyfaceoff,
-matching our 3 active stat sources -- Dom (The Athletic)/'Yahoo / Fantrax' and ESPN's
-position-reference tab are both retired, see ACTIVE_SOURCES and DROP_SHEETS), Positions,
-AllProjections_S/G's player list, ADPYahoo/ADPFantrax/ADPother, Rankings, CVals/Vorp,
-FanPts/Vorp, CleanCat/CleanPts, and Available - Cats/Pts. Every reworked formula below is
-plain pre-2007-function arithmetic (SUMPRODUCT/INDEX/MATCH instead of FILTER/SORT/
+Reworked (regenerated from scratch every run, not preserved from SOURCE): the raw per-source
+tabs (DatsyukToZetterberg/LineupExperts/Dailyfaceoff/Apples & Ginos, matching our active stat
+sources -- Dom (The Athletic)/'Yahoo / Fantrax' and ESPN's position-reference tab are both
+retired, see ACTIVE_SOURCES and DROP_SHEETS), Positions, AllProjections_S/G, Export,
+ADPYahoo/ADPFantrax/ADPother, Rankings!A, CVals/Vorp, FanPts/Vorp, CleanCat/CleanPts,
+Available - Cats/Pts, and Player Values - Cats/Pts' player rows. Every reworked formula below
+is plain pre-2007-function arithmetic (SUMPRODUCT/INDEX/MATCH instead of FILTER/SORT/
 ARRAY_CONSTRAIN) -- not because native Sheets needs it (it doesn't), but because it was
 originally written to also run correctly if re-exported to Excel; kept as-is since it's
 already correct and there's no reason to churn it. SORTBY is used instead of SORT
 specifically to avoid SORT's sort_order argument meaning opposite things in Excel (1/-1) vs
 Sheets (TRUE/FALSE); descending sorts are done by sorting ascending on a negated key instead.
+
+Player Values - Cats/Pts is a hybrid: the *pattern* each player's row of formulas follows is
+authored directly in the sheet (two reference rows -- see rebuild_player_values), not
+hardcoded here, but this script still writes the row-shifted result into every real player
+row every run (Google Sheets has no live per-row conditional-formula-variant primitive that
+would let the sheet do this entirely on its own). Editing what a Player Values formula does
+is a template edit now, not a code change; editing how many player rows exist, or which
+reference row a given player uses, is still this module's job.
 
 Player-name matching across sources is exact-string (per user: already reconciled).
 
@@ -51,7 +63,20 @@ from nhl_pipeline import db as nhl_db
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("build_aggregate_workbook")
 
-SOURCE_SPREADSHEET_ID = "1qWbfN9TwDFWLR3bcCFKyIrqV8H7chSkHUgyJ33yjquI"  # Aggregate Sheet Template
+# Aggregate Sheet Template (clean) -- a data-free duplicate of the original template (still at
+# 1qWbfN9TwDFWLR3bcCFKyIrqV8H7chSkHUgyJ33yjquI, kept as a fallback). Every sheet's structure,
+# named ranges, data validation, and formulas (including the ones this module never touches --
+# NameFix's alias dropdown, Rankings!B:I, Cheat Sheet's ARRAY_CONSTRAIN spill, etc.) are
+# unchanged; only literal player/projection/schedule DATA was cleared out, so a from-scratch
+# bootstrap no longer starts from ~600-1000 rows of leftover sample names in tabs like MISC3/
+# Fleaflicker/Import 1-3 that this script was never going to overwrite anyway. Positions' own
+# handful of genuinely-dead legacy columns (see the removed POSITIONS_DEAD_COLS) were
+# deliberately left in place rather than deleted -- deleting them would shift column T, which
+# this module's own POSITIONS_MANUAL_EXTRA_COL now writes to every run, and re-deriving that
+# shift correctly is exactly the class of bug _repatch_shifted_positions_refs used to exist to
+# paper over. Leaving a few permanently-blank columns costs nothing; getting that shift wrong
+# would corrupt fill_positions' own output.
+SOURCE_SPREADSHEET_ID = "1B-Vp2edky2VE2eV1QmK37D0805lK2RRBRdNUkW2ip_0"
 RESULT_SPREADSHEET_ID = "11zECvxbuKwlYBncjE75VncFLUPkp90fv6LsjoAp-97E"  # Aggregate Fantasy Hockey Projections 2026-27
 CREDENTIALS_PATH = Path(__file__).parent / "googleSheetsCredentials.json"
 
@@ -332,108 +357,6 @@ def load_master_data(cursor) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase 0.5: unused column cleanup
-#
-# The raw per-source tabs' templates predate the database (they mirror each source's own
-# original CSV/XLSX column layout, whatever that happened to include). The database doesn't
-# model every field those templates have a column for (raw +/-, split PPG/PPA, raw FOW/FOL/
-# GA/SA/SV counts -- see Phase 0's docstring), and switching Positions!D/E/F to direct
-# database values (see fill_positions) retired the ADPYahoo!J:M / ESPN!C:D columns that used
-# to exist only to feed the old INDEX/MATCH lookup chain. Every column removed here is
-# permanently empty by construction now, not just empty in this particular run -- confirmed
-# by scanning every data row, not a sample (a source that mixes skaters then goalies, e.g.
-# LineupExperts, would otherwise look emptier than it is if only the leading skater rows
-# were checked).
-# ---------------------------------------------------------------------------
-
-def _delete_columns_by_header(ws, dead_headers):
-    """Deletes every column (right to left, so indices of ones still to delete don't shift)
-    whose row-1 header exactly matches one of dead_headers. Idempotent -- a header already
-    gone just isn't found again on a rerun."""
-    dead_headers = set(dead_headers)
-    cols = [c for c in range(1, ws.max_column + 1) if ws.cell(row=1, column=c).value in dead_headers]
-    for c in reversed(cols):
-        ws.delete_cols(c)
-    return len(cols)
-
-
-def _trim_trailing_blank_columns(ws):
-    """Deletes trailing columns (from the right) whose row-1 header is blank -- pure dead
-    space at the end of a sheet. Idempotent: a rerun just finds no more trailing blanks."""
-    c = ws.max_column
-    while c >= 1 and ws.cell(row=1, column=c).value in (None, ""):
-        c -= 1
-    if c < ws.max_column:
-        ws.delete_cols(c + 1, ws.max_column - c)
-
-
-def _trim_to_column(ws, keep_through):
-    """Deletes every column after keep_through outright (used where the tail is a mix of
-    blank and stale-but-labeled dead columns, not just blanks). Idempotent."""
-    if ws.max_column > keep_through:
-        ws.delete_cols(keep_through + 1, ws.max_column - keep_through)
-
-
-# DtZ/LineupExperts/Dailyfaceoff's stat-category columns (PPG, PPA, FOW, FOL, +/-, raw GA/SV
-# counts, etc.) are NOT touched here even though the current 3 database sources don't
-# populate all of them -- more sources are going to be added later that will, so those
-# columns stay in place ready for that data rather than being removed as "unused".
-# Non-contiguous dead columns in Positions: L:N (blank), O:P (a TEAM/count widget -- its own
-# formulas are a dead Google-Sheets spill too, and confirmed by a full cross-workbook scan to
-# have zero external references, unlike the next group), Q:T (blank), X:AE (blank).
-# U:W ('SKATERS'/'GOALIES'/'Included') look like the same kind of dead Google-Sheets
-# FILTER()-spill as O:P at a glance (each shows only one stale cached name, not a real
-# filtered list) -- but that same cross-workbook scan found U/V are the entire contents of
-# the SNames/GNames defined names, and W is read directly by SourceCheck's per-row MATCHED
-# count (1076 formula references) -- so despite being individually degraded, they're
-# load-bearing and must NOT be deleted.
-POSITIONS_DEAD_COLS = [12, 13, 14, 15, 16, 17, 18, 19, 20, 24, 25, 26, 27, 28, 29, 30, 31]
-
-
-def remove_unused_columns(wb):
-    counts = {}
-
-    _trim_trailing_blank_columns(wb["Dailyfaceoff"])
-
-    _trim_to_column(wb["ADPYahoo"], 2)
-    _trim_to_column(wb["ADPFantrax"], 2)
-
-    ws = wb["Positions"]
-    if ws.max_column >= max(POSITIONS_DEAD_COLS):
-        for c in reversed(POSITIONS_DEAD_COLS):
-            ws.delete_cols(c)
-        counts["Positions"] = len(POSITIONS_DEAD_COLS)
-        _repatch_shifted_positions_refs(wb)
-    else:
-        counts["Positions"] = 0
-
-    return counts
-
-
-def _repatch_shifted_positions_refs(wb):
-    """'SKATERS'/'GOALIES' (kept -- see POSITIONS_DEAD_COLS's comment) shifted left when the
-    dead columns before them were deleted. openpyxl doesn't rewrite the literal-letter
-    defined names elsewhere that reference them the way Excel does on a UI column delete, so
-    SNames/GNames would otherwise silently point at the wrong (now-blank) column. Re-derives
-    the new letters from the header text (robust to POSITIONS_DEAD_COLS changing).
-    ('Included', the third column in this same shifted group, used to need the same
-    treatment for SourceCheck's per-row MATCHED formulas -- moot now that
-    rebuild_source_check regenerates SourceCheck from scratch every run, looking up
-    Positions' INCLUDED column itself rather than depending on a value patched in here.)"""
-    ws = wb["Positions"]
-    new_letter = {}
-    for c in range(1, ws.max_column + 1):
-        header = ws.cell(row=1, column=c).value
-        if header in ("SKATERS", "GOALIES"):
-            new_letter[header] = cl(c)
-    if len(new_letter) != 2:
-        return
-
-    set_defined_name(wb, "SNames", f"Positions!${new_letter['SKATERS']}$2:${new_letter['SKATERS']}$1020")
-    set_defined_name(wb, "GNames", f"Positions!${new_letter['GOALIES']}$2:${new_letter['GOALIES']}$1020")
-
-
-# ---------------------------------------------------------------------------
 # Phase 1: raw per-source tabs
 # ---------------------------------------------------------------------------
 
@@ -648,6 +571,22 @@ def refresh_allprojections_names(ws, names, name_col_letter="A"):
     return r - 5
 
 
+def refresh_export_names(ws, names):
+    """Export!A2: (row 2, not 5 -- no frozen header rows here) feeds its own per-player
+    INDEX/MATCH-against-AllProj/AllProjNames formulas in B: onward, hardcoded to the skater
+    namespace only (no AllGProj equivalent) -- so `names` should be skater_names, matching
+    AllProjections_S's own name list. Nothing wrote to this sheet before the template cleanup
+    (its player list was just whatever static text happened to be typed in); the demo names
+    are gone now, so this keeps it populated without depending on that leftover state."""
+    r = 2
+    for name in sorted(names):
+        ws.cell(row=r, column=1, value=name)
+        r += 1
+    for row in range(r, ws.max_row + 1):
+        ws.cell(row=row, column=1).value = None
+    return r - 2
+
+
 # ---------------------------------------------------------------------------
 # Phase 5: Settings source weights
 # ---------------------------------------------------------------------------
@@ -656,69 +595,95 @@ def refresh_allprojections_names(ws, names, name_col_letter="A"):
 # Phase 6: Player Values - Cats / Player Values - Pts
 # ---------------------------------------------------------------------------
 
-def _pv_cats_row_formulas(r, is_goalie):
-    allp, names, cats = ("AllGProj", "AllGProjNames", "AllGProjCats") if is_goalie \
-        else ("AllProj", "AllProjNames", "AllProjCats")
-    out = {
-        "A": f'=if(J{r}=0,,iferror(index(RanksAll,match(D{r},RanksAllNames,0),match(A$2,RanksAllCat,0)),""))',
-        "B": False, "C": False,
-        "E": f'=iferror(vlookup($D{r},TeamPOS,2,false),)',
-        "F": f'=iferror(vlookup($D{r},TeamPOS,3,false),)',
-        # -9999 (not the original -30) guarantees a real GP=0 player always ranks below every
-        # actual player: with 4 blended sources instead of the original ~12, the range of
-        # realistic z-score sums is wider/more negative than -30 anticipated (a real 60-start
-        # goalie can legitimately sum to -45), which let 0-GP ghosts outrank real players.
-        "G": f'=if(J{r}=0,-9999,sum(M{r}:AL{r}))',
-        "H": f'=iferror(vlookup(D{r},VorpAll,5,false),-50)',
-        "I": f'=iferror(vlookup(D{r},VorpAll,6,false),)',
-        "J": f'=if(J$2="","",iferror(index({allp},match($D{r},{names},0),match(J$2,{cats},0)),""))',
-        "K": f'=iferror(vlookup(E{r},OffNights,2,false),)',
-        "L": f'=iferror(vlookup(E{r},PlayoffGames,2,false),)',
-    }
-    for col in [cl(i) for i in range(ci("M"), ci("AL") + 1)]:
-        out[col] = (
-            f'=if({col}$2="","",if(iferror(index({allp},match($D{r},{names},0),'
-            f'match({col}$2,{cats},0)+1),"")="",,iferror(index({allp},match($D{r},{names},0),'
-            f'match({col}$2,{cats},0)+1),"")*{col}$1))'
+# Player Values' row formula isn't one pattern -- it's two, chosen per player: a skater row
+# looks stats up in AllProj/AllProjNames/AllProjCats, a goalie row in the AllGProj equivalent
+# (see rebuild_all_projections). Rather than hardcode both variants' formula text here (which
+# is exactly the "have to change it in the script every run" the template cleanup was meant to
+# get away from), each sheet keeps two live reference rows -- a skater example at
+# skater_ref_row, a goalie example at goalie_ref_row -- sitting one blank column past the real
+# data block (e.g. Player Values - Cats' data ends at AL, so its reference rows live at AN:BY).
+# Editing a formula there changes what every real player row gets, with no code change: this
+# function reads those two rows once, then row-shifts whichever one matches each player onto
+# their real row. The reference rows are seeded from this exact machinery's own previously-
+# hardcoded output (see git history), so they start out provably identical to what this sheet
+# already produced -- including the already-fixed VAL floor (-9999, not the more obvious -30;
+# see the reference row's own G-column formula for why).
+
+_CELL_REF_RE = re.compile(
+    r'("(?:[^"]|"")*")'  # 1: a double-quoted string literal, consumed whole and left untouched
+    r'|((?:\'[^\']+\'|[A-Za-z_]\w*)!)?(\$?)([A-Z]{1,3})(\$?)(\d+)'  # 2-6: optional sheet prefix, col $, col letters, row $, row number
+)
+
+
+def _shift_row_refs(formula, from_row, to_row):
+    """Rewrites every cell reference in `formula` whose row component is unanchored ($-free)
+    and equals from_row to instead read to_row, leaving row-anchored references ($2, A$1 --
+    the header-row lookups every Player Values formula makes), column letters, sheet-name
+    prefixes, and named ranges (which never match this pattern at all -- no named range used
+    here ends in digits) untouched. Skips anything inside a double-quoted string literal so a
+    stray digit in a text argument can never be mistaken for a row reference."""
+    def repl(m):
+        if m.group(1) is not None:
+            return m.group(1)
+        sheet_prefix, col_dollar, col_letters, row_dollar, row_num = (
+            m.group(2), m.group(3), m.group(4), m.group(5), m.group(6)
         )
+        if row_dollar or int(row_num) != from_row:
+            return m.group(0)
+        return f"{sheet_prefix or ''}{col_dollar}{col_letters}{row_dollar}{to_row}"
+    return _CELL_REF_RE.sub(repl, formula)
+
+
+def _read_template_row(ws, row, col_offset, last_col):
+    """{col_letter: value} for every non-blank cell in [A, last_col_letter] of `row`, shifted
+    col_offset columns to the right (where the reference rows actually live)."""
+    out = {}
+    for c in range(1, last_col + 1):
+        v = ws.cell(row=row, column=c + col_offset).value
+        if v not in (None, ""):
+            out[cl(c)] = v
     return out
 
 
-def _pv_pts_row_formulas(r, is_goalie):
-    allp, names, cats = ("AllGProj", "AllGProjNames", "AllGProjCats") if is_goalie \
-        else ("AllProj", "AllProjNames", "AllProjCats")
-    out = {
-        "A": f'=if(K{r}=0,,iferror(index(RanksAll,match(D{r},RanksAllNames,0),match(A$2,RanksAllCat,0)),""))',
-        "B": False, "C": False,
-        "E": f'=iferror(vlookup($D{r},TeamPOS,2,false),)',
-        "F": f'=iferror(vlookup($D{r},TeamPOS,3,false),)',
-        "G": f'=SUMPRODUCT(N{r}:AM{r},$N$1:$AM$1)',
-        "H": f'=IF(K{r}=0,0,G{r}/K{r})',
-        "I": f'=iferror(vlookup(D{r},PtsVorpAll,5,false),)',
-        "J": f'=vlookup(D{r},PtsVorpAll,6,false)',
-        "K": f'=if(K$2="","",iferror(index({allp},match($D{r},{names},0),match(K$2,{cats},0)),""))',
-        "L": f'=iferror(vlookup(E{r},OffNights,2,false),)',
-        "M": f'=iferror(vlookup(E{r},PlayoffGames,2,false),)',
-    }
-    for col in [cl(i) for i in range(ci("N"), ci("AM") + 1)]:
-        out[col] = (
-            f'=if({col}$2="","",if(iferror(index({allp},match($D{r},{names},0),'
-            f'match({col}$2,{cats},0)),"")="",,iferror(index({allp},match($D{r},{names},0),'
-            f'match({col}$2,{cats},0)),"")))'
-        )
+def _row_formulas_from_template(template_cells, from_row, to_row):
+    """template_cells: a _read_template_row() result. Formula cells (values starting with "=")
+    get row-shifted to to_row; anything else (a bare False literal, e.g.) is returned as-is,
+    since it doesn't depend on row number. Self-checks each shifted formula by shifting it back
+    to from_row and asserting it exactly reproduces the template text -- a shifting bug then
+    fails loudly here instead of silently writing a wrong formula to the sheet."""
+    out = {}
+    for col, val in template_cells.items():
+        if isinstance(val, str) and val.startswith("="):
+            shifted = _shift_row_refs(val, from_row, to_row)
+            if _shift_row_refs(shifted, to_row, from_row) != val:
+                raise RuntimeError(
+                    f"formula row-shift didn't round-trip for column {col} "
+                    f"(from_row={from_row}, to_row={to_row}): {val!r} -> {shifted!r}"
+                )
+            out[col] = shifted
+        else:
+            out[col] = val
     return out
 
 
-def rebuild_player_values(ws, all_names, goalie_names, row_formula_fn, last_col_letter):
+def rebuild_player_values(ws, all_names, goalie_names, last_col_letter,
+                           skater_ref_row=1, goalie_ref_row=2):
     goalie_set = set(goalie_names)
     last_col = ci(last_col_letter)
+    ref_offset = last_col + 1  # reference rows sit one blank column past the real data block
+    skater_template = _read_template_row(ws, skater_ref_row, ref_offset, last_col)
+    goalie_template = _read_template_row(ws, goalie_ref_row, ref_offset, last_col)
+
     first_row = 3
     last_row = first_row + len(all_names) - 1
     clear_data_rows(ws, first_row, max(ws.max_row, last_row), first_col=1, last_col=last_col)
     r = first_row
     for name in all_names:
         ws.cell(row=r, column=4, value=name)  # D PLAYER
-        formulas = row_formula_fn(r, name in goalie_set)
+        is_goalie = name in goalie_set
+        template = goalie_template if is_goalie else skater_template
+        from_row = goalie_ref_row if is_goalie else skater_ref_row
+        formulas = _row_formulas_from_template(template, from_row, r)
         for col, val in formulas.items():
             ws.cell(row=r, column=ci(col), value=val)
         r += 1
@@ -1623,9 +1588,6 @@ if __name__ == "__main__":
         SOURCE_SPREADSHEET_ID, RESULT_SPREADSHEET_ID, DROP_SHEETS, CREDENTIALS_PATH,
     )
 
-    col_counts = remove_unused_columns(wb)
-    log.info("Removed unused columns: %s", col_counts)
-
     clear_namefix(wb["NameFix"])
     log.info("NameFix: cleared manual alias rows (fixnames kept, unused now that names come from the database)")
 
@@ -1690,6 +1652,9 @@ if __name__ == "__main__":
     n = refresh_allprojections_names(wb["AllProjections_S"], master["skater_names"])
     log.info("AllProjections_S: %d skater rows", n)
 
+    n = refresh_export_names(wb["Export"], master["skater_names"])
+    log.info("Export: %d skater rows", n)
+
     n = refresh_allprojections_names(wb["AllProjections_G"], master["goalie_names"])
     log.info("AllProjections_G: %d goalie rows", n)
 
@@ -1723,13 +1688,13 @@ if __name__ == "__main__":
 
     goalie_set = master["goalie_names"]
     first_row, last_row = rebuild_player_values(
-        wb["Player Values - Cats"], all_names, goalie_set, _pv_cats_row_formulas, "AL")
+        wb["Player Values - Cats"], all_names, goalie_set, "AL")
     log.info("Player Values - Cats: rows %d-%d", first_row, last_row)
     set_defined_name(wb, "RecCats", f"'Player Values - Cats'!$A$2:$H${last_row}")
     set_defined_name(wb, "ValsAll", f"'Player Values - Cats'!$D$2:$G${last_row}")
 
     first_row, last_row = rebuild_player_values(
-        wb["Player Values - Pts"], all_names, goalie_set, _pv_pts_row_formulas, "AM")
+        wb["Player Values - Pts"], all_names, goalie_set, "AM")
     log.info("Player Values - Pts: rows %d-%d", first_row, last_row)
     set_defined_name(wb, "RecPoints", f"'Player Values - Pts'!$A$2:$I${last_row}")
     set_defined_name(wb, "FanPtsAll", f"'Player Values - Pts'!$D$2:$G${last_row}")
