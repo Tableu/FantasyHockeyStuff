@@ -134,6 +134,20 @@ class CompatWorksheet:
         if column > self._max_col:
             self._max_col = column
 
+    def get_computed_values(self, first_row, first_col, last_row, last_col):
+        """Reads a range's live COMPUTED values (UNFORMATTED_VALUE) directly from the API,
+        bypassing this module's own cache entirely -- every cell this module otherwise reads
+        holds FORMULA text, not a computed result (see open_result_workbook's
+        valueRenderOption=FORMULA fetch), which is right for round-tripping formulas
+        unmodified but useless for a caller that needs an actual computed value (e.g. a
+        MISC3-style sheet's resolved-name column, itself a formula depending on
+        NamesMasterList/fixnames). Returns a 2D list; like values.get always does, a row or
+        the whole response is shortened wherever trailing cells are blank -- pad it yourself
+        if the caller needs every row/column position to line up."""
+        range_a1 = _a1_range(self.title, first_row, first_col, last_row, last_col)
+        resp = self._gs.spreadsheet.values_get(range_a1, params={"valueRenderOption": "UNFORMATTED_VALUE"})
+        return resp.get("values", [])
+
     def iter_rows(self, min_row=1, max_row=None, min_col=1, max_col=None):
         max_row = self._max_row if max_row is None else max_row
         max_col = self._max_col if max_col is None else max_col

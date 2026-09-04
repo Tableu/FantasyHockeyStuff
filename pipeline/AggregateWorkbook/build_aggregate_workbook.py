@@ -622,14 +622,42 @@ POSITIONS_MANUAL_EXTRA_HEADER = "ADD NAMES"
 # function doesn't manage notes) rather than in the header text itself.
 
 
-def fill_positions(ws, master):
+def _fleaflicker_positions(wb) -> dict:
+    """{name -> POS}, read live from the Fleaflicker sheet -- unlike Yahoo/Fantrax/ESPN
+    (Fantasy.PlayerPositions, a real per-platform scrape), there's no database-backed
+    Fleaflicker source at all, so this is the one platform whose eligibility can only ever
+    come from whatever a user pastes in by hand, in the same MISC3-style paste-and-match
+    sheet Import 1/2/3 use for stat lines (see ensure_raw_source_sheet's scaffold: column A
+    is the resolved/matched name -- blank or "NO MATCH" for a paste that hasn't been matched
+    yet -- column B the match status, C the raw pasted name, D whatever position text came
+    with it). Keyed off the resolved column A, not raw column C, so a pasted spelling that
+    only matches via a manual fixnames alias still lands on the same canonical name
+    Positions/TeamPOS use everywhere else. Column A is a formula (depends on
+    NamesMasterList/fixnames) -- this module otherwise only ever sees FORMULA-rendered text
+    (see open_result_workbook's valueRenderOption=FORMULA fetch), so getting its actual
+    resolved value needs get_computed_values' direct API read instead of the usual
+    ws.cell(...).value."""
+    ws = wb["Fleaflicker"]
+    rows = ws.get_computed_values(2, 1, ws.max_row, 4)
+    out = {}
+    for row in rows:
+        name = row[0] if len(row) > 0 else None
+        pos = row[3] if len(row) > 3 else None
+        if isinstance(name, str) and name.strip() and name != "NO MATCH" and isinstance(pos, str) and pos.strip():
+            out[name.strip()] = pos.strip()
+    return out
+
+
+def fill_positions(ws, master, fleaflicker_pos):
     """D/E/F (Yahoo/Fantrax/ESPN) are written as plain PositionCode values, not formulas --
     each one is already resolved per-platform straight from the database (Fantasy.
     PlayerPositions), falling back to the player's real on-ice PositionCode
     (Reference.Players, present for every player) when a platform has no eligibility row for
     them. This is what actually fixes the blank-VORP/PRNK bug: no more multi-tab INDEX/MATCH
     fallback chain that silently comes up empty when a name doesn't match verbatim. G
-    (Fleaflicker) stays blank -- no platform-wide Fleaflicker data exists.
+    (Fleaflicker) uses the same fallback pattern but reads fleaflicker_pos (see
+    _fleaflicker_positions) instead of a database table, since there's no scraped Fleaflicker
+    source at all -- only whatever a user has pasted into the Fleaflicker sheet by hand.
 
     Column T (POSITIONS_MANUAL_EXTRA_COL) is a standing, never-cleared manual-entry area: when
     a user's own imported spreadsheet has a player the database doesn't know about at all (so
@@ -656,6 +684,7 @@ def fill_positions(ws, master):
         ws.cell(row=r, column=4, value=yahoo_pos.get(name) or primary_pos.get(name))    # D Yahoo
         ws.cell(row=r, column=5, value=fantrax_pos.get(name) or primary_pos.get(name))  # E Fantrax
         ws.cell(row=r, column=6, value=espn_pos.get(name) or primary_pos.get(name))     # F ESPN
+        ws.cell(row=r, column=7, value=fleaflicker_pos.get(name) or primary_pos.get(name))  # G Fleaflicker
         r += 1
 
     known = set(all_names)
@@ -1819,7 +1848,8 @@ if __name__ == "__main__":
     clear_adp_other(wb["ADPother"])
     log.info("ADPother: cleared (no Fleaflicker source)")
 
-    n, all_names, n_extra = fill_positions(wb["Positions"], master)
+    fleaflicker_pos = _fleaflicker_positions(wb)
+    n, all_names, n_extra = fill_positions(wb["Positions"], master, fleaflicker_pos)
     log.info("Positions: %d rows (%d from the database + %d manually-added extra name(s))",
               n, len(all_names), n_extra)
     # NamesMasterList/TeamPOS are Positions' own name-matching contract to the rest of the
