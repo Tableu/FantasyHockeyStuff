@@ -217,10 +217,43 @@ def clear_namefix(ws):
 # that doesn't have a given stat just leaves that cell blank rather than erroring.
 # ---------------------------------------------------------------------------
 
-def _skater_projection_rows(cursor, source_name: str) -> dict:
+
+def _display_names(cursor) -> dict:
+    """{PlayerID -> display name} for every player in Reference.Players. Every dict this
+    script builds is keyed by player-name string (Google Sheets INDEX/MATCH has no PlayerID
+    to key off of, so the workbook itself only ever has the name to go on) -- but
+    Reference.Players isn't actually one-name-per-player: a handful of FullNames belong to
+    two distinct real NHL players (e.g. two active players named "Elias Pettersson", one a
+    Vancouver center and one a Colorado defenseman -- import-time resolution in
+    nhl_pipeline/name_resolver.py already keeps their projections correctly separated by
+    PlayerID). Left alone, every query below would still key its output dict by the bare
+    FullName, so the second player's row would silently clobber the first's in that dict --
+    the exact "two players collapse into one workbook row" bug this function exists to
+    prevent. Disambiguated with a "(POS)" suffix when the two players' positions differ
+    (covers Pettersson); if even position ties (e.g. two goalies sharing a name), falls back
+    to "(NHLPlayerID)", which is always unique. Every non-duplicated FullName passes through
+    unchanged, so this is a no-op for the overwhelming majority of players."""
+    cursor.execute("SELECT PlayerID, NHLPlayerID, FullName, PositionCode FROM Reference.Players")
+    by_name: dict = {}
+    for row in cursor.fetchall():
+        by_name.setdefault(row.FullName, []).append(row)
+
+    names = {}
+    for full_name, group in by_name.items():
+        if len(group) == 1:
+            names[group[0].PlayerID] = full_name
+            continue
+        positions = [r.PositionCode for r in group]
+        for r in group:
+            suffix = r.PositionCode if positions.count(r.PositionCode) == 1 else r.NHLPlayerID
+            names[r.PlayerID] = f"{full_name} ({suffix})"
+    return names
+
+
+def _skater_projection_rows(cursor, source_name: str, display_names: dict) -> dict:
     cursor.execute(
         """
-        SELECT p.FullName, p.PositionCode, t.Abbreviation AS Team,
+        SELECT p.PlayerID, p.FullName, p.PositionCode, t.Abbreviation AS Team,
                sp.GamesPlayed, sp.Goals, sp.Assists, sp.Points,
                sp.PowerPlayPoints, sp.ShortHandedPoints, sp.Shots, sp.Hits,
                sp.Blocks, sp.PenaltyMinutes, sp.AverageTOIMinutes,
@@ -237,7 +270,7 @@ def _skater_projection_rows(cursor, source_name: str) -> dict:
     )
     out = {}
     for row in cursor.fetchall():
-        out[row.FullName] = {
+        out[display_names.get(row.PlayerID, row.FullName)] = {
             "Team": row.Team, "Pos": row.PositionCode, "GP": row.GamesPlayed,
             # dtz.py stores the CSV's season-total 'Total TOI' under this column name
             # (a pre-existing upstream mislabeling, not fixed here) -- SKATER_FIELDS' own
@@ -253,10 +286,10 @@ def _skater_projection_rows(cursor, source_name: str) -> dict:
     return out
 
 
-def _goalie_projection_rows(cursor, source_name: str) -> dict:
+def _goalie_projection_rows(cursor, source_name: str, display_names: dict) -> dict:
     cursor.execute(
         """
-        SELECT p.FullName, p.PositionCode, t.Abbreviation AS Team,
+        SELECT p.PlayerID, p.FullName, p.PositionCode, t.Abbreviation AS Team,
                gp.GamesPlayed, gp.Wins, gp.Losses, gp.OvertimeLosses,
                gp.GoalsAgainstAverage, gp.SavePercentage, gp.Shutouts,
                gp.GamesStarted, gp.GoalsAgainst, gp.ShotsAgainst, gp.Saves
@@ -271,7 +304,7 @@ def _goalie_projection_rows(cursor, source_name: str) -> dict:
     )
     out = {}
     for row in cursor.fetchall():
-        out[row.FullName] = {
+        out[display_names.get(row.PlayerID, row.FullName)] = {
             "Team": row.Team, "Pos": row.PositionCode, "GP": row.GamesPlayed,
             "W": row.Wins, "L": row.Losses, "OTL": row.OvertimeLosses,
             "GAA": float(row.GoalsAgainstAverage) if row.GoalsAgainstAverage is not None else None,
@@ -283,12 +316,12 @@ def _goalie_projection_rows(cursor, source_name: str) -> dict:
     return out
 
 
-def _platform_positions(cursor, platform_name: str) -> dict:
-    """{FullName -> comma-joined PositionCode string} for one Fantasy platform, e.g.
+def _platform_positions(cursor, platform_name: str, display_names: dict) -> dict:
+    """{name -> comma-joined PositionCode string} for one Fantasy platform, e.g.
     'C,LW' for a multi-eligible player."""
     cursor.execute(
         """
-        SELECT p.FullName, fp.PositionCode
+        SELECT p.PlayerID, p.FullName, fp.PositionCode
         FROM Fantasy.PlayerPositions fp
         JOIN Fantasy.Platforms pl ON pl.FantasyPlatformID = fp.FantasyPlatformID
         JOIN Reference.Players p ON p.PlayerID = fp.PlayerID
@@ -299,14 +332,14 @@ def _platform_positions(cursor, platform_name: str) -> dict:
     )
     out = {}
     for row in cursor.fetchall():
-        out.setdefault(row.FullName, set()).add(row.PositionCode)
+        out.setdefault(display_names.get(row.PlayerID, row.FullName), set()).add(row.PositionCode)
     return {name: ",".join(sorted(codes)) for name, codes in out.items()}
 
 
-def _platform_adp(cursor, platform_name: str) -> dict:
+def _platform_adp(cursor, platform_name: str, display_names: dict) -> dict:
     cursor.execute(
         """
-        SELECT p.FullName, fa.ADP
+        SELECT p.PlayerID, p.FullName, fa.ADP
         FROM Fantasy.PlayerADP fa
         JOIN Fantasy.Platforms pl ON pl.FantasyPlatformID = fa.FantasyPlatformID
         JOIN Reference.Players p ON p.PlayerID = fa.PlayerID
@@ -315,16 +348,16 @@ def _platform_adp(cursor, platform_name: str) -> dict:
         """,
         platform_name, SEASON_NHL_ID,
     )
-    return {row.FullName: float(row.ADP) for row in cursor.fetchall()}
+    return {display_names.get(row.PlayerID, row.FullName): float(row.ADP) for row in cursor.fetchall()}
 
 
-def _primary_positions(cursor) -> dict:
-    """{FullName -> PositionCode}, real on-ice position for every player Reference.Players
+def _primary_positions(cursor, display_names: dict) -> dict:
+    """{name -> PositionCode}, real on-ice position for every player Reference.Players
     knows about -- the last-resort fallback so a platform with no eligibility data for a
     given player (a deep prospect ESPN doesn't carry, say) still gets *some* position rather
     than a blank that would zero out its VORP/PRNK downstream."""
-    cursor.execute("SELECT FullName, PositionCode FROM Reference.Players")
-    return {row.FullName: row.PositionCode for row in cursor.fetchall()}
+    cursor.execute("SELECT PlayerID, FullName, PositionCode FROM Reference.Players")
+    return {display_names.get(row.PlayerID, row.FullName): row.PositionCode for row in cursor.fetchall()}
 
 
 def load_master_data(cursor) -> dict:
@@ -333,6 +366,12 @@ def load_master_data(cursor) -> dict:
     ACTIVE_SOURCES = db_sources + MANUAL_SOURCES
     DB_EXPORTED_SOURCES = {label for label, _sheet, _nick in ACTIVE_SOURCES}
     ACTIVE_SOURCE_SHEETS = [sheet for _label, sheet, _nick in ACTIVE_SOURCES]
+
+    # see _display_names -- computed once and threaded through every query below so the
+    # handful of real players who share a FullName (two players both named "Elias
+    # Pettersson", say) get consistently disambiguated everywhere instead of colliding into
+    # one workbook row.
+    display_names = _display_names(cursor)
 
     # {source_name: {"skaters": {...}, "goalies": {...}}} -- database-driven sources only
     # (db_sources, not ACTIVE_SOURCE_SHEETS -- querying Projections.SkaterProjections for
@@ -344,8 +383,8 @@ def load_master_data(cursor) -> dict:
     # simply aren't in this dict, so master["sources"][name] would KeyError if it tried.
     sources = {
         name: {
-            "skaters": _skater_projection_rows(cursor, name),
-            "goalies": _goalie_projection_rows(cursor, name),
+            "skaters": _skater_projection_rows(cursor, name, display_names),
+            "goalies": _goalie_projection_rows(cursor, name, display_names),
         }
         for name, _sheet, _nick in db_sources
     }
@@ -367,12 +406,12 @@ def load_master_data(cursor) -> dict:
     # PlayerADP) eligibility/ADP -- unrelated to Dom's excluded stat-projection source above
     # (see DB_SOURCE_EXCLUDE) despite the name collision with its former SourceName; feeds
     # Positions!D/E/F and ADPYahoo/ADPFantrax, both kept.
-    master["primary_pos"] = _primary_positions(cursor)
-    master["yahoo_platform_pos"] = _platform_positions(cursor, "Yahoo")
-    master["fantrax_platform_pos"] = _platform_positions(cursor, "Fantrax")
-    master["espn_platform_pos"] = _platform_positions(cursor, "ESPN")
-    master["yahoo_adp"] = _platform_adp(cursor, "Yahoo")
-    master["fantrax_adp"] = _platform_adp(cursor, "Fantrax")
+    master["primary_pos"] = _primary_positions(cursor, display_names)
+    master["yahoo_platform_pos"] = _platform_positions(cursor, "Yahoo", display_names)
+    master["fantrax_platform_pos"] = _platform_positions(cursor, "Fantrax", display_names)
+    master["espn_platform_pos"] = _platform_positions(cursor, "ESPN", display_names)
+    master["yahoo_adp"] = _platform_adp(cursor, "Yahoo", display_names)
+    master["fantrax_adp"] = _platform_adp(cursor, "Fantrax", display_names)
     return master
 
 
@@ -453,26 +492,39 @@ def ensure_raw_source_sheet(wb, title):
     no player data; fill_source_sheet writes that immediately after) if RESULT has never had
     this source's sheet before, whether because it's brand new (Projections.Sources just
     started carrying it) or because this is a from-scratch bootstrap (e.g. next season's new
-    RESULT workbook). Idempotent and a no-op in the normal case, where the sheet already
-    exists."""
+    RESULT workbook). For a sheet that already exists, the row-1/row-2+ scaffold formulas are
+    left alone (a human may have hand-edited match-check logic) but the header row (columns
+    3+) is still rewritten to the current RAW_SOURCE_HEADERS every run -- confirmed live as a
+    real, not hypothetical, bug: three sheets left over from before RAW_SOURCE_HEADERS was
+    unified across sources (Apples & Ginos - Blake/Nate, Lineup Experts) still carried their
+    old per-source header text ("Name" / lowercase "player" instead of "Player", "Proj Pos"
+    instead of "Pos") since this function previously only ever wrote headers at creation time.
+    write_row silently skips any header text fill_source_sheet doesn't find in the sheet's own
+    header row (see write_row's docstring) -- so on those three sheets that included the
+    player-name column itself, silently dropping every single row's name while still writing
+    every stat column whose text happened to already match, leaving hundreds of rows of
+    numbers with no player attached and every INDEX/MATCH-by-name lookup against them (e.g.
+    SourceComparison) coming up blank. Rewriting the header row every run, not just at
+    creation, makes that class of drift self-correcting instead of a silent one-time trap."""
     if title in wb.sheetnames:
-        return wb[title]
-    ws = wb.add_worksheet(title, rows=RAW_SOURCE_SCAFFOLD_ROWS, cols=2 + len(RAW_SOURCE_HEADERS))
-    ws.cell(row=1, column=1, value=(
-        '=COUNTA(C2:C)&" PLAYERS"&CHAR(10)&COUNTIFS(A2:A,"<>NO MATCH",A2:A,"?*")&" ON MASTER"'
-    ))
-    ws.cell(row=1, column=2, value=(
-        '=SUM(B2:B)&" MATCHED"&char(10)&COUNTIF(B2:B,"?*")&" FIXED"&CHAR(10)&'
-        'COUNTIF(A2:A,"NO MATCH")&" NO MATCH"'
-    ))
+        ws = wb[title]
+    else:
+        ws = wb.add_worksheet(title, rows=RAW_SOURCE_SCAFFOLD_ROWS, cols=2 + len(RAW_SOURCE_HEADERS))
+        ws.cell(row=1, column=1, value=(
+            '=COUNTA(C2:C)&" PLAYERS"&CHAR(10)&COUNTIFS(A2:A,"<>NO MATCH",A2:A,"?*")&" ON MASTER"'
+        ))
+        ws.cell(row=1, column=2, value=(
+            '=SUM(B2:B)&" MATCHED"&char(10)&COUNTIF(B2:B,"?*")&" FIXED"&CHAR(10)&'
+            'COUNTIF(A2:A,"NO MATCH")&" NO MATCH"'
+        ))
+        for r in range(2, RAW_SOURCE_SCAFFOLD_ROWS + 1):
+            ws.cell(row=r, column=1, value=f'=IF(C{r}="","",if(B{r}=1,C{r},if(B{r}="","NO MATCH",B{r})))')
+            ws.cell(row=r, column=2, value=(
+                f'=IFNA(IF(COUNTIF(NamesMasterList,C{r}),1,VLOOKUP(C{r},fixnames,2,FALSE)),)'
+            ))
+        log.info("%s: created new source sheet (RESULT never had this tab before)", title)
     for i, h in enumerate(RAW_SOURCE_HEADERS):
         ws.cell(row=1, column=3 + i, value=h)
-    for r in range(2, RAW_SOURCE_SCAFFOLD_ROWS + 1):
-        ws.cell(row=r, column=1, value=f'=IF(C{r}="","",if(B{r}=1,C{r},if(B{r}="","NO MATCH",B{r})))')
-        ws.cell(row=r, column=2, value=(
-            f'=IFNA(IF(COUNTIF(NamesMasterList,C{r}),1,VLOOKUP(C{r},fixnames,2,FALSE)),)'
-        ))
-    log.info("%s: created new source sheet (RESULT never had this tab before)", title)
     return ws
 
 
