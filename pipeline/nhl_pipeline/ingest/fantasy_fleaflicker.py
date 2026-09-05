@@ -9,6 +9,11 @@ for that reason.
 Fleaflicker's own player IDs aren't NHLPlayerID, so names are resolved through
 nhl_pipeline.name_resolver, same two-tier approach as every other external source in this
 pipeline (see that module's docstring).
+
+Every run fully replaces this platform's PlayerPositions rows for the season rather than only
+upserting: a player whose real eligibility changed since the last run, or who dropped out of
+the proxy league's roster entirely, must not keep a stale row forever (see fantasy_espn.py's
+docstring for how this bit ESPN in practice).
 """
 
 import logging
@@ -36,9 +41,12 @@ def sync_fleaflicker(cursor, season_id: int, league_id: int = FLEAFLICKER_PROXY_
 
     player_index = name_resolver.load_player_index(cursor)
     alias_map = name_resolver.load_alias_map(cursor, ALIAS_TABLE, platform_id)
+    raw_players = fleaflicker.get_players(league_id)
+
+    db.delete_where(cursor, "Fantasy.PlayerPositions", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
     counts = {"positions": 0, "unresolved": 0}
-    for raw in fleaflicker.get_players(league_id):
+    for raw in raw_players:
         f = field_map.fleaflicker_player_fields(raw)
         if not f["full_name"]:
             continue

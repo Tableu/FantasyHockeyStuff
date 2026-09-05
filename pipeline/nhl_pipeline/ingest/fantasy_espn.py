@@ -8,12 +8,21 @@ A player with no averageDraftPosition (undrafted-in-practice, e.g. deep prospect
 call-ups) is skipped for PlayerADP but still gets its PlayerPositions rows -- position
 eligibility and ADP are independent facts.
 
-Before the draft season has produced any real aggregate data (verified live in late August,
-well before ESPN's typical Sept/Oct fantasy hockey draft window), ESPN returns the exact same
+Every run fully replaces this platform's PlayerPositions rows (and PlayerADP too, when ADP
+is live -- see below) for the season rather than only upserting: a player whose real
+eligibility/ADP changed since the last run, or who dropped out of the pool entirely, must not
+keep a stale row forever, which is exactly what happened when this module briefly queried the
+wrong season year and left ~200 leftover incorrect position rows behind that plain upserting
+never cleaned up (see api/espn_fantasy.py's docstring on ESPN's year-the-season-ENDS
+numbering).
+
+Before the draft season has produced any real aggregate data, ESPN returns the exact same
 placeholder averageDraftPosition for every single player rather than omitting it -- silently
-indistinguishable from real data by looking at one player alone. Guarded against here: if the
-whole fetched pool has fewer than 2 distinct ADP values, none of it is written (positions
-still are), since a real draft population is never that uniform.
+indistinguishable from real data by looking at one player alone (seen firsthand querying the
+prior, wrong season year -- see api/espn_fantasy.py's docstring on ESPN's year-the-season-ENDS
+numbering). Guarded against here: if the whole fetched pool has fewer than 2 distinct ADP
+values, none of it is written (positions still are), since a real draft population is never
+that uniform.
 """
 
 import logging
@@ -40,7 +49,12 @@ def sync_espn(cursor, year: int, season_id: int) -> dict:
     player_index = name_resolver.load_player_index(cursor)
     alias_map = name_resolver.load_alias_map(cursor, ALIAS_TABLE, platform_id)
 
-    fields = [field_map.espn_player_fields(p) for p in espn_fantasy.get_players(year)]
+    # Drops thousands of stale duplicate entries under an old ESPN player id for a player
+    # already covered by a current one -- verified live: every one of these lacks `ownership`
+    # entirely (never a stale/wrong ADP value, just no data), so this never drops a real
+    # player's only entry, including one who's currently injured/inactive in real life (their
+    # current-id entry is still active:true in ESPN's own data model regardless).
+    fields = [field_map.espn_player_fields(p) for p in espn_fantasy.get_players(year) if p.get("active")]
     distinct_adp = {f["average_draft_position"] for f in fields if f["average_draft_position"]}
     adp_is_live = len(distinct_adp) > 1
     if not adp_is_live:
@@ -48,6 +62,12 @@ def sync_espn(cursor, year: int, season_id: int) -> dict:
             "ESPN ADP looks like a not-yet-live placeholder (only %d distinct value(s) across "
             "the whole pool) -- skipping PlayerADP this run, positions still imported", len(distinct_adp),
         )
+
+    db.delete_where(cursor, "Fantasy.PlayerPositions", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
+    if adp_is_live:
+        # Left alone entirely when not live -- clearing this out on a placeholder-looking run
+        # would delete last run's real ADP for nothing gained.
+        db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
     counts = {"adp": 0, "positions": 0, "unresolved": 0}
     for f in fields:

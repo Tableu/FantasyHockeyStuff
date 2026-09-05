@@ -10,7 +10,9 @@ the draft season.
 
 Usage:
     python import_fantasy_espn.py [year]
-    (year defaults to 2026, ESPN's fantasy-season year for the upcoming 2026-27 season)
+    (year defaults to 2027 -- ESPN's fantasy API numbers a season by the year it ENDS, so
+    the upcoming 2026-27 season is seasons/2027, confirmed by watching the live network calls
+    fantasy.espn.com's own Live Draft Trends page makes)
 """
 
 import logging
@@ -23,7 +25,7 @@ from nhl_pipeline.ingest.season import ensure_season
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("import_fantasy_espn")
 
-DEFAULT_YEAR = 2026
+DEFAULT_YEAR = 2027
 
 # Same 2026-27 season used by import_projections.py -- see that script for why it's ensured
 # here rather than coming from season_config.json (that file tracks the season currently

@@ -9,6 +9,11 @@ match Reference.Players' spelling either.
 A player with no averageDraftPosition (Yahoo's own "-" placeholder for undrafted-in-practice
 players) is skipped for PlayerADP but still gets its PlayerPositions rows -- position
 eligibility and ADP are independent facts (same convention as fantasy_espn.py).
+
+Every run fully replaces this platform's PlayerADP/PlayerPositions rows for the season
+rather than only upserting: a player whose real eligibility/ADP changed since the last run,
+or who dropped out of the pool entirely, must not keep a stale row forever (see
+fantasy_espn.py's docstring for how this bit ESPN in practice).
 """
 
 import logging
@@ -37,6 +42,9 @@ def sync_yahoo(cursor, season_id: int) -> dict:
 
     game_key = yahoo_fantasy.get_game_key()
     fields = [field_map.yahoo_player_fields(p) for p in yahoo_fantasy.get_players(game_key)]
+
+    db.delete_where(cursor, "Fantasy.PlayerPositions", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
+    db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
     counts = {"adp": 0, "positions": 0, "unresolved": 0}
     for f in fields:

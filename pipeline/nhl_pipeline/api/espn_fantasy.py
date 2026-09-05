@@ -3,8 +3,15 @@ ESPN's public NHL fantasy player pool (fhl = "fantasy hockey league", ESPN's int
 code). Verified live: no API key or league_id needed, unlike Yahoo (OAuth-only) or
 Fleaflicker (every endpoint is scoped to one specific league_id, with no platform-wide
 equivalent) -- this one genuinely returns the whole player universe with each player's
-ownership.averageDraftPosition and eligibleSlots in a single call (1738 players, no
-pagination needed as of this writing; limit is set well above that as a margin).
+ownership.averageDraftPosition and eligibleSlots in a single call (no pagination needed).
+
+`year` is the year the season ENDS, not starts -- confirmed by watching the live network
+calls fantasy.espn.com's own pages make -- so the 2026-27 season is seasons/2027, same
+numbering fantasy.espn.com/hockey/players/projections's own "2027 Projections" heading and
+the Live Draft Trends page use. The pool also contains thousands of stale duplicate entries
+for already-covered players under an old, no-longer-current ESPN player id (no
+`ownership`/`draftRanksByRankType` data, `active: false`) alongside the one real, current
+entry -- ingest.fantasy_espn filters these out.
 """
 
 import json

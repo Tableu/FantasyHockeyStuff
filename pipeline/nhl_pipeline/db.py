@@ -81,6 +81,15 @@ def upsert_get_id(cursor, table: str, id_col: str, unique_cols: dict, update_col
     return fetch_scalar(cursor, f"SELECT {id_col} FROM {table} WHERE {where_clause}", *unique_cols.values())
 
 
+def delete_where(cursor, table: str, match_cols: dict) -> None:
+    """Deletes every row in table matching match_cols exactly -- used to fully replace a
+    scope (e.g. one platform's rows for one season) right before repopulating it fresh, so a
+    row whose source data no longer applies (a player's eligibility changed, they dropped out
+    of the pool) doesn't linger forever the way upsert alone would leave it."""
+    where_clause = " AND ".join(f"{c} = ?" for c in match_cols)
+    cursor.execute(f"DELETE FROM {table} WHERE {where_clause}", list(match_cols.values()))
+
+
 def fetch_scalar(cursor, sql: str, *params):
     cursor.execute(sql, params)
     row = cursor.fetchone()

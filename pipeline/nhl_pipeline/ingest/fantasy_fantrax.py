@@ -8,6 +8,12 @@ Same two-tier name resolution as fantasy_espn.py/fantasy_yahoo.py (Fantasy.Playe
 UnresolvedPlayerNames). A player with no ADP value -- including this sheet's own "undrafted"
 placeholder of a literal 0 in the ADP column, e.g. deep bench players nobody's ever drafted --
 is skipped for PlayerADP but still gets its PlayerPositions rows.
+
+Every run fully replaces this platform's PlayerADP/PlayerPositions rows for the season rather
+than only upserting: a player whose sheet row changed or disappeared since the last run must
+not keep a stale row forever (see fantasy_espn.py's docstring for how this bit ESPN in
+practice). The sheet is read into a plain list before anything is deleted, so a bad/missing
+file fails loudly before touching the database rather than wiping existing data for nothing.
 """
 
 import logging
@@ -63,9 +69,13 @@ def sync_fantrax(cursor, season_id: int, sheets_dir: Path = None) -> dict:
     player_index = name_resolver.load_player_index(cursor)
     alias_map = name_resolver.load_alias_map(cursor, ALIAS_TABLE, platform_id)
     team_index, team_name_pairs = team_resolver.load_team_index(cursor)
+    rows = list(_rows(sheets_dir))
+
+    db.delete_where(cursor, "Fantasy.PlayerPositions", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
+    db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
     counts = {"adp": 0, "positions": 0, "unresolved": 0}
-    for r in _rows(sheets_dir):
+    for r in rows:
         player_id = name_resolver.resolve_player_id(
             cursor, ALIAS_TABLE, UNRESOLVED_TABLE, platform_id, r["raw_name"], alias_map, player_index,
         )
