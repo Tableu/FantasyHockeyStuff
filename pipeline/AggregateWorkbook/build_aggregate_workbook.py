@@ -185,18 +185,22 @@ def clear_data_rows(ws, first_row, last_row, first_col=1, last_col=None):
 
 
 def clear_namefix(ws):
-    """Blanks NameFix's manual-workflow content every run -- kept blank rather than dropping
-    the sheet entirely (see DROP_SHEETS) so its "fixnames" named range still exists for other
+    """Blanks NameFix's manual alias list every run -- kept blank rather than dropping the
+    sheet entirely (see DROP_SHEETS) so its "fixnames" named range still exists for other
     tabs' formulas to reference, but with no manual entries: exact-string database names mean
     there's nothing left for a human to alias. IFNA(VLOOKUP(...,fixnames,...),) still resolves
     fine against an empty range -- a lookup that finds nothing is exactly what IFNA is there to
-    catch. A2:B<last> is the alias list itself ("DOESN'T MATCH"/"FIXED", header at row 1 kept);
-    C1 rightward is a second, separate scratchpad for finding names to add to that list --
-    hardcoded to one specific (and no longer active) source sheet and partly built on CONTAINS,
-    which was never a real Sheets function -- cleared in full since it has no header worth
-    keeping and is just as dead as the list it used to feed."""
+    catch. A2:B<last> is the alias list itself ("DOESN'T MATCH"/"FIXED", header at row 1 kept).
+
+    C1 rightward is NOT dead scratchpad -- it's the live "pick a source sheet from K1's
+    dropdown (validated against Settings!S4:S15), see its NO MATCH rows spill into I2:M via
+    FILTER, and see which of those names still isn't in the A2:A alias list spill into O2 via
+    N's COUNTIF($A$2:$A,K#)>0" workflow (see fill_positions' reference to "NameFix's dropdown
+    and MISC3's 'NO MATCH' check"), so it's left completely untouched here: wiping it every run
+    was blanking out the user's dropdown selection and every one of its formulas along with it.
+    (N used to read =CONTAINS(K#,$A$2:$A) -- not a real Sheets function, so every row errored
+    #NAME? -- replaced with the COUNTIF equivalent directly in both NameFix sheets.)"""
     clear_data_rows(ws, 2, ws.max_row, first_col=1, last_col=2)
-    clear_data_rows(ws, 1, ws.max_row, first_col=3, last_col=ws.max_column)
 
 
 # ---------------------------------------------------------------------------
@@ -206,10 +210,10 @@ def clear_namefix(ws):
 # the name-matching formulas elsewhere in the workbook (TeamPOS, VorpAll/PtsVorpAll, etc.)
 # actually reliable -- no more nickname/spelling mismatches (e.g. "Matt Boldy" vs. "Matthew
 # Boldy") silently dropping a player's position, which is what previously left CValsVorp/
-# FanPtsVorp blank for real players. NameFix (a manual alias sheet nothing in code ever read)
-# is retired along with the CSV/XLSX-parsing this replaces (aggregate_sources.py) -- its own
-# rows are cleared every run by clear_namefix, since the database makes manual aliasing
-# unnecessary; only the sheet and its "fixnames" named range are kept around (see DROP_SHEETS).
+# FanPtsVorp blank for real players. NameFix's A:B alias list (nothing in code ever reads it --
+# only other sheets' fixnames-keyed formulas do) is cleared every run by clear_namefix, since
+# exact-string database names mean manual aliasing is normally unnecessary; its dropdown/NO
+# MATCH-finder workflow in C: rightward is still live and is left alone (see clear_namefix).
 #
 # +/-, split PPG/PPA, raw FOW/FOL (skaters) and GS/GA/SA/SV (goalies) are modeled in the
 # database (Projections.SkaterProjections/GoalieProjections) but not every source populates
@@ -1802,7 +1806,7 @@ if __name__ == "__main__":
     )
 
     clear_namefix(wb["NameFix"])
-    log.info("NameFix: cleared manual alias rows (fixnames kept, unused now that names come from the database)")
+    log.info("NameFix: cleared manual alias rows only (dropdown/NO MATCH scratchpad in C: left untouched)")
 
     sched_conn = nhl_db.connect()
     sched_info = rebuild_schedule_info(wb, sched_conn.cursor(), SEASON_NHL_ID)
