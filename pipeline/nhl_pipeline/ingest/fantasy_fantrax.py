@@ -1,34 +1,43 @@
-"""Fantasy.PlayerADP / Fantasy.PlayerPositions -- Fantrax. Reads the same doms Fantrax
-workbook ('The List' sheet) that nhl_pipeline.projections.sources.fantrax reads for stat
-projections -- read positionally there for the same reason (duplicate 'GP' header), so this
-does too: name=col B (index 1), POS=col D (index 3, comma-separated multi-position
-eligibility e.g. "C,LW"), TEAM=col F (index 5), ADP=col M (index 12).
+"""Fantasy.PlayerADP / Fantasy.PlayerPositions -- Fantrax. Pulled live from Fantrax's public
+REST API (fxea/general/*, documented at fantrax.com/developer) via nhl_pipeline.api.fantrax,
+rather than the manually-exported workbook this used to read with openpyxl.
 
-Same two-tier name resolution as fantasy_espn.py/fantasy_yahoo.py (Fantasy.PlayerNameAliases/
-UnresolvedPlayerNames). A player with no ADP value -- including this sheet's own "undrafted"
-placeholder of a literal 0 in the ADP column, e.g. deep bench players nobody's ever drafted --
-is skipped for PlayerADP but still gets its PlayerPositions rows.
+No single Fantrax endpoint has name + full position eligibility + ADP together, so three
+calls are joined by Fantrax player id (see api/fantrax.py's docstring for why each is
+needed): getPlayerIds for the name, getLeagueInfo for real multi-position eligibility,
+getAdp for ADP. FANTRAX_LEAGUE_ID is a league created purely to read via getLeagueInfo --
+same idea as FLEAFLICKER_PROXY_LEAGUE_ID in ingest/fantasy_fleaflicker.py, except this one is
+a league on this project's own Fantrax account rather than someone else's public league,
+since getLeagueInfo needs no userSecretId/ownership check to read.
 
-Every run fully replaces this platform's PlayerADP/PlayerPositions rows for the season rather
-than only upserting: a player whose sheet row changed or disappeared since the last run must
-not keep a stale row forever (see fantasy_espn.py's docstring for how this bit ESPN in
-practice). The sheet is read into a plain list before anything is deleted, so a bad/missing
-file fails loudly before touching the database rather than wiping existing data for nothing.
+getPlayerIds is the wider list (8,966 for NHL as of writing) and is what's iterated -- a
+player missing from getLeagueInfo's pool (rare, ~280 players) still gets resolved and gets an
+ADP row if getAdp has one, just no PlayerPositions rows that run. Same two-tier name
+resolution as fantasy_espn.py/fantasy_yahoo.py (Fantasy.PlayerNameAliases/
+UnresolvedPlayerNames) -- expect many more unresolved entries than before, since this pool
+includes thousands of prospects/depth players never added to Reference.Players.
+
+Same not-yet-live-season guard as fantasy_espn.py/fantasy_yahoo.py: if the whole fetched ADP
+set has fewer than 2 distinct values, none of it is written (positions still are), since a
+real draft population is never that uniform.
+
+Every run fully replaces this platform's PlayerPositions rows for the season, and PlayerADP
+too when ADP is live, rather than only upserting: a player whose real eligibility/ADP changed
+since the last run, or who dropped out of the pool entirely, must not keep a stale row forever
+(see fantasy_espn.py's docstring for how this bit ESPN in practice).
 """
 
 import logging
-from pathlib import Path
 
-import openpyxl
-
-from nhl_pipeline import config, db, name_resolver, team_resolver
+from nhl_pipeline import db, name_resolver
+from nhl_pipeline.api import fantrax, field_map
 
 log = logging.getLogger("ingest.fantasy_fantrax")
 
 ALIAS_TABLE = "Fantasy.PlayerNameAliases"
 UNRESOLVED_TABLE = "Fantasy.UnresolvedPlayerNames"
-FILENAME = "doms 2026-27-Fantasy-Projections-Fantrax.xlsx"
-SHEET = "The List"
+
+FANTRAX_LEAGUE_ID = "9ag6lqydmtop2ffo"
 
 
 def get_or_create_platform(cursor, platform_name: str) -> int:
@@ -38,60 +47,54 @@ def get_or_create_platform(cursor, platform_name: str) -> int:
     )
 
 
-def _to_float(value):
-    try:
-        result = float(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
-        return None
-    return result if result != 0 else None  # this sheet's own placeholder for no ADP yet
-
-
-def _rows(sheets_dir: Path):
-    wb = openpyxl.load_workbook(sheets_dir / FILENAME, data_only=True)
-    ws = wb[SHEET]
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        name = r[1]
-        if not name:
-            continue
-        pos = r[3]
-        yield {
-            "raw_name": name,
-            "team_raw": r[5],
-            "adp": _to_float(r[12]),
-            "position_codes": [p.strip() for p in str(pos).split(",") if p.strip()] if pos else [],
-        }
-
-
-def sync_fantrax(cursor, season_id: int, sheets_dir: Path = None) -> dict:
-    sheets_dir = sheets_dir or (config.PROJECT_ROOT / "AggregateWorkbook" / "Sheets")
+def sync_fantrax(cursor, season_id: int, league_id: str = FANTRAX_LEAGUE_ID) -> dict:
     platform_id = get_or_create_platform(cursor, "Fantrax")
 
     player_index = name_resolver.load_player_index(cursor)
     alias_map = name_resolver.load_alias_map(cursor, ALIAS_TABLE, platform_id)
-    team_index, team_name_pairs = team_resolver.load_team_index(cursor)
-    rows = list(_rows(sheets_dir))
+
+    player_ids = fantrax.get_player_ids()
+    league_positions = fantrax.get_league_positions(league_id)
+    adp_by_id = {p["id"]: p["ADP"] for p in fantrax.get_adp()}
+
+    distinct_adp = set(adp_by_id.values())
+    adp_is_live = len(distinct_adp) > 1
+    if not adp_is_live:
+        log.warning(
+            "Fantrax ADP looks like a not-yet-live placeholder (only %d distinct value(s) across "
+            "the whole pool) -- skipping PlayerADP this run, positions still imported", len(distinct_adp),
+        )
 
     db.delete_where(cursor, "Fantasy.PlayerPositions", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
-    db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
+    if adp_is_live:
+        # Left alone entirely when not live -- clearing this out on a placeholder-looking run
+        # would delete last run's real ADP for nothing gained.
+        db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
     counts = {"adp": 0, "positions": 0, "unresolved": 0}
-    for r in rows:
+    for fantrax_id, raw in player_ids.items():
+        full_name = field_map.fantrax_name_fields(raw)["full_name"]
+        if not full_name:
+            continue
+
         player_id = name_resolver.resolve_player_id(
-            cursor, ALIAS_TABLE, UNRESOLVED_TABLE, platform_id, r["raw_name"], alias_map, player_index,
+            cursor, ALIAS_TABLE, UNRESOLVED_TABLE, platform_id, full_name, alias_map, player_index,
         )
         if player_id is None:
             counts["unresolved"] += 1
             continue
 
-        if r["adp"] is not None:
+        average_draft_position = adp_by_id.get(fantrax_id)
+        if adp_is_live and average_draft_position is not None:
             db.upsert(
                 cursor, "Fantasy.PlayerADP",
                 {"FantasyPlatformID": platform_id, "PlayerID": player_id, "SeasonID": season_id},
-                {"ADP": round(r["adp"], 2)},
+                {"ADP": round(average_draft_position, 2)},
             )
             counts["adp"] += 1
 
-        for position_code in r["position_codes"]:
+        eligible_pos = (league_positions.get(fantrax_id) or {}).get("eligiblePos")
+        for position_code in field_map.fantrax_position_codes(eligible_pos):
             db.upsert(
                 cursor, "Fantasy.PlayerPositions",
                 {

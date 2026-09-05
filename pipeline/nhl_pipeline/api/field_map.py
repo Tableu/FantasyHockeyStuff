@@ -319,6 +319,25 @@ def fleaflicker_player_fields(player: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Fantrax: fxea/general/{getPlayerIds, getLeagueInfo, getAdp}
+# ---------------------------------------------------------------------------
+
+def _fantrax_full_name(raw_name: str) -> str | None:
+    last, _, first = (raw_name or "").partition(", ")
+    return f"{first} {last}".strip() if first else (last or None)
+
+
+def fantrax_name_fields(player: dict) -> dict:
+    """One entry from getPlayerIds' {id: {...}} map."""
+    return {"full_name": _fantrax_full_name(player.get("name"))}
+
+
+def fantrax_position_codes(eligible_pos: str) -> list:
+    """One entry's `eligiblePos` value from getLeagueInfo's playerInfo map, e.g. "LW,C"."""
+    return [p.strip() for p in (eligible_pos or "").split(",") if p.strip()]
+
+
+# ---------------------------------------------------------------------------
 # Schedule: schedule/{date} -> gameWeek[].games[]
 # ---------------------------------------------------------------------------
 

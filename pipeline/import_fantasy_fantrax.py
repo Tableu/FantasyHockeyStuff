@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""Imports Fantrax's fantasy position eligibility + ADP (from AggregateWorkbook/Sheets/doms
-2026-27-Fantasy-Projections-Fantrax.xlsx) into Fantasy.PlayerADP / Fantasy.PlayerPositions (see
+"""Imports Fantrax's fantasy position eligibility + ADP, pulled live from Fantrax's public
+getAdp API, into Fantasy.PlayerADP / Fantasy.PlayerPositions (see
 nhl_pipeline/ingest/fantasy_fantrax.py).
 
 Rerunnable: each run fully replaces this platform's PlayerADP/PlayerPositions rows for the
 season (not a pure upsert -- see fantasy_fantrax.py's docstring for why), so this can be run
-periodically as the sheet refreshes.
+periodically as Fantrax's own ADP data updates.
 
 Usage:
     python import_fantasy_fantrax.py
