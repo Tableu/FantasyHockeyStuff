@@ -95,6 +95,24 @@ def load_alias_map(cursor, alias_table: str, source_id: int) -> dict:
     return {row.RawName: row.PlayerID for row in cursor.fetchall()}
 
 
+def _candidate_ids(raw_name: str, player_index: dict) -> set:
+    candidates: set = set()
+    for variant in _name_variants(normalize_name(raw_name)):
+        candidates.update(player_index.get(variant, []))
+    return candidates
+
+
+def has_known_name(raw_name: str, alias_map: dict, player_index: dict) -> bool:
+    """True if `raw_name` has at least one prior alias or live candidate in
+    Reference.Players -- a cheap, side-effect-free pre-check a caller can use to skip a name
+    entirely (no unresolved-table row at all) rather than route it through resolve_player_id,
+    for a source whose raw pool is mostly names that were never going to be in our database
+    (e.g. Fantrax's full prospect pool -- see ingest/fantasy_fantrax.py)."""
+    if raw_name in alias_map:
+        return True
+    return bool(_candidate_ids(raw_name, player_index))
+
+
 def resolve_player_id(
     cursor, alias_table: str, unresolved_table: str, source_id: int,
     raw_name: str, alias_map: dict, player_index: dict,
@@ -102,9 +120,7 @@ def resolve_player_id(
     if raw_name in alias_map:
         return alias_map[raw_name]
 
-    candidates: set = set()
-    for variant in _name_variants(normalize_name(raw_name)):
-        candidates.update(player_index.get(variant, []))
+    candidates = _candidate_ids(raw_name, player_index)
 
     if len(candidates) == 1:
         player_id = next(iter(candidates))

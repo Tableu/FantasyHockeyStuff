@@ -14,8 +14,13 @@ getPlayerIds is the wider list (8,966 for NHL as of writing) and is what's itera
 player missing from getLeagueInfo's pool (rare, ~280 players) still gets resolved and gets an
 ADP row if getAdp has one, just no PlayerPositions rows that run. Same two-tier name
 resolution as fantasy_espn.py/fantasy_yahoo.py (Fantasy.PlayerNameAliases/
-UnresolvedPlayerNames) -- expect many more unresolved entries than before, since this pool
-includes thousands of prospects/depth players never added to Reference.Players.
+UnresolvedPlayerNames), with one addition: name_resolver.has_known_name() is checked first
+and a name with zero match candidates is skipped outright, without ever touching
+UnresolvedPlayerNames -- per user instruction, prospects/depth players who were never going
+to be in Reference.Players aren't worth a manual-review row (confirmed live: 6,805 of 6,809
+Fantrax unresolved-name rows had zero candidates; only 4 were a real ambiguous match). A name
+with at least one real candidate still goes through resolve_player_id as normal, so a genuine
+ambiguous match (e.g. two same-named real players) is still recorded for review.
 
 Same not-yet-live-season guard as fantasy_espn.py/fantasy_yahoo.py: if the whole fetched ADP
 set has fewer than 2 distinct values, none of it is written (positions still are), since a
@@ -71,10 +76,14 @@ def sync_fantrax(cursor, season_id: int, league_id: str = FANTRAX_LEAGUE_ID) -> 
         # would delete last run's real ADP for nothing gained.
         db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
-    counts = {"adp": 0, "positions": 0, "unresolved": 0}
+    counts = {"adp": 0, "positions": 0, "unresolved": 0, "not_in_db": 0}
     for fantrax_id, raw in player_ids.items():
         full_name = field_map.fantrax_name_fields(raw)["full_name"]
         if not full_name:
+            continue
+
+        if not name_resolver.has_known_name(full_name, alias_map, player_index):
+            counts["not_in_db"] += 1
             continue
 
         player_id = name_resolver.resolve_player_id(
@@ -106,7 +115,8 @@ def sync_fantrax(cursor, season_id: int, league_id: str = FANTRAX_LEAGUE_ID) -> 
             counts["positions"] += 1
 
     log.info(
-        "Fantrax: %d ADP row(s), %d position row(s), %d unresolved name(s)",
-        counts["adp"], counts["positions"], counts["unresolved"],
+        "Fantrax: %d ADP row(s), %d position row(s), %d unresolved name(s), "
+        "%d skipped (no match, not in our database)",
+        counts["adp"], counts["positions"], counts["unresolved"], counts["not_in_db"],
     )
     return counts
