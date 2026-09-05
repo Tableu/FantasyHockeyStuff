@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""Imports Fantrax's fantasy position eligibility + ADP (from Sheets/doms 2026-27-Fantasy-
-Projections-Fantrax.xlsx) into Fantasy.PlayerADP / Fantasy.PlayerPositions (see
+"""Imports Fantrax's fantasy position eligibility + ADP (from AggregateWorkbook/Sheets/doms
+2026-27-Fantasy-Projections-Fantrax.xlsx) into Fantasy.PlayerADP / Fantasy.PlayerPositions (see
 nhl_pipeline/ingest/fantasy_fantrax.py).
 
 Rerunnable: everything is upserted, so this can be run periodically as the sheet refreshes.

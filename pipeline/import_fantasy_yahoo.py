@@ -1,8 +1,9 @@
 #!/usr/bin/env python
-"""Imports Yahoo's fantasy position eligibility + ADP (from Sheets/dailyfaceoff yahoo.csv)
-into Fantasy.PlayerADP / Fantasy.PlayerPositions (see nhl_pipeline/ingest/fantasy_yahoo.py).
+"""Imports Yahoo's fantasy position eligibility + ADP, pulled live from Yahoo's public
+read-only Fantasy API, into Fantasy.PlayerADP / Fantasy.PlayerPositions (see
+nhl_pipeline/ingest/fantasy_yahoo.py).
 
-Rerunnable: everything is upserted, so this can be run periodically as the sheet refreshes.
+Rerunnable: everything is upserted, so this can be run periodically as Yahoo's live ADP moves.
 
 Usage:
     python import_fantasy_yahoo.py

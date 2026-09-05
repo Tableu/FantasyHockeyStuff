@@ -5,8 +5,9 @@ does too: name=col B (index 1), POS=col D (index 3, comma-separated multi-positi
 eligibility e.g. "C,LW"), TEAM=col F (index 5), ADP=col M (index 12).
 
 Same two-tier name resolution as fantasy_espn.py/fantasy_yahoo.py (Fantasy.PlayerNameAliases/
-UnresolvedPlayerNames). A player with no ADP value is skipped for PlayerADP but still gets
-its PlayerPositions rows.
+UnresolvedPlayerNames). A player with no ADP value -- including this sheet's own "undrafted"
+placeholder of a literal 0 in the ADP column, e.g. deep bench players nobody's ever drafted --
+is skipped for PlayerADP but still gets its PlayerPositions rows.
 """
 
 import logging
@@ -33,9 +34,10 @@ def get_or_create_platform(cursor, platform_name: str) -> int:
 
 def _to_float(value):
     try:
-        return float(value) if value not in (None, "") else None
+        result = float(value) if value not in (None, "") else None
     except (TypeError, ValueError):
         return None
+    return result if result != 0 else None  # this sheet's own placeholder for no ADP yet
 
 
 def _rows(sheets_dir: Path):
@@ -55,7 +57,7 @@ def _rows(sheets_dir: Path):
 
 
 def sync_fantrax(cursor, season_id: int, sheets_dir: Path = None) -> dict:
-    sheets_dir = sheets_dir or (config.PROJECT_ROOT / "Sheets")
+    sheets_dir = sheets_dir or (config.PROJECT_ROOT / "AggregateWorkbook" / "Sheets")
     platform_id = get_or_create_platform(cursor, "Fantrax")
 
     player_index = name_resolver.load_player_index(cursor)

@@ -252,6 +252,7 @@ def player_search_result_fields(result: dict) -> dict:
     return {
         "nhl_player_id": int(result["playerId"]),
         "name": result.get("name"),
+        "position_code": result.get("positionCode"),
         "team_abbrev": result.get("teamAbbrev"),
         "height_inches": result.get("heightInInches"),
         "weight_lbs": result.get("weightInPounds"),
@@ -275,6 +276,32 @@ def espn_player_fields(player: dict) -> dict:
         "full_name": player.get("fullName"),
         "average_draft_position": (player.get("ownership") or {}).get("averageDraftPosition"),
         "position_codes": [ESPN_SLOT_POSITION[s] for s in player.get("eligibleSlots", []) if s in ESPN_SLOT_POSITION],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Yahoo fantasy (public draft-analysis API): league/{game_key}.l.public/players -> player{}
+# ---------------------------------------------------------------------------
+
+# eligible_positions also carries roster-status flags like "IR" alongside real positions --
+# verified live -- so this filters down to the concrete on-ice positions only, same reasoning
+# as ESPN_SLOT_POSITION above.
+YAHOO_POSITION_CODES = {"C", "LW", "RW", "D", "G"}
+
+
+def yahoo_player_fields(player: dict) -> dict:
+    average_pick = (player.get("draft_analysis") or {}).get("average_pick")
+    try:
+        adp = float(average_pick)
+    except (TypeError, ValueError):
+        adp = None  # Yahoo's own "-" placeholder for a player with no ADP yet
+    return {
+        "full_name": (player.get("name") or {}).get("full"),
+        "average_draft_position": adp,
+        "position_codes": [
+            e["position"] for e in player.get("eligible_positions", [])
+            if e.get("position") in YAHOO_POSITION_CODES
+        ],
     }
 
 
