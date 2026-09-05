@@ -76,6 +76,7 @@ def sync_espn(cursor, year: int, season_id: int) -> dict:
 
         player_id = name_resolver.resolve_player_id(
             cursor, ALIAS_TABLE, UNRESOLVED_TABLE, platform_id, f["full_name"], alias_map, player_index,
+            position_codes=f["position_codes"],
         )
         if player_id is None:
             counts["unresolved"] += 1

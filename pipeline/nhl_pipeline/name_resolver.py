@@ -82,11 +82,13 @@ def _name_variants(normalized_name: str) -> list:
 
 
 def load_player_index(cursor) -> dict:
-    """Returns {normalized_full_name: [PlayerID, ...]}."""
-    cursor.execute("SELECT PlayerID, FullName FROM Reference.Players")
+    """Returns {normalized_full_name: [(PlayerID, PositionCode), ...]}. PositionCode rides
+    along so resolve_player_id can use a source's own per-record position as a same-name
+    tiebreaker (see its position_codes parameter) without a second database round trip."""
+    cursor.execute("SELECT PlayerID, FullName, PositionCode FROM Reference.Players")
     index: dict = {}
     for row in cursor.fetchall():
-        index.setdefault(normalize_name(row.FullName), []).append(row.PlayerID)
+        index.setdefault(normalize_name(row.FullName), []).append((row.PlayerID, row.PositionCode))
     return index
 
 
@@ -95,10 +97,13 @@ def load_alias_map(cursor, alias_table: str, source_id: int) -> dict:
     return {row.RawName: row.PlayerID for row in cursor.fetchall()}
 
 
-def _candidate_ids(raw_name: str, player_index: dict) -> set:
-    candidates: set = set()
+def _candidates(raw_name: str, player_index: dict) -> dict:
+    """{PlayerID: PositionCode} for every real player raw_name could plausibly be (across
+    nickname-variant spellings)."""
+    candidates: dict = {}
     for variant in _name_variants(normalize_name(raw_name)):
-        candidates.update(player_index.get(variant, []))
+        for player_id, position_code in player_index.get(variant, []):
+            candidates[player_id] = position_code
     return candidates
 
 
@@ -110,17 +115,26 @@ def has_known_name(raw_name: str, alias_map: dict, player_index: dict) -> bool:
     (e.g. Fantrax's full prospect pool -- see ingest/fantasy_fantrax.py)."""
     if raw_name in alias_map:
         return True
-    return bool(_candidate_ids(raw_name, player_index))
+    return bool(_candidates(raw_name, player_index))
 
 
 def resolve_player_id(
     cursor, alias_table: str, unresolved_table: str, source_id: int,
-    raw_name: str, alias_map: dict, player_index: dict,
+    raw_name: str, alias_map: dict, player_index: dict, position_codes: list | None = None,
 ) -> int | None:
+    """position_codes, when given, is this specific record's own position(s) from the
+    source's raw data -- used only as a tiebreaker when raw_name alone matches more than one
+    real player (e.g. two real "Elias Pettersson"s, one a C and one a D). Confirmed live: a
+    source can carry two separate raw records under the exact same name (Fantrax's own player
+    pool has exactly this Pettersson pair) -- a position-hint match is therefore NEVER written
+    to the alias table, unlike the single-candidate case below. Aliasing by RawName alone
+    would wrongly collapse both records onto whichever one happened to resolve first, since
+    the alias table has no way to key on which raw record within a name-sharing pair it came
+    from."""
     if raw_name in alias_map:
         return alias_map[raw_name]
 
-    candidates = _candidate_ids(raw_name, player_index)
+    candidates = _candidates(raw_name, player_index)
 
     if len(candidates) == 1:
         player_id = next(iter(candidates))
@@ -135,6 +149,18 @@ def resolve_player_id(
         )
         alias_map[raw_name] = player_id
         return player_id
+
+    if position_codes:
+        matches = [player_id for player_id, pos in candidates.items() if pos in position_codes]
+        if len(matches) == 1:
+            # Best-effort cleanup of a stale row from before this record's position could
+            # disambiguate it -- if a different raw record sharing this exact name still can't
+            # be resolved later in the same run, its own fallback upsert below re-adds one.
+            cursor.execute(
+                f"DELETE FROM {unresolved_table} WHERE SourceID = ? AND RawName = ?",
+                source_id, raw_name,
+            )
+            return matches[0]
 
     db.upsert(
         cursor, unresolved_table,

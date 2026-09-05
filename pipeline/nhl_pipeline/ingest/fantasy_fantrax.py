@@ -14,13 +14,20 @@ getPlayerIds is the wider list (8,966 for NHL as of writing) and is what's itera
 player missing from getLeagueInfo's pool (rare, ~280 players) still gets resolved and gets an
 ADP row if getAdp has one, just no PlayerPositions rows that run. Same two-tier name
 resolution as fantasy_espn.py/fantasy_yahoo.py (Fantasy.PlayerNameAliases/
-UnresolvedPlayerNames), with one addition: name_resolver.has_known_name() is checked first
-and a name with zero match candidates is skipped outright, without ever touching
-UnresolvedPlayerNames -- per user instruction, prospects/depth players who were never going
-to be in Reference.Players aren't worth a manual-review row (confirmed live: 6,805 of 6,809
-Fantrax unresolved-name rows had zero candidates; only 4 were a real ambiguous match). A name
-with at least one real candidate still goes through resolve_player_id as normal, so a genuine
-ambiguous match (e.g. two same-named real players) is still recorded for review.
+UnresolvedPlayerNames), with two additions:
+
+- name_resolver.has_known_name() is checked first and a name with zero match candidates is
+  skipped outright, without ever touching UnresolvedPlayerNames -- per user instruction,
+  prospects/depth players who were never going to be in Reference.Players aren't worth a
+  manual-review row (confirmed live: 6,805 of 6,809 Fantrax unresolved-name rows had zero
+  candidates; only 4 were a real ambiguous match).
+- Each record's own `position` (getPlayerIds' single default position) is passed as
+  resolve_player_id's position_codes tiebreaker, so a name matching more than one real
+  player resolves automatically when only one candidate's real PositionCode matches (e.g.
+  the two real "Elias Pettersson"s, one a C one a D -- Fantrax's own pool carries both as
+  separate records, each correctly tagged). Not every ambiguous name has a position that
+  disambiguates it (e.g. two real "Matt Murray"s, both goalies) -- those still fall through
+  to UnresolvedPlayerNames for manual review, same as before.
 
 Same not-yet-live-season guard as fantasy_espn.py/fantasy_yahoo.py: if the whole fetched ADP
 set has fewer than 2 distinct values, none of it is written (positions still are), since a
@@ -86,8 +93,10 @@ def sync_fantrax(cursor, season_id: int, league_id: str = FANTRAX_LEAGUE_ID) -> 
             counts["not_in_db"] += 1
             continue
 
+        position_hint = [raw["position"]] if raw.get("position") else None
         player_id = name_resolver.resolve_player_id(
             cursor, ALIAS_TABLE, UNRESOLVED_TABLE, platform_id, full_name, alias_map, player_index,
+            position_codes=position_hint,
         )
         if player_id is None:
             counts["unresolved"] += 1
