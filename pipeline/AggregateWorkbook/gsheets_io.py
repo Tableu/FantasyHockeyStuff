@@ -782,7 +782,6 @@ def set_defined_names(wb, mapping):
             })
         else:
             requests.append({"addNamedRange": {"namedRange": {"name": name, "range": grid_range}}})
-            add_names_in_order.append(name)
 
     CHUNK = 300
     for i in range(0, len(requests), CHUNK):

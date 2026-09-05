@@ -414,6 +414,7 @@ def load_master_data(cursor) -> dict:
     master["fleaflicker_platform_pos"] = _platform_positions(cursor, "Fleaflicker", display_names)
     master["yahoo_adp"] = _platform_adp(cursor, "Yahoo", display_names)
     master["fantrax_adp"] = _platform_adp(cursor, "Fantrax", display_names)
+    master["espn_adp"] = _platform_adp(cursor, "ESPN", display_names)
     return master
 
 
@@ -608,6 +609,30 @@ def fill_adp_fantrax(ws, doms_adp: dict):
         ws.cell(row=r, column=2, value=doms_adp[name])
         r += 1
     return r - 2
+
+
+def fill_adp_espn(ws, espn_adp: dict):
+    """A:B feeds the ADPESPN named range (Rankings!G2). Not read by Positions (ESPN
+    positions come straight from the database via fill_positions, same as Yahoo/Fantrax)."""
+    clear_data_rows(ws, 2, ws.max_row)
+    r = 2
+    for name in sorted(espn_adp):
+        ws.cell(row=r, column=1, value=name)
+        ws.cell(row=r, column=2, value=espn_adp[name])
+        r += 1
+    return r - 2
+
+
+def ensure_adp_espn_sheet(wb):
+    """Creates the ADPESPN sheet (Player/ADP header, matching ADPYahoo/ADPFantrax) the first
+    time this runs against a workbook that predates ESPN having a real ADP source of its own
+    -- for every later run it already exists and this is a no-op."""
+    if "ADPESPN" in wb.sheetnames:
+        return wb["ADPESPN"]
+    ws = wb.add_worksheet("ADPESPN", rows=2000, cols=2)
+    ws.cell(row=1, column=1, value="Player")
+    ws.cell(row=1, column=2, value="ADP")
+    return ws
 
 
 def clear_adp_other(ws):
@@ -1428,8 +1453,9 @@ def rebuild_settings_sources(ws):
 
 
 # ---------------------------------------------------------------------------
-# Phase 7: Rankings (static player list; B:I formulas already fill down and
-# stay untouched -- Excel-native, driven entirely by name-keyed VLOOKUPs)
+# Phase 7: Rankings (static player list; B/D/E/H/I formulas already fill down
+# and stay untouched -- Excel-native, driven entirely by name-keyed VLOOKUPs.
+# C/G are the exceptions -- see refresh_rankings)
 # ---------------------------------------------------------------------------
 
 def refresh_rankings(ws, all_names):
@@ -1438,6 +1464,7 @@ def refresh_rankings(ws, all_names):
     for name in all_names:
         ws.cell(row=r, column=1, value=name)
         r += 1
+    n = r - 2
     # Column E's IFERROR fallback is bare (,) not (,"") unlike D/F -- evaluates to 0, which
     # then pollutes column C's AVERAGE(D:F) for anyone missing Fantrax ADP specifically.
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=5, max_col=5):
@@ -1446,7 +1473,23 @@ def refresh_rankings(ws, all_names):
             text = getattr(v, "text", v)
             if isinstance(text, str) and text.rstrip().endswith(",)"):
                 cell.value = text.rstrip()[:-2] + ',"")'
-    return r - 2
+
+    # G (ESPN ADP) was a blank spacer column until ESPN got a real ADP source of its own (see
+    # api/espn_fantasy.py/ingest/fantasy_espn.py) -- self-correcting fill-down here rather than
+    # a one-time manual add, same reasoning as the E-column fix above: a from-scratch bootstrap,
+    # or any row added since the last run, would otherwise never get it. C's own blended average
+    # is widened from D:F to D:G to actually include ESPN (B/H/I -- AVG/MIN/MAX -- are left
+    # alone; those are a deliberately Yahoo+Fantrax-only pair, unrelated to C's blend).
+    ws.cell(row=1, column=7, value="ESPN ADP")
+    for g_row in range(2, ws.max_row + 1):
+        ws.cell(row=g_row, column=7, value=f'=iferror(vlookup(A{g_row},ADPESPN,2,false),"")')
+        c_cell = ws.cell(row=g_row, column=3)
+        text = getattr(c_cell.value, "text", c_cell.value)
+        old_range, new_range = f"D{g_row}:F{g_row})", f"D{g_row}:G{g_row})"
+        if isinstance(text, str) and old_range in text:
+            c_cell.value = text.replace(old_range, new_range)
+
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -1825,6 +1868,10 @@ if __name__ == "__main__":
     n = fill_adp_fantrax(wb["ADPFantrax"], master["fantrax_adp"])
     log.info("ADPFantrax: %d rows", n)
     set_defined_name(wb, "ADPFantrax", f"ADPFantrax!$A$1:$B${n + 1}")
+
+    n = fill_adp_espn(ensure_adp_espn_sheet(wb), master["espn_adp"])
+    log.info("ADPESPN: %d rows", n)
+    set_defined_name(wb, "ADPESPN", f"ADPESPN!$A$1:$B${n + 1}")
 
     clear_adp_other(wb["ADPother"])
     log.info("ADPother: cleared (no Fleaflicker source)")
