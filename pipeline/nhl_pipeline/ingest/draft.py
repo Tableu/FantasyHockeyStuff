@@ -21,18 +21,8 @@ log = logging.getLogger("ingest.draft")
 
 
 def _resolve_nhl_player_id(full_name: str, team_abbrev: str | None) -> int | None:
-    candidates = [
-        field_map.player_search_result_fields(r)
-        for r in player_search.search_player(full_name)
-        if (r.get("name") or "").strip().lower() == full_name.strip().lower()
-    ]
-    if len(candidates) == 1:
-        return candidates[0]["nhl_player_id"]
-    if len(candidates) > 1 and team_abbrev:
-        team_matches = [c for c in candidates if c["team_abbrev"] == team_abbrev]
-        if len(team_matches) == 1:
-            return team_matches[0]["nhl_player_id"]
-    return None
+    match = player_search.find_exact_match(full_name, team_abbrev)
+    return match["nhl_player_id"] if match else None
 
 
 def sync_draft_class(cursor, year: int) -> dict:

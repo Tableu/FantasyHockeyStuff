@@ -18,20 +18,9 @@ PlayerPositions until that source's import is re-run -- this only populates Refe
 import logging
 
 from nhl_pipeline import db
-from nhl_pipeline.api import field_map, player_search
+from nhl_pipeline.api import player_search
 
 log = logging.getLogger("ingest.player_backfill")
-
-
-def _resolve_nhl_player_id(full_name: str) -> int | None:
-    candidates = [
-        field_map.player_search_result_fields(r)
-        for r in player_search.search_player(full_name)
-        if (r.get("name") or "").strip().lower() == full_name.strip().lower()
-    ]
-    if len(candidates) == 1:
-        return candidates[0]
-    return None
 
 
 def backfill_unresolved_names(cursor, unresolved_table: str) -> dict:
@@ -40,11 +29,15 @@ def backfill_unresolved_names(cursor, unresolved_table: str) -> dict:
 
     counts = {"added": 0, "still_unresolved": 0}
     for raw_name in names:
-        match = _resolve_nhl_player_id(raw_name)
+        match = player_search.find_exact_match(raw_name)
         if match is None:
             counts["still_unresolved"] += 1
             continue
 
+        # FirstName/LastName left unset (unlike ingest.draft/ingest.teams_players, which both
+        # have a real first/last split to write) -- the NHL search result only ever gives a
+        # combined "name" string, and splitting it ourselves would mangle any multi-word last
+        # name, so this is a deliberate gap, not an oversight.
         db.upsert_get_id(
             cursor, "Reference.Players", "PlayerID",
             {"NHLPlayerID": match["nhl_player_id"]},

@@ -10,10 +10,17 @@ A player with no averageDraftPosition (Yahoo's own "-" placeholder for undrafted
 players) is skipped for PlayerADP but still gets its PlayerPositions rows -- position
 eligibility and ADP are independent facts (same convention as fantasy_espn.py).
 
-Every run fully replaces this platform's PlayerADP/PlayerPositions rows for the season
-rather than only upserting: a player whose real eligibility/ADP changed since the last run,
-or who dropped out of the pool entirely, must not keep a stale row forever (see
-fantasy_espn.py's docstring for how this bit ESPN in practice).
+Same not-yet-live-season guard as fantasy_espn.py: if the whole fetched pool has fewer than 2
+distinct ADP values, none of it is written (positions still are). ESPN is the platform this
+was actually observed on (querying the wrong season year made every player come back with the
+same placeholder), but there's no reason to assume Yahoo's pub-api-ro couldn't do the same
+before its own draft_analysis data goes live, and the risk is worse now that a bad run would
+also delete every previously-good ADP row instead of just leaving them unchanged (see below).
+
+Every run fully replaces this platform's PlayerPositions rows for the season, and PlayerADP
+too when ADP is live, rather than only upserting: a player whose real eligibility/ADP changed
+since the last run, or who dropped out of the pool entirely, must not keep a stale row forever
+(see fantasy_espn.py's docstring for how this bit ESPN in practice).
 """
 
 import logging
@@ -42,9 +49,19 @@ def sync_yahoo(cursor, season_id: int) -> dict:
 
     game_key = yahoo_fantasy.get_game_key()
     fields = [field_map.yahoo_player_fields(p) for p in yahoo_fantasy.get_players(game_key)]
+    distinct_adp = {f["average_draft_position"] for f in fields if f["average_draft_position"]}
+    adp_is_live = len(distinct_adp) > 1
+    if not adp_is_live:
+        log.warning(
+            "Yahoo ADP looks like a not-yet-live placeholder (only %d distinct value(s) across "
+            "the whole pool) -- skipping PlayerADP this run, positions still imported", len(distinct_adp),
+        )
 
     db.delete_where(cursor, "Fantasy.PlayerPositions", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
-    db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
+    if adp_is_live:
+        # Left alone entirely when not live -- clearing this out on a placeholder-looking run
+        # would delete last run's real ADP for nothing gained.
+        db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
     counts = {"adp": 0, "positions": 0, "unresolved": 0}
     for f in fields:
@@ -58,7 +75,7 @@ def sync_yahoo(cursor, season_id: int) -> dict:
             counts["unresolved"] += 1
             continue
 
-        if f["average_draft_position"] is not None:
+        if adp_is_live and f["average_draft_position"] is not None:
             db.upsert(
                 cursor, "Fantasy.PlayerADP",
                 {"FantasyPlatformID": platform_id, "PlayerID": player_id, "SeasonID": season_id},

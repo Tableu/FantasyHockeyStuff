@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 """Imports ESPN's public NHL fantasy player pool into Fantasy.PlayerADP and
 Fantasy.PlayerPositions (see nhl_pipeline/ingest/fantasy_espn.py). No credentials needed --
-unlike Yahoo (OAuth app registration) or Fantrax (login cookie), ESPN's player-pool endpoint
-is fully public. Fleaflicker is skipped entirely: it has no platform-wide ADP endpoint, only
+same as Yahoo's pub-api-ro endpoint, but unlike Fantrax (no public ADP source at all, reads a
+workbook instead). Fleaflicker is skipped entirely: it has no platform-wide ADP endpoint, only
 per-league data.
 
-Rerunnable: everything is upserted, so this can be run periodically as ADP shifts through
-the draft season.
+Rerunnable: each run fully replaces this platform's PlayerADP/PlayerPositions rows for the
+season (not a pure upsert -- see fantasy_espn.py's docstring for why), so this can be run
+periodically as ADP shifts through the draft season.
 
 Usage:
     python import_fantasy_espn.py [year]

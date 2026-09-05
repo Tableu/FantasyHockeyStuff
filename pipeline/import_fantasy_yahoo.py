@@ -3,7 +3,9 @@
 read-only Fantasy API, into Fantasy.PlayerADP / Fantasy.PlayerPositions (see
 nhl_pipeline/ingest/fantasy_yahoo.py).
 
-Rerunnable: everything is upserted, so this can be run periodically as Yahoo's live ADP moves.
+Rerunnable: each run fully replaces this platform's PlayerADP/PlayerPositions rows for the
+season (not a pure upsert -- see fantasy_yahoo.py's docstring for why), so this can be run
+periodically as Yahoo's live ADP moves.
 
 Usage:
     python import_fantasy_yahoo.py

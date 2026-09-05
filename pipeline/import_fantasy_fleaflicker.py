@@ -7,7 +7,8 @@ worse stand-in for "Fleaflicker's ADP" than one league's position eligibility is
 "Fleaflicker's positions" (eligibility is close to just the player's real position; ADP is
 inherently about aggregate draft behavior, which one small league can't represent).
 
-Rerunnable: everything is upserted.
+Rerunnable: each run fully replaces this platform's PlayerPositions rows for the season (not
+a pure upsert -- see fantasy_fleaflicker.py's docstring for why).
 
 Usage:
     python import_fantasy_fleaflicker.py

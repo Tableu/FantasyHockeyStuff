@@ -3,7 +3,9 @@
 2026-27-Fantasy-Projections-Fantrax.xlsx) into Fantasy.PlayerADP / Fantasy.PlayerPositions (see
 nhl_pipeline/ingest/fantasy_fantrax.py).
 
-Rerunnable: everything is upserted, so this can be run periodically as the sheet refreshes.
+Rerunnable: each run fully replaces this platform's PlayerADP/PlayerPositions rows for the
+season (not a pure upsert -- see fantasy_fantrax.py's docstring for why), so this can be run
+periodically as the sheet refreshes.
 
 Usage:
     python import_fantasy_fantrax.py
