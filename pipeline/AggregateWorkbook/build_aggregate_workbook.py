@@ -1518,7 +1518,23 @@ def _group_rank_sumproduct(value_range, cond, myval_ref, row_range, r):
 def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roster_g_name):
     """source_sheet: 'Player Values - Cats' or 'Player Values - Pts'. Writes VorpAll's
     A:F (mirrors source D:G, then VORP/PRNK) at CValsVorp!A3:F<last_row>, thresholds at
-    H1:J1. Same layout used for both CValsVorp and FanPtsVorp -- caller passes the sheet."""
+    H1:P1. Same layout used for both CValsVorp and FanPtsVorp -- caller passes the sheet.
+
+    Forwards are split into C/LW/RW replacement-level pools, restored to match the original
+    (pre-automation) template's dead FILTER/SORT formulas -- found live at spreadsheet
+    1qWbfN9TwDFWLR3bcCFKyIrqV8H7chSkHUgyJ33yjquI (the "kept as a fallback" original this
+    project's template was cloned from) after a user reported VORP numbers diverging from a
+    second, independently-run copy of that original sheet. That original: for each of C/LW/RW,
+    counts how many of the *combined*-forward-pool's top roster_f_name players are eligible at
+    that specific position (K1/L1/M1 here -- the ">= H1" cutoff is an equivalent stand-in for
+    the original's ARRAY_CONSTRAIN-to-top-N approach), then uses (that count + 3) as the rank
+    index into a LARGE() over just that position's own eligible pool (N1/O1/P1) -- the "+3" is
+    a fixed buffer baked into the original, not derived from Settings, kept as-is for fidelity.
+    A multi-position player (e.g. "C,RW") is eligible in every group their position string
+    contains a letter for -- FIND, not exact match, exactly like add_rank_helpers' own
+    C/RW/LW eligibility tests elsewhere on this sheet -- and their VORP is the best (MAX) of
+    whichever groups apply, same as the original's own row-level MAX(Q:T). D/G are untouched
+    (single pool each, exact-match "D"/"G" -- already matched the original before this fix)."""
     old_max_col = ws.max_column
     clear_data_rows(ws, 1, max(ws.max_row, last_row), first_col=1, last_col=old_max_col)
     ws.cell(row=2, column=1, value="PLAYER")
@@ -1533,6 +1549,9 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
     fwd_cond = f'({crange}<>"D")*({crange}<>"G")'
     def_cond = f'{crange}="D"'
     gk_cond = f'{crange}="G"'
+    c_cond = f'ISNUMBER(FIND("C",{crange}))'
+    lw_cond = f'ISNUMBER(FIND("L",{crange}))'
+    rw_cond = f'ISNUMBER(FIND("R",{crange}))'
 
     ws.cell(row=1, column=8, value=(
         f'=SUMPRODUCT(LARGE(({fwd_cond})*{drange}+(1-({fwd_cond}))*-999999,'
@@ -1546,21 +1565,51 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
         f'=SUMPRODUCT(LARGE(({gk_cond})*{drange}+(1-({gk_cond}))*-999999,'
         f'MIN(SUMPRODUCT(({gk_cond})*1),70,{roster_g_name}+1)))'
     ))
+    # K/L/M1: how many of the combined-forward-pool's top roster_f_name players (by VAL >=
+    # $H$1, the combined threshold above) are eligible at C/LW/RW respectively -- a multi-
+    # eligible player counts toward more than one of these, matching the original's own
+    # double-counting via ARRAY_CONSTRAIN+COUNTIF.
+    ws.cell(row=1, column=11, value=f'=SUMPRODUCT(({c_cond})*({drange}>=$H$1))')
+    ws.cell(row=1, column=12, value=f'=SUMPRODUCT(({lw_cond})*({drange}>=$H$1))')
+    ws.cell(row=1, column=13, value=f'=SUMPRODUCT(({rw_cond})*({drange}>=$H$1))')
+    # N/O/P1: the (K/L/M1 + 3)-th largest VAL within each position's own eligible pool --
+    # the "+3" buffer is the original's, not ours (see docstring).
+    ws.cell(row=1, column=14, value=(
+        f'=SUMPRODUCT(LARGE(({c_cond})*{drange}+(1-({c_cond}))*-999999,'
+        f'MIN(SUMPRODUCT(({c_cond})*1),$K$1+3)))'
+    ))
+    ws.cell(row=1, column=15, value=(
+        f'=SUMPRODUCT(LARGE(({lw_cond})*{drange}+(1-({lw_cond}))*-999999,'
+        f'MIN(SUMPRODUCT(({lw_cond})*1),$L$1+3)))'
+    ))
+    ws.cell(row=1, column=16, value=(
+        f'=SUMPRODUCT(LARGE(({rw_cond})*{drange}+(1-({rw_cond}))*-999999,'
+        f'MIN(SUMPRODUCT(({rw_cond})*1),$M$1+3)))'
+    ))
 
     for r in range(3, last_row + 1):
         ws.cell(row=r, column=1, value=f"='{source_sheet}'!D{r}")
         ws.cell(row=r, column=2, value=f"='{source_sheet}'!E{r}")
         ws.cell(row=r, column=3, value=f"='{source_sheet}'!F{r}")
         ws.cell(row=r, column=4, value=f"='{source_sheet}'!G{r}")
+        c_r = f'ISNUMBER(FIND("C",$C{r}))'
+        lw_r = f'ISNUMBER(FIND("L",$C{r}))'
+        rw_r = f'ISNUMBER(FIND("R",$C{r}))'
         ws.cell(row=r, column=5, value=(
-            f'=IF($C{r}="","",IF($C{r}="D",$D{r}-$I$1,IF($C{r}="G",$D{r}-$J$1,$D{r}-$H$1)))'
+            f'=IF($C{r}="","",IF($C{r}="D",$D{r}-$I$1,IF($C{r}="G",$D{r}-$J$1,'
+            f'MAX(IF({c_r},$D{r}-$N$1,-999999),IF({lw_r},$D{r}-$O$1,-999999),'
+            f'IF({rw_r},$D{r}-$P$1,-999999),'
+            f'IF(AND(NOT({c_r}),NOT({lw_r}),NOT({rw_r})),$D{r}-$H$1,-999999)))))'
         ))
-        fwd_rank = _group_rank_sumproduct(drange, fwd_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
         def_rank = _group_rank_sumproduct(drange, def_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
         gk_rank = _group_rank_sumproduct(drange, gk_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
+        c_rank = _group_rank_sumproduct(drange, c_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
+        lw_rank = _group_rank_sumproduct(drange, lw_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
+        rw_rank = _group_rank_sumproduct(drange, rw_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
         ws.cell(row=r, column=6, value=(
             f'=IF($C{r}="","",IF($C{r}="D","D"&({def_rank}),IF($C{r}="G","G"&({gk_rank}),'
-            f'"F"&({fwd_rank}))))'
+            f'IF({c_r},"C"&({c_rank})&" ","")&IF({lw_r},"L"&({lw_rank})&" ","")&'
+            f'IF({rw_r},"R"&({rw_rank}),""))))'
         ))
 
 
