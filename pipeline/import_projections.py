@@ -18,7 +18,8 @@ from nhl_pipeline import config, db
 from nhl_pipeline.ingest.season import ensure_season
 from nhl_pipeline.projections import importer
 from nhl_pipeline.projections.sources import (
-    apples_ginos_blake, apples_ginos_nate, dailyfaceoff, dtz, fantrax, lineup_experts,
+    apples_ginos_blake, apples_ginos_nate, dailyfaceoff, dtz, dom, kubota_hockey,
+    lineup_experts, scott_cullen,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -37,9 +38,11 @@ SOURCES = [
     ("DtZ", dtz, "DtZ 2026-2027 NHL Fantasy Projections"),
     ("Dailyfaceoff", dailyfaceoff, "dailyfaceoff espn.csv"),
     ("Lineup Experts", lineup_experts, "Lineup Experts Hockey Fantasy Draft Cheat Sheet"),
-    ("Dom", fantrax, "Fantrax 2026-27 Fantasy Projections, 'The List' sheet"),
+    ("Dom", dom, "Dom's Fantrax 2026-27 Fantasy Projections, 'The List' sheet"),
     ("Apples & Ginos - Blake", apples_ginos_blake, "Apples & Ginos 2026-27 NHL Skater Projections - Blake"),
     ("Apples & Ginos - Nate", apples_ginos_nate, "Apples & Ginos 2026-27 NHL Skater Projections - Nate"),
+    ("Scott Cullen", scott_cullen, "Scott Cullen Projections"),
+    ("Kubota Hockey", kubota_hockey, "Kubota Hockey 2026-27 Projections"),
 ]
 
 
