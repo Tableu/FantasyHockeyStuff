@@ -5,6 +5,12 @@ ranking views (FP, VORP, ADP) derived from it, not separate raw data.
 
 Read positionally, not by header name: 'GP' appears twice in the header row (once for the
 skater block, once for the goalie block), so a name-keyed dict would silently collide.
+
+Every counting stat is passed through as-is, not rounded -- this source projects everything
+to long decimal precision (e.g. Goals=21.99, GamesPlayed=83.2625, PenaltyMinutes=33.9), and
+Projections.SkaterProjections/GoalieProjections' matching columns are DECIMAL for exactly
+this reason. Rounding here would silently throw that precision away before it ever reached
+the database.
 """
 
 from pathlib import Path
@@ -13,10 +19,6 @@ import openpyxl
 
 FILENAME = "doms 2026-27-Fantasy-Projections-Fantrax.xlsx"
 SHEET = "The List"
-
-
-def _round(value):
-    return round(value) if value is not None else None
 
 
 def rows(sheets_dir: Path):
@@ -29,27 +31,27 @@ def rows(sheets_dir: Path):
         is_goalie = r[3] == "G"
         if is_goalie:
             stats = {
-                "GamesPlayed": _round(r[35]),
-                "Wins": _round(r[36]),
-                "Losses": _round(r[37]),
-                "OvertimeLosses": _round(r[38]),
-                "Shutouts": _round(r[39]),
+                "GamesPlayed": r[35],
+                "Wins": r[36],
+                "Losses": r[37],
+                "OvertimeLosses": r[38],
+                "Shutouts": r[39],
                 "SavePercentage": r[42],
                 "GoalsAgainstAverage": r[43],
             }
         else:
             stats = {
-                "GamesPlayed": _round(r[16]),
+                "GamesPlayed": r[16],
                 "AverageTOIMinutes": r[17],
-                "Goals": _round(r[18]),
-                "Assists": _round(r[19]),
-                "Points": _round(r[20]),
-                "Shots": _round(r[21]),
-                "PowerPlayPoints": _round(r[23]),
-                "ShortHandedPoints": _round(r[25]),
-                "Blocks": _round(r[26]),
-                "Hits": _round(r[27]),
-                "PenaltyMinutes": _round(r[29]),
+                "Goals": r[18],
+                "Assists": r[19],
+                "Points": r[20],
+                "Shots": r[21],
+                "PowerPlayPoints": r[23],
+                "ShortHandedPoints": r[25],
+                "Blocks": r[26],
+                "Hits": r[27],
+                "PenaltyMinutes": r[29],
                 "FaceoffWinPct": r[33],
             }
         yield {

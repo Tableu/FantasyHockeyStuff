@@ -3,6 +3,12 @@ goalies). No shorthanded-points or faceoff-win-percentage columns are provided (
 in the sheet at all), so those stay NULL for this source. Goalie games played comes from
 'GS' (games started) since 'GP' is blank on goalie rows.
 
+Every counting stat is read as a float, not rounded to an int -- this source genuinely
+projects several of them (and goalie Shutouts) to fractional precision (e.g. A=29.9,
+SOG=156.5, HIT=210.3, SO=1.1), and Projections.SkaterProjections/GoalieProjections' matching
+columns are DECIMAL for exactly this reason. Rounding here would silently throw that
+precision away before it ever reached the database.
+
 Previously imported under the source name "All Points League" and read from a since-renamed
 file (all_pts_league.csv, no longer present in Sheets/) -- same site, same column layout,
 just renamed for consistency with the workbook's own "Dailyfaceoff" tab.
@@ -14,10 +20,6 @@ from pathlib import Path
 FILENAME = "dailyfaceoff espn.csv"
 
 
-def _to_int(value):
-    return int(round(float(value))) if value not in (None, "") else None
-
-
 def _to_float(value):
     return float(value) if value not in (None, "") else None
 
@@ -27,13 +29,13 @@ def rows(sheets_dir: Path):
         for r in csv.DictReader(f):
             is_goalie = r["Pos"] == "G"
             if is_goalie:
-                gs, ga, sv = _to_int(r["GS"]), _to_int(r["GA"]), _to_int(r["SV"])
+                gs, ga, sv = _to_float(r["GS"]), _to_float(r["GA"]), _to_float(r["SV"])
                 stats = {
                     "GamesPlayed": gs,
-                    "Wins": _to_int(r["W"]),
-                    "Losses": _to_int(r["L"]),
-                    "OvertimeLosses": _to_int(r["T/O"]),
-                    "Shutouts": _to_int(r["SO"]),
+                    "Wins": _to_float(r["W"]),
+                    "Losses": _to_float(r["L"]),
+                    "OvertimeLosses": _to_float(r["T/O"]),
+                    "Shutouts": _to_float(r["SO"]),
                     "SavePercentage": _to_float(r["SV%"]),
                     "GoalsAgainstAverage": _to_float(r["GAA"]),
                     "GamesStarted": gs,
@@ -44,20 +46,20 @@ def rows(sheets_dir: Path):
                 }
             else:
                 stats = {
-                    "GamesPlayed": _to_int(r["GP"]),
-                    "Goals": _to_int(r["G"]),
-                    "Assists": _to_int(r["A"]),
-                    "Points": _to_int(r["PTS"]),
-                    "PowerPlayPoints": _to_int(r["PPP"]),
-                    "Shots": _to_int(r["SOG"]),
-                    "Hits": _to_int(r["HIT"]),
-                    "Blocks": _to_int(r["BLK"]),
-                    "PenaltyMinutes": _to_int(r["PIM"]),
+                    "GamesPlayed": _to_float(r["GP"]),
+                    "Goals": _to_float(r["G"]),
+                    "Assists": _to_float(r["A"]),
+                    "Points": _to_float(r["PTS"]),
+                    "PowerPlayPoints": _to_float(r["PPP"]),
+                    "Shots": _to_float(r["SOG"]),
+                    "Hits": _to_float(r["HIT"]),
+                    "Blocks": _to_float(r["BLK"]),
+                    "PenaltyMinutes": _to_float(r["PIM"]),
                     "AverageTOIMinutes": _to_float(r["ATOI"]),
-                    "PlusMinus": _to_int(r["(+/-)"]),
-                    "PowerPlayGoals": _to_int(r["PPG"]),
-                    "PowerPlayAssists": _to_int(r["PPA"]),
-                    "FaceoffWins": _to_int(r["FOW"]),
+                    "PlusMinus": _to_float(r["(+/-)"]),
+                    "PowerPlayGoals": _to_float(r["PPG"]),
+                    "PowerPlayAssists": _to_float(r["PPA"]),
+                    "FaceoffWins": _to_float(r["FOW"]),
                 }
             yield {
                 "raw_name": r["Player"],

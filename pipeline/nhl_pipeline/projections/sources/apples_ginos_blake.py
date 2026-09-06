@@ -7,6 +7,11 @@ same header text (G, A, PTS, PPP, SOG, HIT, BLK, PIM, S%, ATOI), so header_map k
 first occurrence of each name, which lands on the real raw-stat block. No Y! Pos values are
 usable (every row reads '#REF!', a broken formula in the source file) and no FOW/FOL/+/-/
 PPG/PPA columns exist at all, so those stay unset for this source.
+
+Every counting stat is read as a float, not rounded to an int -- this source genuinely
+projects them to fractional precision (e.g. Nathan MacKinnon: G=50.4, A=74.4, PTS=124.8),
+and Projections.SkaterProjections' matching columns are DECIMAL for exactly this reason.
+Rounding here would silently throw that precision away before it ever reached the database.
 """
 
 from pathlib import Path
@@ -17,10 +22,6 @@ FILENAME = "Apples & Ginos 2026-27 NHL Skater Projections - Blake.xlsx"
 SHEET = "Blakes Projections"
 HEADER_ROW = 7
 FIRST_DATA_ROW = 8
-
-
-def _to_int(value):
-    return int(round(float(value))) if value not in (None, "") else None
 
 
 def _to_float(value):
@@ -53,15 +54,15 @@ def rows(sheets_dir: Path):
             "team_raw": get(r, "Team"),
             "is_goalie": False,
             "stats": {
-                "GamesPlayed": _to_int(get(r, "GP")),
-                "Goals": _to_int(get(r, "G")),
-                "Assists": _to_int(get(r, "A")),
-                "Points": _to_int(get(r, "PTS")),
-                "PowerPlayPoints": _to_int(get(r, "PPP")),
-                "Shots": _to_int(get(r, "SOG")),
-                "Hits": _to_int(get(r, "HIT")),
-                "Blocks": _to_int(get(r, "BLK")),
-                "PenaltyMinutes": _to_int(get(r, "PIM")),
+                "GamesPlayed": _to_float(get(r, "GP")),
+                "Goals": _to_float(get(r, "G")),
+                "Assists": _to_float(get(r, "A")),
+                "Points": _to_float(get(r, "PTS")),
+                "PowerPlayPoints": _to_float(get(r, "PPP")),
+                "Shots": _to_float(get(r, "SOG")),
+                "Hits": _to_float(get(r, "HIT")),
+                "Blocks": _to_float(get(r, "BLK")),
+                "PenaltyMinutes": _to_float(get(r, "PIM")),
                 "AverageTOIMinutes": _to_float(get(r, "ATOI")),
             },
         }

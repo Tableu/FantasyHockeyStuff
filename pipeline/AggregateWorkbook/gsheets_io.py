@@ -31,6 +31,7 @@ import datetime
 import logging
 import re
 import time
+from decimal import Decimal
 from pathlib import Path
 
 import gspread
@@ -45,9 +46,16 @@ DEFAULT_CREDENTIALS_PATH = Path(__file__).parent / "googleSheetsCredentials.json
 def _coerce(value):
     """Serializes datetime.date/datetime to an ISO string so USER_ENTERED reliably parses
     them as real dates regardless of spreadsheet locale (Sheets values are plain JSON
-    scalars -- python date objects aren't one)."""
+    scalars -- python date objects aren't one). Also widens decimal.Decimal (what pyodbc
+    hands back for any DECIMAL/NUMERIC column, e.g. Projections.SkaterProjections' counting
+    stats now that they hold fractional per-source projections) to float -- Decimal isn't
+    JSON-serializable, so passing one through untouched doesn't silently mis-render, it
+    throws inside values_batch_update at save() time, potentially after everything else this
+    run wrote has already gone out."""
     if isinstance(value, (datetime.datetime, datetime.date)):
         return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
     return value
 
 

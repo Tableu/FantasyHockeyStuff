@@ -1,7 +1,7 @@
 """Apples & Ginos 2026-27 NHL Skater Projections - Nate -- same layout as
 apples_ginos_blake.py (see that module's docstring for the header-collision/broken-Pos/
-missing-category details); only the filename and sheet name differ. Filename genuinely
-starts with an underscore in Sheets/, not a typo introduced here.
+missing-category/fractional-counting-stat details); only the filename and sheet name differ.
+Filename genuinely starts with an underscore in Sheets/, not a typo introduced here.
 """
 
 from pathlib import Path
@@ -12,10 +12,6 @@ FILENAME = "_Apples & Ginos 2026-27 NHL Skater Projections - Nate.xlsx"
 SHEET = "Nates Projections"
 HEADER_ROW = 7
 FIRST_DATA_ROW = 8
-
-
-def _to_int(value):
-    return int(round(float(value))) if value not in (None, "") else None
 
 
 def _to_float(value):
@@ -48,15 +44,15 @@ def rows(sheets_dir: Path):
             "team_raw": get(r, "Team"),
             "is_goalie": False,
             "stats": {
-                "GamesPlayed": _to_int(get(r, "GP")),
-                "Goals": _to_int(get(r, "G")),
-                "Assists": _to_int(get(r, "A")),
-                "Points": _to_int(get(r, "PTS")),
-                "PowerPlayPoints": _to_int(get(r, "PPP")),
-                "Shots": _to_int(get(r, "SOG")),
-                "Hits": _to_int(get(r, "HIT")),
-                "Blocks": _to_int(get(r, "BLK")),
-                "PenaltyMinutes": _to_int(get(r, "PIM")),
+                "GamesPlayed": _to_float(get(r, "GP")),
+                "Goals": _to_float(get(r, "G")),
+                "Assists": _to_float(get(r, "A")),
+                "Points": _to_float(get(r, "PTS")),
+                "PowerPlayPoints": _to_float(get(r, "PPP")),
+                "Shots": _to_float(get(r, "SOG")),
+                "Hits": _to_float(get(r, "HIT")),
+                "Blocks": _to_float(get(r, "BLK")),
+                "PenaltyMinutes": _to_float(get(r, "PIM")),
                 "AverageTOIMinutes": _to_float(get(r, "ATOI")),
             },
         }
