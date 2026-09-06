@@ -189,6 +189,24 @@ class CompatWorksheet:
         self._gs.unmerge_cells(range_str)
         self._merges = [r for r in self._merges if r != range_str]
 
+    def _ensure_grid_size(self, last_row, last_col):
+        """Every "fired immediately" call below (set_number_format, set_data_validation,
+        set_cell_format, update_borders) targets the sheet's live grid directly through the
+        Sheets API, unlike value writes -- those are staged in _pending and grown by
+        wb.save()'s _grow_sheets_as_needed right before flushing. A fired-immediately range
+        past the sheet's CURRENT dimensions is instead rejected outright ("Range ... exceeds
+        grid limits"), confirmed empirically when a newly-added projection source widened
+        AllProjections_S past its previous column count before this existed. Called by each
+        of those methods so a widening/lengthening rebuild grows the sheet on first touch
+        instead of erroring mid-run."""
+        cur_rows, cur_cols = self._gs.row_count, self._gs.col_count
+        if last_row > cur_rows or last_col > cur_cols:
+            new_rows, new_cols = max(last_row, cur_rows), max(last_col, cur_cols)
+            self._gs.resize(rows=new_rows, cols=new_cols)
+            log.info("Grew '%s' to %d rows x %d cols", self.title, new_rows, new_cols)
+            self._max_row = max(self._max_row, new_rows)
+            self._max_col = max(self._max_col, new_cols)
+
     def set_number_format(self, first_row, first_col, last_row, last_col, pattern):
         """Applies a NUMBER format (e.g. "0.00") to a rectangular range, fired immediately
         like delete_cols/unmerge_cells above rather than staged with the value writes --
@@ -200,6 +218,7 @@ class CompatWorksheet:
         format at all in RESULT despite the template having one, apparently lost somewhere
         in this workbook's history) -- callers that only ever fill an already-correctly-
         formatted template range don't need this."""
+        self._ensure_grid_size(last_row, last_col)
         self._gs.spreadsheet.batch_update({"requests": [{
             "repeatCell": {
                 "range": {
@@ -221,6 +240,7 @@ class CompatWorksheet:
         called fresh every run with the CURRENT player-name range instead of trusting
         whatever validation rule happened to survive from before). Fired immediately, like
         set_number_format above, since values.update never touches validation rules."""
+        self._ensure_grid_size(row, col)
         self._gs.spreadsheet.batch_update({"requests": [{
             "setDataValidation": {
                 "range": {
@@ -243,6 +263,7 @@ class CompatWorksheet:
         touches format). `fields` is the usual Sheets API field mask, e.g.
         "backgroundColor,textFormat.bold" -- only pass what you're actually setting, since an
         empty/unset key isn't the same as "leave whatever was already there alone"."""
+        self._ensure_grid_size(last_row, last_col)
         self._gs.spreadsheet.batch_update({"requests": [{
             "repeatCell": {
                 "range": {
@@ -264,6 +285,7 @@ class CompatWorksheet:
         plus one shared inner grid, which is also how the Sheets UI itself presents border
         options). Keys: top/bottom/left/right/innerHorizontal/innerVertical, each either None
         (leave that edge alone) or a {"style": "SOLID"|"SOLID_MEDIUM"|..., "width": int} dict."""
+        self._ensure_grid_size(last_row, last_col)
         request = {
             "range": {
                 "sheetId": self.sheet_id,

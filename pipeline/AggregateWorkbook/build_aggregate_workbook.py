@@ -96,11 +96,10 @@ SEASON_NHL_ID = 20262027
 # rebuild_source_check, rebuild_source_comparison, rebuild_all_projections,
 # rebuild_misc_source_weights) already reads these three names generically -- none of them
 # needed to change for this to become database-driven instead of a fixed list.
-# Dom (The Athletic)'s export -- imported, not ready to blend in yet (per user instruction).
-# Both names covered defensively: SourceID 4's SourceName changed from "Fantrax" to "Dom"
-# (same row, same Description) mid-development, so it isn't safe to assume which one is
-# current by the time this runs again.
-DB_SOURCE_EXCLUDE = {"Fantrax", "Dom"}
+# "Fantrax" is SourceID 4's old SourceName, before it was renamed to "Dom" mid-development
+# (same row, same Description) -- kept excluded defensively in case that old name ever
+# resurfaces, even though Dom itself is now blended in like any other source.
+DB_SOURCE_EXCLUDE = {"Fantrax"}
 ACTIVE_SOURCES = []
 DB_EXPORTED_SOURCES = set()
 ACTIVE_SOURCE_SHEETS = []
@@ -404,9 +403,9 @@ def load_master_data(cursor) -> dict:
     }
 
     # Fantasy-PLATFORM (Yahoo/Fantrax/ESPN/Fleaflicker the apps players draft on, Fantasy.
-    # PlayerPositions/PlayerADP) eligibility/ADP -- unrelated to Dom's excluded stat-projection
-    # source above (see DB_SOURCE_EXCLUDE) despite the name collision with its former
-    # SourceName; feeds Positions!D/E/F/G and ADPYahoo/ADPFantrax, both kept.
+    # PlayerPositions/PlayerADP) eligibility/ADP -- unrelated to the "Fantrax" stat-projection
+    # source excluded above (see DB_SOURCE_EXCLUDE) despite the name collision with Dom's
+    # former SourceName; feeds Positions!D/E/F/G and ADPYahoo/ADPFantrax, both kept.
     master["primary_pos"] = _primary_positions(cursor, display_names)
     master["yahoo_platform_pos"] = _platform_positions(cursor, "Yahoo", display_names)
     master["fantrax_platform_pos"] = _platform_positions(cursor, "Fantrax", display_names)
@@ -526,11 +525,26 @@ def ensure_raw_source_sheet(wb, title):
     formatting at all (unlike every sheet copyTo'd in from a template, which brings its
     template formatting along automatically), and this is the only thing that ever sets it.
     Confirmed live as a real gap, not hypothetical: Lineup Experts and Import 1/2/3 (all
-    created this way, none ever copied from a template) had no formatting whatsoever."""
+    created this way, none ever copied from a template) had no formatting whatsoever.
+
+    The scaffold-formula block below (A1/B1 plus every row's A/B NO-MATCH-check formulas) is
+    keyed off A1 being genuinely empty, not off whether the sheet already existed -- a sheet
+    can exist with no scaffold at all if add_worksheet (fired immediately) succeeded but the
+    process died before wb.save() flushed the cell writes that were supposed to follow it in
+    the same run (confirmed live: a later run crashed partway through -- unrelated to this
+    function -- after add_worksheet had already created Dom/Kubota Hockey/Scott Cullen's
+    sheets but before their scaffold formulas were ever sent; the next run then found those
+    titles already in wb.sheetnames and skipped writing them, permanently. Since
+    ProjXNames/ProjXCats point at column A itself, a scaffold-less sheet's MATCH lookups in
+    AllProjections_S/G fail for every player via IFERROR -- not an error, just silently blank
+    -- so the source LOOKS imported but contributes nothing to any blended value.) Checking
+    A1 instead of sheet existence makes this self-healing on the very next run instead of a
+    silent, permanent gap."""
     if title in wb.sheetnames:
         ws = wb[title]
     else:
         ws = wb.add_worksheet(title, rows=RAW_SOURCE_SCAFFOLD_ROWS, cols=2 + len(RAW_SOURCE_HEADERS))
+    if not ws.cell(row=1, column=1).value:
         ws.cell(row=1, column=1, value=(
             '=COUNTA(C2:C)&" PLAYERS"&CHAR(10)&COUNTIFS(A2:A,"<>NO MATCH",A2:A,"?*")&" ON MASTER"'
         ))
@@ -543,7 +557,7 @@ def ensure_raw_source_sheet(wb, title):
             ws.cell(row=r, column=2, value=(
                 f'=IFNA(IF(COUNTIF(NamesMasterList,C{r}),1,VLOOKUP(C{r},fixnames,2,FALSE)),)'
             ))
-        log.info("%s: created new source sheet (RESULT never had this tab before)", title)
+        log.info("%s: (re)built missing scaffold formulas", title)
     for i, h in enumerate(RAW_SOURCE_HEADERS):
         ws.cell(row=1, column=3 + i, value=h)
 
@@ -556,6 +570,18 @@ def ensure_raw_source_sheet(wb, title):
         2, 1, RAW_SOURCE_SCAFFOLD_ROWS, last_col,
         {"textFormat": {"fontFamily": "Calibri", "fontSize": 11}}, "textFormat",
     )
+    # Reset every data column's NUMBER format every run, same reasoning as the header text and
+    # basic text formatting above -- fill_source_sheet only ever writes cell VALUES (see
+    # write_row), so whatever numberFormat a physical column happened to carry from this
+    # sheet's pre-unification history (or, for a sheet add_worksheet just created, no format at
+    # all) sticks around indefinitely and silently misrenders correct data. Confirmed live: on
+    # Apples & Ginos - Blake/Nate, the physical column PPP now lands in still carried a
+    # leftover PERCENT format from whatever stat used to sit there, so a genuine PPP value of
+    # 37 displayed as "3700.00%"; DtZ's ATOI column was similarly stuck at CURRENCY ("$22").
+    # Player/Team/Pos (the first three of these columns) are text and unaffected by a NUMBER
+    # format either way, so applying this to the whole range uniformly is simpler than
+    # carving out exceptions.
+    ws.set_number_format(2, 3, RAW_SOURCE_SCAFFOLD_ROWS, last_col, "0.00")
     return ws
 
 
