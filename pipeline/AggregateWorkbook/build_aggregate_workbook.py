@@ -580,8 +580,13 @@ def ensure_raw_source_sheet(wb, title):
     # 37 displayed as "3700.00%"; DtZ's ATOI column was similarly stuck at CURRENCY ("$22").
     # Player/Team/Pos (the first three of these columns) are text and unaffected by a NUMBER
     # format either way, so applying this to the whole range uniformly is simpler than
-    # carving out exceptions.
+    # carving out exceptions. SV% is the one column that needs its own override, same as
+    # AllProjections_S/G's AP_NUMBER_FORMAT_OVERRIDES below -- confirmed live: "0.00" rounded
+    # a real value like 0.891 down to a displayed "0.89", masking exactly the third decimal
+    # that actually distinguishes one goalie's save percentage from another's.
     ws.set_number_format(2, 3, RAW_SOURCE_SCAFFOLD_ROWS, last_col, "0.00")
+    svpct_col = 3 + RAW_SOURCE_HEADERS.index("SV%")
+    ws.set_number_format(2, svpct_col, RAW_SOURCE_SCAFFOLD_ROWS, svpct_col, "0.000")
     return ws
 
 
