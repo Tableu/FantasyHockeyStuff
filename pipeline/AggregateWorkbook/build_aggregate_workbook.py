@@ -877,6 +877,12 @@ def rebuild_player_values(ws, all_names, goalie_names, last_col_letter,
     ref_offset = last_col + 20
     skater_template = _read_template_row(ws, skater_ref_row, ref_offset, last_col)
     goalie_template = _read_template_row(ws, goalie_ref_row, ref_offset, last_col)
+    # The reference block is a live formula copy meant to be edited, not player-facing data --
+    # its own placeholder $D1/$D2 example "player" is literally the text "PLAYER", not a real
+    # name, so its lookups produce nonsense (e.g. matching VorpAll's own header row) that would
+    # otherwise be visible to anyone who scrolls this far right. Hidden every run rather than
+    # once, so it stays hidden even after a from-scratch bootstrap re-copies this sheet in.
+    ws.hide_columns(1 + ref_offset, last_col + ref_offset)
 
     first_row = 3
     last_row = first_row + len(all_names) - 1

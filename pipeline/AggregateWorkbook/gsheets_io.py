@@ -43,6 +43,36 @@ log = logging.getLogger("gsheets_io")
 DEFAULT_CREDENTIALS_PATH = Path(__file__).parent / "googleSheetsCredentials.json"
 
 
+def _call_with_retry(fn, *args, max_retries=6, **kwargs):
+    """Every "fired immediately" structural/formatting call in this module (set_number_format,
+    hide_columns, set_defined_name, ...) hits the Sheets API directly rather than batching with
+    the value writes -- a full run easily makes 100+ of these (formatting alone is ~6 calls per
+    raw source sheet), which trips Google's per-minute write-request quota well before the run
+    is done. A bare 429 used to abort the entire run outright, discarding everything already
+    computed and forcing a full from-scratch retry (confirmed live, repeatedly, while wiring up
+    new sources -- retries kept landing at a *later* point each time, meaning it's this run's
+    own request volume tripping it, not leftover quota from a previous attempt). Retries with
+    backoff instead -- Retry-After from the response if Google provides one, else 5/10/20/...
+    doubling up to 60s -- so a mid-run quota trip pauses and resumes instead of losing the run."""
+    delay = 5
+    for attempt in range(max_retries):
+        try:
+            return fn(*args, **kwargs)
+        except APIError as exc:
+            status = getattr(exc.response, "status_code", None)
+            if status != 429 or attempt == max_retries - 1:
+                raise
+            wait = delay
+            try:
+                wait = int(exc.response.headers.get("Retry-After", delay))
+            except (AttributeError, TypeError, ValueError):
+                pass
+            log.warning("Sheets API write quota hit (429) -- retrying in %ds (attempt %d/%d)",
+                        wait, attempt + 1, max_retries)
+            time.sleep(wait)
+            delay = min(delay * 2, 60)
+
+
 def _coerce(value):
     """Serializes datetime.date/datetime to an ISO string so USER_ENTERED reliably parses
     them as real dates regardless of spreadsheet locale (Sheets values are plain JSON
@@ -172,6 +202,24 @@ class CompatWorksheet:
         self._shift_cache(axis=0, at=idx, amount=amount)
         self._max_row = max(self._max_row - amount, 0)
 
+    def hide_columns(self, first_col, last_col):
+        """Marks [first_col, last_col] hiddenByUser -- fired immediately like the other
+        dimension/format calls above (this is sheet-structure, not a cell value or format,
+        so values.update/set_cell_format can't express it either). Idempotent: re-hiding an
+        already-hidden range is a no-op, so callers can just call this unconditionally every
+        run rather than checking current visibility first."""
+        self._ensure_grid_size(1, last_col)
+        _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": [{
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": self.sheet_id, "dimension": "COLUMNS",
+                    "startIndex": first_col - 1, "endIndex": last_col,
+                },
+                "properties": {"hiddenByUser": True},
+                "fields": "hiddenByUser",
+            }
+        }]})
+
     def _shift_cache(self, axis, at, amount):
         for store in (self._cache, self._pending):
             shifted = {}
@@ -219,7 +267,7 @@ class CompatWorksheet:
         in this workbook's history) -- callers that only ever fill an already-correctly-
         formatted template range don't need this."""
         self._ensure_grid_size(last_row, last_col)
-        self._gs.spreadsheet.batch_update({"requests": [{
+        _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": [{
             "repeatCell": {
                 "range": {
                     "sheetId": self.sheet_id,
@@ -241,7 +289,7 @@ class CompatWorksheet:
         whatever validation rule happened to survive from before). Fired immediately, like
         set_number_format above, since values.update never touches validation rules."""
         self._ensure_grid_size(row, col)
-        self._gs.spreadsheet.batch_update({"requests": [{
+        _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": [{
             "setDataValidation": {
                 "range": {
                     "sheetId": self.sheet_id,
@@ -264,7 +312,7 @@ class CompatWorksheet:
         "backgroundColor,textFormat.bold" -- only pass what you're actually setting, since an
         empty/unset key isn't the same as "leave whatever was already there alone"."""
         self._ensure_grid_size(last_row, last_col)
-        self._gs.spreadsheet.batch_update({"requests": [{
+        _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": [{
             "repeatCell": {
                 "range": {
                     "sheetId": self.sheet_id,
@@ -296,7 +344,7 @@ class CompatWorksheet:
         for edge, spec in borders.items():
             if spec is not None:
                 request[edge] = spec
-        self._gs.spreadsheet.batch_update({"requests": [{"updateBorders": request}]})
+        _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": [{"updateBorders": request}]})
 
 
 class CompatWorkbook:
@@ -327,7 +375,7 @@ class CompatWorkbook:
         caller that needs a sheet the template doesn't carry a copy of at all (see
         ensure_raw_source_sheet in build_aggregate_workbook.py) -- ordinary missing-sheet
         bootstrapping from a template still goes through open_result_workbook."""
-        resp = self._sh.batch_update({"requests": [{
+        resp = _call_with_retry(self._sh.batch_update, {"requests": [{
             "addSheet": {"properties": {
                 "title": title,
                 "gridProperties": {"rowCount": rows, "columnCount": cols},
@@ -353,8 +401,8 @@ class CompatWorkbook:
         CHUNK = 2000
         for i in range(0, len(data), CHUNK):
             batch = data[i : i + CHUNK]
-            self._sh.values_batch_update(
-                {"valueInputOption": "USER_ENTERED", "data": batch}
+            _call_with_retry(
+                self._sh.values_batch_update, {"valueInputOption": "USER_ENTERED", "data": batch}
             )
             log.info("Flushed %d range(s) (%d/%d)", len(batch), min(i + CHUNK, len(data)), len(data))
 
@@ -563,7 +611,7 @@ def _prune_dropped_sheets(result_sh, drop_sheets):
         for nr in meta.get("namedRanges", [])
         if nr.get("range", {}).get("sheetId") in removed_ids
     ]
-    result_sh.batch_update({"requests": requests})
+    _call_with_retry(result_sh.batch_update, {"requests": requests})
     log.info(
         "Pruned %d sheet(s) now in drop_sheets but still present in RESULT: %s",
         len(to_remove), ", ".join(s["properties"]["title"] for s in to_remove),
@@ -582,7 +630,7 @@ def _bootstrap_sheets(source_sh, result_sh, source_props_by_title, keep_sheets, 
                 "fields": "title",
             }
         })
-    result_sh.batch_update({"requests": rename_requests})
+    _call_with_retry(result_sh.batch_update, {"requests": rename_requests})
     log.info("Copied and renamed %d sheet(s)", len(missing))
 
     try:
@@ -636,7 +684,7 @@ def _bootstrap_named_ranges(source_meta, wb, keep_sheets):
     CHUNK = 300
     for i in range(0, len(requests), CHUNK):
         batch = requests[i : i + CHUNK]
-        resp = wb._sh.batch_update({"requests": batch})
+        resp = _call_with_retry(wb._sh.batch_update, {"requests": batch})
         for name, reply in zip(names_in_order[i : i + CHUNK], resp["replies"]):
             wb._named_range_ids[name] = reply["addNamedRange"]["namedRange"]["namedRangeId"]
     log.info("Bootstrapped %d named range(s)", len(requests))
@@ -699,8 +747,8 @@ def _scan_and_fix_ref_errors_once(source_sh, result_sh, copied_titles):
         return 0
     CHUNK = 2000
     for i in range(0, len(data), CHUNK):
-        result_sh.values_batch_update(
-            {"valueInputOption": "USER_ENTERED", "data": data[i : i + CHUNK]}
+        _call_with_retry(
+            result_sh.values_batch_update, {"valueInputOption": "USER_ENTERED", "data": data[i : i + CHUNK]}
         )
     return len(data)
 
@@ -738,8 +786,8 @@ def _repair_ghost_sheet_refs(source_sh, result_sh, copied_titles):
         return 0
     CHUNK = 2000
     for i in range(0, len(data), CHUNK):
-        result_sh.values_batch_update(
-            {"valueInputOption": "USER_ENTERED", "data": data[i : i + CHUNK]}
+        _call_with_retry(
+            result_sh.values_batch_update, {"valueInputOption": "USER_ENTERED", "data": data[i : i + CHUNK]}
         )
     log.info("Re-pasted %d formula cell(s) with direct cross-sheet references (ghost-reference repair)", len(data))
     return len(data)
@@ -759,7 +807,7 @@ def _cleanup_shadow_named_ranges(result_sh, legit_names):
     requests = [{"deleteNamedRange": {"namedRangeId": nr["namedRangeId"]}} for nr in shadow]
     CHUNK = 300
     for i in range(0, len(requests), CHUNK):
-        result_sh.batch_update({"requests": requests[i : i + CHUNK]})
+        _call_with_retry(result_sh.batch_update, {"requests": requests[i : i + CHUNK]})
     log.info("Removed %d shadow named range(s) created as a copyTo side effect", len(shadow))
 
 
@@ -816,7 +864,7 @@ def set_defined_names(wb, mapping):
     CHUNK = 300
     for i in range(0, len(requests), CHUNK):
         batch = requests[i : i + CHUNK]
-        resp = wb._sh.batch_update({"requests": batch})
+        resp = _call_with_retry(wb._sh.batch_update, {"requests": batch})
         for req, reply in zip(batch, resp["replies"]):
             if "addNamedRange" in req:
                 name = req["addNamedRange"]["namedRange"]["name"]
