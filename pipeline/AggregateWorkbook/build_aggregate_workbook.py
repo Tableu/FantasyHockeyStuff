@@ -1526,9 +1526,13 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
     project's template was cloned from) after a user reported VORP numbers diverging from a
     second, independently-run copy of that original sheet. That original: for each of C/LW/RW,
     counts how many of the *combined*-forward-pool's top roster_f_name players are eligible at
-    that specific position (K1/L1/M1 here -- the ">= H1" cutoff is an equivalent stand-in for
-    the original's ARRAY_CONSTRAIN-to-top-N approach), then uses (that count + 3) as the rank
-    index into a LARGE() over just that position's own eligible pool (N1/O1/P1) -- the "+3" is
+    that specific position (K1/L1/M1 here, via column Q's tie-broken combined-forward rank --
+    matches the original's ARRAY_CONSTRAIN-to-top-N positional slice exactly, including its
+    tie-break-by-original-order behavior; an earlier ">=$H$1" version of this was *close* but
+    not exact -- ties right at the roster_f_name cutoff can inflate a ">=threshold" count
+    beyond a true top-N slice, confirmed live: it overcounted LW by 1 and shifted that
+    threshold ~0.004), then uses (that count + 3) as the rank index into a LARGE() over just
+    that position's own eligible pool (N1/O1/P1) -- the "+3" is
     a fixed buffer baked into the original, not derived from Settings, kept as-is for fidelity.
     A multi-position player (e.g. "C,RW") is eligible in every group their position string
     contains a letter for -- FIND, not exact match, exactly like add_rank_helpers' own
@@ -1565,13 +1569,20 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
         f'=SUMPRODUCT(LARGE(({gk_cond})*{drange}+(1-({gk_cond}))*-999999,'
         f'MIN(SUMPRODUCT(({gk_cond})*1),70,{roster_g_name}+1)))'
     ))
-    # K/L/M1: how many of the combined-forward-pool's top roster_f_name players (by VAL >=
-    # $H$1, the combined threshold above) are eligible at C/LW/RW respectively -- a multi-
-    # eligible player counts toward more than one of these, matching the original's own
+    # Q3:Q<last_row>: each row's own rank within the combined forward pool (tie-broken by row
+    # order, same convention as every other rank in this file) -- written first since K/L/M1
+    # below need it materialized as a real range to SUMPRODUCT over.
+    qrange = f"$Q$3:$Q${last_row}"
+    for r in range(3, last_row + 1):
+        fwd_rank_r = _group_rank_sumproduct(drange, fwd_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
+        ws.cell(row=r, column=17, value=f'=IF($C{r}="","",IF({fwd_cond.replace(crange, f"$C{r}")},{fwd_rank_r},""))')
+    # K/L/M1: how many of the combined-forward-pool's top roster_f_name players (by that exact
+    # rank, not a VAL threshold -- see docstring) are eligible at C/LW/RW respectively -- a
+    # multi-eligible player counts toward more than one of these, matching the original's own
     # double-counting via ARRAY_CONSTRAIN+COUNTIF.
-    ws.cell(row=1, column=11, value=f'=SUMPRODUCT(({c_cond})*({drange}>=$H$1))')
-    ws.cell(row=1, column=12, value=f'=SUMPRODUCT(({lw_cond})*({drange}>=$H$1))')
-    ws.cell(row=1, column=13, value=f'=SUMPRODUCT(({rw_cond})*({drange}>=$H$1))')
+    ws.cell(row=1, column=11, value=f'=SUMPRODUCT(({c_cond})*({qrange}<={roster_f_name})*ISNUMBER({qrange}))')
+    ws.cell(row=1, column=12, value=f'=SUMPRODUCT(({lw_cond})*({qrange}<={roster_f_name})*ISNUMBER({qrange}))')
+    ws.cell(row=1, column=13, value=f'=SUMPRODUCT(({rw_cond})*({qrange}<={roster_f_name})*ISNUMBER({qrange}))')
     # N/O/P1: the (K/L/M1 + 3)-th largest VAL within each position's own eligible pool --
     # the "+3" buffer is the original's, not ours (see docstring).
     ws.cell(row=1, column=14, value=(
