@@ -1166,6 +1166,19 @@ GOALIE_AP_CATEGORIES = [
 ]
 GOALIE_AP_CONDITIONAL_TARGETS = {}
 
+# Every blended/zscore/per-source cell rebuild_all_projections writes is a formula
+# (values.update never touches format -- see set_number_format's docstring), so it silently
+# inherits whatever numberFormat that cell already had from this sheet's history. Z-scores in
+# particular are usually small (-3..3) decimals clustered near 0, so a stale integer "0"
+# format doesn't just lose precision, it rounds most of them straight to displayed "0" --
+# empirically the actual shape of the "everything's rounded to zero" bug reported against
+# AllProjections_S. Blended values are weighted averages across sources and non-integer for
+# the same reason. Applied uniformly per category (one column block is one category end to
+# end, so its dtype is uniform) except SV%, which needs 3 decimals to be readable at all
+# (.905 vs .91 both look "fine" rounded, but goalie SV% is conventionally quoted to thousandths).
+DEFAULT_AP_NUMBER_FORMAT = "0.00"
+AP_NUMBER_FORMAT_OVERRIDES = {"SV%": "0.000"}
+
 _ZSCORE_SELF_REF = re.compile(r"^=if\(([A-Z]+)\$3,")
 
 
@@ -1308,6 +1321,10 @@ def rebuild_all_projections(wb, sheet_name, categories, conditional_targets):
                     f'MAX(0,STANDARDIZE({blended_L}{r},{blended_L}$1,{blended_L}$2)),'
                     f'STANDARDIZE({blended_L}{r},{blended_L}$1,{blended_L}$2)))'
                 ))
+
+        last_block_col = src_last_col if has_sources else (zscore_col if has_zscore else blended_col)
+        fmt = AP_NUMBER_FORMAT_OVERRIDES.get(cat, DEFAULT_AP_NUMBER_FORMAT)
+        ws.set_number_format(1, blended_col, last_row, last_block_col, fmt)
 
     return new_last_col
 
