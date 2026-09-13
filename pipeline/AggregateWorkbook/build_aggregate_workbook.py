@@ -889,7 +889,12 @@ def rebuild_player_values(ws, all_names, goalie_names, last_col_letter,
     clear_data_rows(ws, first_row, max(ws.max_row, last_row), first_col=1, last_col=last_col)
     r = first_row
     for name in all_names:
-        ws.cell(row=r, column=4, value=name)  # D PLAYER
+        # E (was D): PLAYER shifted one column right when the injury-risk checkbox was
+        # inserted between the favorite and TAKEN columns -- see rebuild_player_values'
+        # callers. This literal is easy to miss since nothing else in this function reads it
+        # back out (the template's own D/E-relative formulas self-heal via the live column
+        # insert instead), but this write itself is never anything but a bare column number.
+        ws.cell(row=r, column=5, value=name)  # E PLAYER
         is_goalie = name in goalie_set
         template = goalie_template if is_goalie else skater_template
         from_row = goalie_ref_row if is_goalie else skater_ref_row
@@ -1785,11 +1790,14 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
         ws.cell(row=1, column=thr_col, value=thr_f)
     ws.hide_columns(18, 42)
 
+    # E/F/G/H (was D/E/F/G): PLAYER/TEAM/POS/VAL each shifted one column right on both
+    # Player Values sheets when the injury-risk checkbox was inserted between the favorite
+    # and TAKEN columns.
     for r in range(3, last_row + 1):
-        ws.cell(row=r, column=1, value=f"='{source_sheet}'!D{r}")
-        ws.cell(row=r, column=2, value=f"='{source_sheet}'!E{r}")
-        ws.cell(row=r, column=3, value=f"='{source_sheet}'!F{r}")
-        ws.cell(row=r, column=4, value=f"='{source_sheet}'!G{r}")
+        ws.cell(row=r, column=1, value=f"='{source_sheet}'!E{r}")
+        ws.cell(row=r, column=2, value=f"='{source_sheet}'!F{r}")
+        ws.cell(row=r, column=3, value=f"='{source_sheet}'!G{r}")
+        ws.cell(row=r, column=4, value=f"='{source_sheet}'!H{r}")
         c_r = f'ISNUMBER(FIND("C",$C{r}))'
         lw_r = f'ISNUMBER(FIND("L",$C{r}))'
         rw_r = f'ISNUMBER(FIND("R",$C{r}))'
@@ -1859,10 +1867,11 @@ def rebuild_clean_cat(ws, last_pv_row):
     first_hidden, last_hidden = 4, 4 + (last_pv_row - 3)
     ws.cell(row=2, column=1, value="CATEGORIES")
     ws.cell(row=2, column=11, value="FORWARDS")
-    # F/G ("M2"/"L2", was "L2"/"K2"): POG/OFF shifted one column right (M/L instead of L/K)
-    # when TIER was inserted into Player Values - Cats right after PRNK -- see
-    # rebuild_player_values' callers.
-    header_src = {"A": "A2", "B": "D2", "C": "G2", "D": "I2", "E": "H2", "F": "M2", "G": "L2"}
+    # B/C/D/E/F/G ("E2"/"H2"/"J2"/"I2"/"N2"/"M2", was "D2"/"G2"/"I2"/"H2"/"M2"/"L2"):
+    # PLAYER/VAL/PRNK/VORP/POG/OFF each shifted one more column right when the injury-risk
+    # checkbox was inserted between the favorite and TAKEN columns on Player Values - Cats,
+    # on top of the shift TIER's own insert already caused.
+    header_src = {"A": "A2", "B": "E2", "C": "H2", "D": "J2", "E": "I2", "F": "N2", "G": "M2"}
     for col, cell in header_src.items():
         ws.cell(row=3, column=ci(col), value=f"='{src}'!{cell}")
     ws.cell(row=3, column=8, value="POS")
@@ -1876,13 +1885,13 @@ def rebuild_clean_cat(ws, last_pv_row):
             f'text(if(mod(\'{src}\'!A{pv},TEAMS)=0,TEAMS,if(mod(\'{src}\'!A{pv},TEAMS)<1,1,'
             f'mod(\'{src}\'!A{pv},TEAMS))),"00"))'
         ))
-        ws.cell(row=r, column=2, value=f"='{src}'!D{pv}&\" - \"&'{src}'!E{pv}&\" - \"&'{src}'!F{pv}")
-        ws.cell(row=r, column=3, value=f"='{src}'!G{pv}")
-        ws.cell(row=r, column=4, value=f"='{src}'!I{pv}")
-        ws.cell(row=r, column=5, value=f"='{src}'!H{pv}")
-        ws.cell(row=r, column=6, value=f"='{src}'!M{pv}")
-        ws.cell(row=r, column=7, value=f"='{src}'!L{pv}")
-        ws.cell(row=r, column=8, value=f"='{src}'!F{pv}")
+        ws.cell(row=r, column=2, value=f"='{src}'!E{pv}&\" - \"&'{src}'!F{pv}&\" - \"&'{src}'!G{pv}")
+        ws.cell(row=r, column=3, value=f"='{src}'!H{pv}")
+        ws.cell(row=r, column=4, value=f"='{src}'!J{pv}")
+        ws.cell(row=r, column=5, value=f"='{src}'!I{pv}")
+        ws.cell(row=r, column=6, value=f"='{src}'!N{pv}")
+        ws.cell(row=r, column=7, value=f"='{src}'!M{pv}")
+        ws.cell(row=r, column=8, value=f"='{src}'!G{pv}")
         ws.cell(row=r, column=9, value=_composite_rank_key(f"$H{r}", f"$C{r}", group_range, val_range, r))
 
     key_range = f"$I${first_hidden}:$I${last_hidden}"
@@ -1915,10 +1924,11 @@ def rebuild_clean_pts(ws, last_pv_row):
     first_hidden, last_hidden = 4, 4 + (last_pv_row - 3)
     ws.cell(row=2, column=1, value="POINTS")
     ws.cell(row=2, column=12, value="FORWARDS")
-    # G/H ("N2"/"M2", was "M2"/"L2"): POG/OFF shifted one column right (N/M instead of M/L)
-    # when TIER was inserted into Player Values - Pts right after PRNK -- see
-    # rebuild_player_values' callers.
-    header_src = {"A": "A2", "B": "D2", "C": "G2", "D": "H2", "E": "J2", "F": "I2", "G": "N2", "H": "M2"}
+    # B/C/D/E/F/G/H ("E2"/"H2"/"I2"/"K2"/"J2"/"O2"/"N2", was "D2"/"G2"/"H2"/"J2"/"I2"/"N2"/
+    # "M2"): PLAYER/FanPts/FP-GP/PRNK/VORP/POG/OFF each shifted one more column right when
+    # the injury-risk checkbox was inserted between the favorite and TAKEN columns on
+    # Player Values - Pts, on top of the shift TIER's own insert already caused.
+    header_src = {"A": "A2", "B": "E2", "C": "H2", "D": "I2", "E": "K2", "F": "J2", "G": "O2", "H": "N2"}
     for col, cell in header_src.items():
         ws.cell(row=3, column=ci(col), value=f"='{src}'!{cell}")
     ws.cell(row=3, column=9, value="POS")
@@ -1932,14 +1942,14 @@ def rebuild_clean_pts(ws, last_pv_row):
             f'text(if(mod(\'{src}\'!A{pv},TEAMS)=0,TEAMS,if(mod(\'{src}\'!A{pv},TEAMS)<1,1,'
             f'mod(\'{src}\'!A{pv},TEAMS))),"00"))'
         ))
-        ws.cell(row=r, column=2, value=f"='{src}'!D{pv}&\" - \"&'{src}'!E{pv}&\" - \"&'{src}'!F{pv}")
-        ws.cell(row=r, column=3, value=f"='{src}'!G{pv}")
-        ws.cell(row=r, column=4, value=f"='{src}'!H{pv}")
-        ws.cell(row=r, column=5, value=f"='{src}'!J{pv}")
-        ws.cell(row=r, column=6, value=f"='{src}'!I{pv}")
-        ws.cell(row=r, column=7, value=f"='{src}'!N{pv}")
-        ws.cell(row=r, column=8, value=f"='{src}'!M{pv}")
-        ws.cell(row=r, column=9, value=f"='{src}'!F{pv}")
+        ws.cell(row=r, column=2, value=f"='{src}'!E{pv}&\" - \"&'{src}'!F{pv}&\" - \"&'{src}'!G{pv}")
+        ws.cell(row=r, column=3, value=f"='{src}'!H{pv}")
+        ws.cell(row=r, column=4, value=f"='{src}'!I{pv}")
+        ws.cell(row=r, column=5, value=f"='{src}'!K{pv}")
+        ws.cell(row=r, column=6, value=f"='{src}'!J{pv}")
+        ws.cell(row=r, column=7, value=f"='{src}'!O{pv}")
+        ws.cell(row=r, column=8, value=f"='{src}'!N{pv}")
+        ws.cell(row=r, column=9, value=f"='{src}'!G{pv}")
         ws.cell(row=r, column=10, value=_composite_rank_key(f"$I{r}", f"$C{r}", group_range, val_range, r))
 
     key_range = f"$J${first_hidden}:$J${last_hidden}"
@@ -1980,13 +1990,16 @@ def add_rank_helpers(pv_ws, last_pv_row, first_helper_col_letter, value_col_lett
       [1..6] rank by value_col_letter desc among undrafted players eligible at C/RW/LW/
              multi-position/D/G, in that order
     Returns the list of 7 column letters, in that order."""
+    # $D/$G (was $C/$F): TAKEN and POS each shifted one column right on both Player Values
+    # sheets when the injury-risk checkbox was inserted between the favorite and TAKEN
+    # columns. $A (ADP) is unaffected -- it sits before the insertion point.
     first_col = ci(first_helper_col_letter)
     cols = [cl(first_col + i) for i in range(7)]
     first_pv, last_pv = 3, last_pv_row
     a_r = f"$A${first_pv}:$A${last_pv}"
-    f_r = f"$F${first_pv}:$F${last_pv}"
+    f_r = f"$G${first_pv}:$G${last_pv}"
     v_r = f"${value_col_letter}${first_pv}:${value_col_letter}${last_pv}"
-    c_r = f"$C${first_pv}:$C${last_pv}"
+    c_r = f"$D${first_pv}:$D${last_pv}"
     notaken = f"({c_r}<>TRUE)"
 
     pos_test_range = {
@@ -1998,12 +2011,12 @@ def add_rank_helpers(pv_ws, last_pv_row, first_helper_col_letter, value_col_lett
         6: f'({f_r}="G")',
     }
     pos_test_cell = {
-        1: lambda r: f'ISNUMBER(FIND("C",$F{r}))',
-        2: lambda r: f'ISNUMBER(FIND("R",$F{r}))',
-        3: lambda r: f'ISNUMBER(FIND("L",$F{r}))',
-        4: lambda r: f'ISNUMBER(FIND(",",$F{r}))',
-        5: lambda r: f'($F{r}="D")',
-        6: lambda r: f'($F{r}="G")',
+        1: lambda r: f'ISNUMBER(FIND("C",$G{r}))',
+        2: lambda r: f'ISNUMBER(FIND("R",$G{r}))',
+        3: lambda r: f'ISNUMBER(FIND("L",$G{r}))',
+        4: lambda r: f'ISNUMBER(FIND(",",$G{r}))',
+        5: lambda r: f'($G{r}="D")',
+        6: lambda r: f'($G{r}="G")',
     }
 
     for r in range(first_pv, last_pv + 1):
@@ -2015,13 +2028,13 @@ def add_rank_helpers(pv_ws, last_pv_row, first_helper_col_letter, value_col_lett
             f'+SUMPRODUCT(({cond0})*({a_r}=$A{r})*(ROW({a_r})<{r}))+1'
         )
         pv_ws.cell(row=r, column=first_col, value=(
-            f'=IF($C{r}=TRUE,"",IF($A{r}="","",{rank0}))'
+            f'=IF($D{r}=TRUE,"",IF($A{r}="","",{rank0}))'
         ))
         for i in range(1, 7):
             cond = f'{notaken}*({pos_test_range[i]})'
             rank = _group_rank_sumproduct(v_r, cond, f"${value_col_letter}{r}", v_r, r)
             pv_ws.cell(row=r, column=first_col + i, value=(
-                f'=IF($C{r}=TRUE,"",IF(NOT({pos_test_cell[i](r)}),"",{rank}))'
+                f'=IF($D{r}=TRUE,"",IF(NOT({pos_test_cell[i](r)}),"",{rank}))'
             ))
     return cols
 
@@ -2046,21 +2059,25 @@ def rebuild_available(ws, pv_ws, pv_sheet_name, last_pv_row, value_col_letter, v
         ws.unmerge_cells(str(rng))
     clear_data_rows(ws, 1, max(ws.max_row, 35), first_col=1, last_col=15)
     pv_first, pv_last = 3, last_pv_row
-    # "AO" (was "AN"): Player Values - Pts' own last data column moved from AM to AN when
-    # TIER was inserted after PRNK, which would otherwise put this helper block one column
-    # too close (colliding with Pts' own last column) -- see rebuild_player_values' callers.
-    rank_cols = add_rank_helpers(pv_ws, last_pv_row, "AO", value_col_letter)
+    # "AP" (was "AO"): Player Values - Pts' own last data column moved from AN to AO when
+    # the injury-risk checkbox was inserted between the favorite and TAKEN columns, which
+    # would otherwise put this helper block one column too close (colliding with Pts' own
+    # last column) -- see rebuild_player_values' callers.
+    rank_cols = add_rank_helpers(pv_ws, last_pv_row, "AP", value_col_letter)
 
+    # "E"/"G" (was "D"/"F"): PLAYER/POS each shifted one column right on Player Values when
+    # the injury-risk checkbox was inserted between the favorite and TAKEN columns. "A" (ADP)
+    # is unaffected -- it sits before the insertion point.
     _write_available_block(
         ws, 1, "A", 30, rank_cols[0], pv_sheet_name, pv_first, pv_last,
-        ["A", "D", "F"], ["ADP", "PLAYER", "POS"])
+        ["A", "E", "G"], ["ADP", "PLAYER", "POS"])
 
     pos_blocks = [
         (3, "E", 1, "C"), (3, "K", 2, "RW"),
         (13, "E", 3, "LW"), (13, "K", 4, "MULTI"),
         (23, "E", 5, "D"), (23, "K", 6, "G"),
     ]
-    out_cols = ["D", "F", value_col_letter, vorp_col_letter, "A"]
+    out_cols = ["E", "G", value_col_letter, vorp_col_letter, "A"]
     headers = ["PLAYER", "POS", "VAL", "VORP", "ADP"]
     for anchor_row, anchor_col, rank_idx, label in pos_blocks:
         hdr = list(headers)
@@ -2210,15 +2227,17 @@ if __name__ == "__main__":
     log.info("AllProjections_G: rebuilt, %d categories, ends at column %s", len(GOALIE_AP_CATEGORIES), cl(last_col))
 
     goalie_set = master["goalie_names"]
-    # "AM"/"AN" (was "AL"/"AM"): both sheets grew by one column when TIER was inserted
-    # right after PRNK (Cats: I->J shifted GP/OFF/POG to K/L/M; Pts: J->K shifted them to
-    # L/M/N) -- see the TIER column's own header comment below and CleanCat/CleanPts'
-    # updated column letters, which shifted for the same reason.
+    # "AN"/"AO" (was "AM"/"AN"): both sheets grew by one more column when the injury-risk
+    # checkbox was inserted between the favorite (B) and TAKEN (C) columns -- pushing TAKEN,
+    # PLAYER, TEAM, POS, VAL/FanPts, VORP, PRNK, TIER, GP, OFF, POG, and every category
+    # column one further right, on top of the shift TIER's own insert already caused. See
+    # CleanCat/CleanPts and add_rank_helpers' updated column letters below, which shifted for
+    # the same reason.
     first_row, last_row = rebuild_player_values(
-        wb["Player Values - Cats"], all_names, goalie_set, "AM")
+        wb["Player Values - Cats"], all_names, goalie_set, "AN")
     log.info("Player Values - Cats: rows %d-%d", first_row, last_row)
-    set_defined_name(wb, "RecCats", f"'Player Values - Cats'!$A$2:$H${last_row}")
-    set_defined_name(wb, "ValsAll", f"'Player Values - Cats'!$D$2:$G${last_row}")
+    set_defined_name(wb, "RecCats", f"'Player Values - Cats'!$A$2:$I${last_row}")
+    set_defined_name(wb, "ValsAll", f"'Player Values - Cats'!$E$2:$H${last_row}")
     # VorpAll (A:G on CVals/Vorp) isn't created by this script -- it's a pre-existing
     # template named range Player Values - Cats' PRNK/TIER cells vlookup into -- but its
     # column width now matters (TIER needs column G in range) so it's kept in sync here
@@ -2226,10 +2245,10 @@ if __name__ == "__main__":
     set_defined_name(wb, "VorpAll", f"'CVals/Vorp'!$A$2:$G${last_row}")
 
     first_row, last_row = rebuild_player_values(
-        wb["Player Values - Pts"], all_names, goalie_set, "AN")
+        wb["Player Values - Pts"], all_names, goalie_set, "AO")
     log.info("Player Values - Pts: rows %d-%d", first_row, last_row)
-    set_defined_name(wb, "RecPoints", f"'Player Values - Pts'!$A$2:$I${last_row}")
-    set_defined_name(wb, "FanPtsAll", f"'Player Values - Pts'!$D$2:$G${last_row}")
+    set_defined_name(wb, "RecPoints", f"'Player Values - Pts'!$A$2:$J${last_row}")
+    set_defined_name(wb, "FanPtsAll", f"'Player Values - Pts'!$E$2:$H${last_row}")
     set_defined_name(wb, "PtsVorpAll", f"'FanPts/Vorp'!$A$2:$G${last_row}")
 
     n = refresh_rankings(wb["Rankings"], all_names)
@@ -2265,12 +2284,15 @@ if __name__ == "__main__":
     set_defined_name(wb, "CleanPtsD", f"CleanPts!$T$4:$AA${3 + 260}")
     set_defined_name(wb, "CleanPtsG", f"CleanPts!$AC$4:$AJ${3 + 100}")
 
+    # "H"/"I" and "H"/"J" (was "G"/"H" and "G"/"I"): VAL/FanPts and VORP each shifted one
+    # column right when the injury-risk checkbox was inserted between the favorite and
+    # TAKEN columns.
     rebuild_available(wb["Available - Cats"], wb["Player Values - Cats"],
-                       "Player Values - Cats", last_row, "G", "H")
+                       "Player Values - Cats", last_row, "H", "I")
     log.info("Available - Cats: rebuilt")
 
     rebuild_available(wb["Available - Pts"], wb["Player Values - Pts"],
-                       "Player Values - Pts", last_row, "G", "I")
+                       "Player Values - Pts", last_row, "H", "J")
     log.info("Available - Pts: rebuilt")
 
     wb.save()
