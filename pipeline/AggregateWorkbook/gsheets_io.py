@@ -346,6 +346,58 @@ class CompatWorksheet:
                 request[edge] = spec
         _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": [{"updateBorders": request}]})
 
+    def set_banded_conditional_formats(self, first_row, first_col, last_row, last_col, rules):
+        """Applies a set of mutually-exclusive CUSTOM_FORMULA/BOOLEAN conditional-format rules
+        (one solid backgroundColor each) to a rectangular range -- e.g. one rule per tier
+        number, so a Tier column's shading tracks each row's own value even though rows aren't
+        physically sorted by tier (see rebuild_vorp's TIER column). rules: a list of (formula,
+        color) pairs, `formula` a normal CUSTOM_FORMULA string anchored the way Sheets expects
+        for a range-applied rule (absolute column, relative row, e.g. "=$G3=1" over a G3:G841
+        range) and `color` an RGB dict e.g. {"red":.85,"green":.94,"blue":.83}.
+
+        Unlike set_number_format/set_cell_format/update_borders above, this can't just
+        unconditionally overwrite -- conditionalFormatRules aren't addressed by range the way
+        a repeatCell format is, they're an ordered per-sheet list the API only lets you touch
+        by index (addConditionalFormatRule/deleteConditionalFormatRule). So a rerun first reads
+        the sheet's current rules, deletes any whose range exactly matches this one (this
+        method owns that range's shading outright, so an exact-range match is enough to
+        recognize which rules are "ours" without needing a separate tag), then adds the fresh
+        set -- two separate batch_update calls, deletes (highest index first, so a deletion
+        never invalidates an index still queued to delete) fully applied before any add runs,
+        so the new rules' indices don't have to account for a same-batch delete/add interleave."""
+        self._ensure_grid_size(last_row, last_col)
+        meta = _call_with_retry(self._gs.spreadsheet.fetch_sheet_metadata)
+        sheet_meta = next(s for s in meta["sheets"] if s["properties"]["sheetId"] == self.sheet_id)
+        target_range = {
+            "sheetId": self.sheet_id,
+            "startRowIndex": first_row - 1, "endRowIndex": last_row,
+            "startColumnIndex": first_col - 1, "endColumnIndex": last_col,
+        }
+        existing = sheet_meta.get("conditionalFormats", [])
+        stale_indexes = [i for i, cf in enumerate(existing) if cf.get("ranges") == [target_range]]
+        if stale_indexes:
+            delete_requests = [
+                {"deleteConditionalFormatRule": {"sheetId": self.sheet_id, "index": i}}
+                for i in sorted(stale_indexes, reverse=True)
+            ]
+            _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": delete_requests})
+
+        add_requests = [
+            {"addConditionalFormatRule": {
+                "index": i,
+                "rule": {
+                    "ranges": [target_range],
+                    "booleanRule": {
+                        "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": formula}]},
+                        "format": {"backgroundColor": color},
+                    },
+                },
+            }}
+            for i, (formula, color) in enumerate(rules)
+        ]
+        if add_requests:
+            _call_with_retry(self._gs.spreadsheet.batch_update, {"requests": add_requests})
+
 
 class CompatWorkbook:
     def __init__(self, gc, spreadsheet):

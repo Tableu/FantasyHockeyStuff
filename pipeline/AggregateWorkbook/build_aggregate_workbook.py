@@ -1562,6 +1562,44 @@ def refresh_rankings(ws, all_names):
 # sheet ever depended on the sub-position credit, only on VorpAll's VORP/PRNK columns.
 # ---------------------------------------------------------------------------
 
+# TIER shading palette (row-index into this list cycles for an 11th+ tier) -- 10 pastel
+# shades, distinct enough at a glance without being loud enough to fight with PRNK/VAL/VORP's
+# own plain white background. Applied to the TIER column via a CUSTOM_FORMULA conditional
+# format per tier number, not a static per-row fill, since a tier's players aren't a
+# contiguous row block (rows follow Player Values' order, not sorted by value) -- see
+# rebuild_tier_shading below.
+TIER_SHADING_PALETTE = [
+    {"red": 0.85, "green": 0.94, "blue": 0.83},  # green
+    {"red": 0.82, "green": 0.88, "blue": 0.97},  # blue
+    {"red": 0.99, "green": 0.94, "blue": 0.77},  # yellow
+    {"red": 0.99, "green": 0.85, "blue": 0.73},  # orange
+    {"red": 0.97, "green": 0.80, "blue": 0.80},  # red/pink
+    {"red": 0.89, "green": 0.83, "blue": 0.95},  # purple
+    {"red": 0.80, "green": 0.93, "blue": 0.91},  # teal
+    {"red": 0.88, "green": 0.88, "blue": 0.88},  # gray
+    {"red": 0.90, "green": 0.85, "blue": 0.75},  # brown
+    {"red": 0.95, "green": 0.80, "blue": 0.90},  # magenta
+]
+
+
+def rebuild_tier_shading(ws, tier_col, last_row, max_tiers=30):
+    """Colors the TIER column (see rebuild_vorp) by each row's own tier number, cycling
+    TIER_SHADING_PALETTE every 10. A multi-position player's TIER cell can hold more than one
+    group's tier ("C2 L1 ") -- shaded by whichever number appears first in the text (the
+    player's first-listed eligible position, same order PRNK already concatenates in), not
+    some blend of all of them; REGEXEXTRACT pulls that leading number out for the comparison.
+    max_tiers caps how many conditional-format rules get created -- comfortably above any
+    realistic tier count a position could produce, so raising it only matters if TierGapZ is
+    tuned low enough to fragment a position into an unusually large number of tiers."""
+    col_L = cl(tier_col)
+    rules = [
+        (f'=IFERROR(VALUE(REGEXEXTRACT(${col_L}3,"\\d+")),0)={n}',
+         TIER_SHADING_PALETTE[(n - 1) % len(TIER_SHADING_PALETTE)])
+        for n in range(1, max_tiers + 1)
+    ]
+    ws.set_banded_conditional_formats(3, tier_col, last_row, tier_col, rules)
+
+
 def _group_rank_sumproduct(value_range, cond, myval_ref, row_range, r):
     return (
         f'SUMPRODUCT(({cond})*({value_range}>{myval_ref}))'
@@ -1569,10 +1607,70 @@ def _group_rank_sumproduct(value_range, cond, myval_ref, row_range, r):
     )
 
 
-def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roster_g_name):
+def _pool_expr(cond, drange):
+    """The same "eligible VAL, everyone else pushed to -999999" trick rebuild_vorp's own
+    threshold formulas already use with LARGE (see H1/I1/J1 etc.) -- pulled out here since
+    the tier gap-stat formulas below need it several times over."""
+    return f'(({cond})*{drange}+(1-({cond}))*-999999)'
+
+
+def _gap_stats_formulas(cond, drange, n_col_L, mean_col_L, stdev_col_L, tier_gap_z_name):
+    """Returns (n, mean_gap, stdev_gap, threshold) formulas for one position group's VAL-drop
+    tiering (see rebuild_vorp's docstring for why VAL, not VORP). n is the group's full
+    eligible pool size (LARGE's own denominator, not the smaller replacement-level count used
+    for the VORP threshold). mean_gap telescopes to (best-worst)/(n-1) -- summing every
+    consecutive gap between n ranked values always collapses to just the endpoints, so the
+    mean needs no materialized gap array, only stdev does. stdev_gap builds that array the
+    same pre-2007-Excel-safe way as everywhere else in this file: LARGE's k argument fed an
+    array via ROW(INDIRECT("1:"&n)) rather than a native spill function. threshold is what a
+    rank's gap must exceed to start a new tier -- confirmed against hand-computed values live
+    against this spreadsheet before being wired in here. n<=1 (a group with 0-1 eligible
+    players) short-circuits every formula to 0 rather than dividing by zero or handing LARGE a
+    k past the population -- moot anyway since _tier_count_expr's rank=1 case never reaches
+    the threshold at all, but the cell would otherwise show a raw error."""
+    n_ref = f'${n_col_L}$1'
+    mean_ref = f'${mean_col_L}$1'
+    stdev_ref = f'${stdev_col_L}$1'
+    pool = _pool_expr(cond, drange)
+    seq = f'ROW(INDIRECT("1:"&({n_ref}-1)))'
+    n_formula = f'=SUMPRODUCT(({cond})*1)'
+    # LARGE(pool, k) over this module's "array expression" pool (as opposed to a plain cell
+    # range) needs an outer SUMPRODUCT to force scalar reduction even when k itself is a bare
+    # scalar like 1 or n_ref -- confirmed live: an unwrapped (LARGE(pool,1)-LARGE(pool,n))/...
+    # here threw "#VALUE! ...default output... single cell in the same row..." (a failed
+    # implicit-intersection, Sheets treating the unreduced array result as a range reference)
+    # even though H1/N1/etc.'s pre-existing SUMPRODUCT(LARGE(pool,k))-style formulas next to
+    # this one are exactly the same shape and never had the problem -- SUMPRODUCT is exactly
+    # what those callers had (and this one initially didn't) to force that reduction.
+    mean_formula = f'=IF({n_ref}<=1,0,SUMPRODUCT(LARGE({pool},1)-LARGE({pool},{n_ref}))/({n_ref}-1))'
+    stdev_formula = (
+        f'=IF({n_ref}<=1,0,SQRT(SUMPRODUCT((LARGE({pool},{seq})-LARGE({pool},{seq}+1)-{mean_ref})^2)'
+        f'/({n_ref}-1)))'
+    )
+    threshold_formula = f'=IF({n_ref}<=1,0,{mean_ref}+{tier_gap_z_name}*{stdev_ref})'
+    return n_formula, mean_formula, stdev_formula, threshold_formula
+
+
+def _tier_count_expr(cond, drange, rank_cell, thr_cell):
+    """A player's tier = 1 + how many of the ranks above them (1..rank-1) had a gap to the
+    next-worse player exceeding this group's break threshold -- same LARGE-over-ROW(INDIRECT))
+    array trick as _gap_stats_formulas' stdev, just counting threshold-exceeding gaps instead
+    of accumulating them. rank=1 short-circuits to a bare 1 (no ranks above the best player to
+    have a break at all), which also means the group's threshold cell is never actually
+    evaluated for a lone eligible player -- see _gap_stats_formulas' n<=1 handling."""
+    pool = _pool_expr(cond, drange)
+    seq = f'ROW(INDIRECT("1:"&({rank_cell}-1)))'
+    return (
+        f'IF({rank_cell}=1,1,1+SUMPRODUCT((LARGE({pool},{seq})-LARGE({pool},{seq}+1)>{thr_cell})*1))'
+    )
+
+
+def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roster_g_name,
+                  tier_gap_z_name="TierGapZ"):
     """source_sheet: 'Player Values - Cats' or 'Player Values - Pts'. Writes VorpAll's
-    A:F (mirrors source D:G, then VORP/PRNK) at CValsVorp!A3:F<last_row>, thresholds at
-    H1:P1. Same layout used for both CValsVorp and FanPtsVorp -- caller passes the sheet.
+    A:G (mirrors source D:G, then VORP/PRNK/TIER) at CValsVorp!A3:G<last_row>, thresholds at
+    H1:P1, tier gap-stats/helper ranks at R1:AP<last_row> (hidden -- see below). Same layout
+    used for both CValsVorp and FanPtsVorp -- caller passes the sheet.
 
     Forwards are split into C/LW/RW replacement-level pools, restored to match the original
     (pre-automation) template's dead FILTER/SORT formulas -- found live at spreadsheet
@@ -1592,7 +1690,21 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
     contains a letter for -- FIND, not exact match, exactly like add_rank_helpers' own
     C/RW/LW eligibility tests elsewhere on this sheet -- and their VORP is the best (MAX) of
     whichever groups apply, same as the original's own row-level MAX(Q:T). D/G are untouched
-    (single pool each, exact-match "D"/"G" -- already matched the original before this fix)."""
+    (single pool each, exact-match "D"/"G" -- already matched the original before this fix).
+
+    TIER (column G) groups each position's players by where their VAL actually drops off,
+    using VAL (column D) rather than VORP (column E) even though it's presented as a VORP
+    tier: VORP is already MAX'd across a multi-position player's eligible groups (see below),
+    so a RW-eligible player's VORP might really reflect their LW threshold -- ranking/gap-
+    finding on VAL within one group avoids that cross-group contamination, and produces
+    identical tier boundaries to that group's own VORP anyway since VAL and VORP differ only
+    by a per-group constant (the threshold), which cancels out in a same-group gap. Reuses the
+    exact same tie-broken rank formula PRNK already computed inline -- now stored once per
+    group in hidden helper columns R:V so PRNK and TIER both read it instead of each
+    recomputing their own copy. See _gap_stats_formulas/_tier_count_expr for the gap-detection
+    math itself (columns W:AP, row 1: pool size / mean gap / stdev gap / break threshold per
+    group) and TierGapZ (a Settings-sheet named cell, see rebuild_all's caller) for the
+    tunable how-big-a-gap-counts sensitivity."""
     old_max_col = ws.max_column
     clear_data_rows(ws, 1, max(ws.max_row, last_row), first_col=1, last_col=old_max_col)
     ws.cell(row=2, column=1, value="PLAYER")
@@ -1601,6 +1713,7 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
     ws.cell(row=2, column=4, value="VAL")
     ws.cell(row=2, column=5, value="VORP")
     ws.cell(row=2, column=6, value="PRNK")
+    ws.cell(row=2, column=7, value="TIER")
 
     crange = f"$C$3:$C${last_row}"
     drange = f"$D$3:$D${last_row}"
@@ -1652,6 +1765,26 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
         f'MIN(SUMPRODUCT(({rw_cond})*1),$M$1+3)))'
     ))
 
+    # TIER helper columns: rank (R:V), pool size (W:AA), mean gap (AB:AF), stdev gap (AG:AK),
+    # break threshold (AL:AP) -- one column per group, D/G/C/L(W)/R(W) in that order. All
+    # hidden below; see rebuild_vorp's docstring for the gap-detection math.
+    row_range = f"$D$3:$D${last_row}"
+    groups = [
+        ("D", def_cond, 18, 23, 28, 33, 38),
+        ("G", gk_cond, 19, 24, 29, 34, 39),
+        ("C", c_cond, 20, 25, 30, 35, 40),
+        ("L", lw_cond, 21, 26, 31, 36, 41),
+        ("R", rw_cond, 22, 27, 32, 37, 42),
+    ]
+    for _label, range_cond, _rank_col, n_col, mean_col, stdev_col, thr_col in groups:
+        n_f, mean_f, stdev_f, thr_f = _gap_stats_formulas(
+            range_cond, drange, cl(n_col), cl(mean_col), cl(stdev_col), tier_gap_z_name)
+        ws.cell(row=1, column=n_col, value=n_f)
+        ws.cell(row=1, column=mean_col, value=mean_f)
+        ws.cell(row=1, column=stdev_col, value=stdev_f)
+        ws.cell(row=1, column=thr_col, value=thr_f)
+    ws.hide_columns(18, 42)
+
     for r in range(3, last_row + 1):
         ws.cell(row=r, column=1, value=f"='{source_sheet}'!D{r}")
         ws.cell(row=r, column=2, value=f"='{source_sheet}'!E{r}")
@@ -1666,15 +1799,30 @@ def rebuild_vorp(ws, source_sheet, last_row, roster_f_name, roster_d_name, roste
             f'IF({rw_r},$D{r}-$P$1,-999999),'
             f'IF(AND(NOT({c_r}),NOT({lw_r}),NOT({rw_r})),$D{r}-$H$1,-999999)))))'
         ))
-        def_rank = _group_rank_sumproduct(drange, def_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
-        gk_rank = _group_rank_sumproduct(drange, gk_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
-        c_rank = _group_rank_sumproduct(drange, c_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
-        lw_rank = _group_rank_sumproduct(drange, lw_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
-        rw_rank = _group_rank_sumproduct(drange, rw_cond, f"$D{r}", f"$D$3:$D${last_row}", r)
+
+        rank_ref = {}
+        for label, range_cond, rank_col, *_rest in groups:
+            row_cond = range_cond.replace(crange, f"$C{r}")
+            rank_formula = _group_rank_sumproduct(drange, range_cond, f"$D{r}", row_range, r)
+            ws.cell(row=r, column=rank_col, value=f'=IF({row_cond},{rank_formula},"")')
+            rank_ref[label] = f"${cl(rank_col)}{r}"
+        r_D, r_G, r_C, r_L, r_R = (rank_ref[k] for k in "DGCLR")
+
         ws.cell(row=r, column=6, value=(
-            f'=IF($C{r}="","",IF($C{r}="D","D"&({def_rank}),IF($C{r}="G","G"&({gk_rank}),'
-            f'IF({c_r},"C"&({c_rank})&" ","")&IF({lw_r},"L"&({lw_rank})&" ","")&'
-            f'IF({rw_r},"R"&({rw_rank}),""))))'
+            f'=IF($C{r}="","",IF($C{r}="D","D"&{r_D},IF($C{r}="G","G"&{r_G},'
+            f'IF({r_C}<>"","C"&{r_C}&" ","")&IF({r_L}<>"","L"&{r_L}&" ","")&'
+            f'IF({r_R}<>"","R"&{r_R},""))))'
+        ))
+
+        tier_expr = {
+            label: _tier_count_expr(range_cond, drange, rank_ref[label], f"${cl(thr_col)}$1")
+            for label, range_cond, _rank_col, _n, _mean, _stdev, thr_col in groups
+        }
+        t_D, t_G, t_C, t_L, t_R = (tier_expr[k] for k in "DGCLR")
+        ws.cell(row=r, column=7, value=(
+            f'=IF($C{r}="","",IF($C{r}="D","D"&({t_D}),IF($C{r}="G","G"&({t_G}),'
+            f'IF({r_C}<>"","C"&({t_C})&" ","")&IF({r_L}<>"","L"&({t_L})&" ","")&'
+            f'IF({r_R}<>"","R"&({t_R}),""))))'
         ))
 
 
@@ -1711,7 +1859,10 @@ def rebuild_clean_cat(ws, last_pv_row):
     first_hidden, last_hidden = 4, 4 + (last_pv_row - 3)
     ws.cell(row=2, column=1, value="CATEGORIES")
     ws.cell(row=2, column=11, value="FORWARDS")
-    header_src = {"A": "A2", "B": "D2", "C": "G2", "D": "I2", "E": "H2", "F": "L2", "G": "K2"}
+    # F/G ("M2"/"L2", was "L2"/"K2"): POG/OFF shifted one column right (M/L instead of L/K)
+    # when TIER was inserted into Player Values - Cats right after PRNK -- see
+    # rebuild_player_values' callers.
+    header_src = {"A": "A2", "B": "D2", "C": "G2", "D": "I2", "E": "H2", "F": "M2", "G": "L2"}
     for col, cell in header_src.items():
         ws.cell(row=3, column=ci(col), value=f"='{src}'!{cell}")
     ws.cell(row=3, column=8, value="POS")
@@ -1729,8 +1880,8 @@ def rebuild_clean_cat(ws, last_pv_row):
         ws.cell(row=r, column=3, value=f"='{src}'!G{pv}")
         ws.cell(row=r, column=4, value=f"='{src}'!I{pv}")
         ws.cell(row=r, column=5, value=f"='{src}'!H{pv}")
-        ws.cell(row=r, column=6, value=f"='{src}'!L{pv}")
-        ws.cell(row=r, column=7, value=f"='{src}'!K{pv}")
+        ws.cell(row=r, column=6, value=f"='{src}'!M{pv}")
+        ws.cell(row=r, column=7, value=f"='{src}'!L{pv}")
         ws.cell(row=r, column=8, value=f"='{src}'!F{pv}")
         ws.cell(row=r, column=9, value=_composite_rank_key(f"$H{r}", f"$C{r}", group_range, val_range, r))
 
@@ -1764,7 +1915,10 @@ def rebuild_clean_pts(ws, last_pv_row):
     first_hidden, last_hidden = 4, 4 + (last_pv_row - 3)
     ws.cell(row=2, column=1, value="POINTS")
     ws.cell(row=2, column=12, value="FORWARDS")
-    header_src = {"A": "A2", "B": "D2", "C": "G2", "D": "H2", "E": "J2", "F": "I2", "G": "M2", "H": "L2"}
+    # G/H ("N2"/"M2", was "M2"/"L2"): POG/OFF shifted one column right (N/M instead of M/L)
+    # when TIER was inserted into Player Values - Pts right after PRNK -- see
+    # rebuild_player_values' callers.
+    header_src = {"A": "A2", "B": "D2", "C": "G2", "D": "H2", "E": "J2", "F": "I2", "G": "N2", "H": "M2"}
     for col, cell in header_src.items():
         ws.cell(row=3, column=ci(col), value=f"='{src}'!{cell}")
     ws.cell(row=3, column=9, value="POS")
@@ -1783,8 +1937,8 @@ def rebuild_clean_pts(ws, last_pv_row):
         ws.cell(row=r, column=4, value=f"='{src}'!H{pv}")
         ws.cell(row=r, column=5, value=f"='{src}'!J{pv}")
         ws.cell(row=r, column=6, value=f"='{src}'!I{pv}")
-        ws.cell(row=r, column=7, value=f"='{src}'!M{pv}")
-        ws.cell(row=r, column=8, value=f"='{src}'!L{pv}")
+        ws.cell(row=r, column=7, value=f"='{src}'!N{pv}")
+        ws.cell(row=r, column=8, value=f"='{src}'!M{pv}")
         ws.cell(row=r, column=9, value=f"='{src}'!F{pv}")
         ws.cell(row=r, column=10, value=_composite_rank_key(f"$I{r}", f"$C{r}", group_range, val_range, r))
 
@@ -1892,7 +2046,10 @@ def rebuild_available(ws, pv_ws, pv_sheet_name, last_pv_row, value_col_letter, v
         ws.unmerge_cells(str(rng))
     clear_data_rows(ws, 1, max(ws.max_row, 35), first_col=1, last_col=15)
     pv_first, pv_last = 3, last_pv_row
-    rank_cols = add_rank_helpers(pv_ws, last_pv_row, "AN", value_col_letter)
+    # "AO" (was "AN"): Player Values - Pts' own last data column moved from AM to AN when
+    # TIER was inserted after PRNK, which would otherwise put this helper block one column
+    # too close (colliding with Pts' own last column) -- see rebuild_player_values' callers.
+    rank_cols = add_rank_helpers(pv_ws, last_pv_row, "AO", value_col_letter)
 
     _write_available_block(
         ws, 1, "A", 30, rank_cols[0], pv_sheet_name, pv_first, pv_last,
@@ -1962,6 +2119,19 @@ if __name__ == "__main__":
     settings_ws.cell(row=19, column=3, value=playoff_start)
     settings_ws.cell(row=20, column=3, value=playoff_end)
     log.info("Settings: defaulted Playoffs Schedule to %s - %s (last 3 weeks of season)", playoff_start, playoff_end)
+
+    # TierGapZ (Settings!C24): the z-score multiplier CVals/Vorp's and FanPts/Vorp's TIER
+    # column uses to decide how big a VAL gap counts as a new tier (see rebuild_vorp). Labels
+    # are always rewritten (cheap, and self-heals a from-scratch bootstrap), but the value
+    # itself is only defaulted the first time the cell is ever blank -- unlike the Playoffs
+    # Schedule dates above, this is a personal tuning knob, not schedule-derived data, so a
+    # rerun must never stomp whatever the user has since tuned it to by hand.
+    settings_ws.cell(row=23, column=2, value="VORP Tier Settings")
+    settings_ws.cell(row=24, column=2, value="Tier Gap Z-Score")
+    tier_gap_z_cell = settings_ws.cell(row=24, column=3)
+    if tier_gap_z_cell.value in (None, ""):
+        tier_gap_z_cell.value = 1
+    set_defined_name(wb, "TierGapZ", "Settings!$C$24")
 
     source_ranges = {}
     for name, _sheet, nick in ACTIVE_SOURCES:
@@ -2040,17 +2210,27 @@ if __name__ == "__main__":
     log.info("AllProjections_G: rebuilt, %d categories, ends at column %s", len(GOALIE_AP_CATEGORIES), cl(last_col))
 
     goalie_set = master["goalie_names"]
+    # "AM"/"AN" (was "AL"/"AM"): both sheets grew by one column when TIER was inserted
+    # right after PRNK (Cats: I->J shifted GP/OFF/POG to K/L/M; Pts: J->K shifted them to
+    # L/M/N) -- see the TIER column's own header comment below and CleanCat/CleanPts'
+    # updated column letters, which shifted for the same reason.
     first_row, last_row = rebuild_player_values(
-        wb["Player Values - Cats"], all_names, goalie_set, "AL")
+        wb["Player Values - Cats"], all_names, goalie_set, "AM")
     log.info("Player Values - Cats: rows %d-%d", first_row, last_row)
     set_defined_name(wb, "RecCats", f"'Player Values - Cats'!$A$2:$H${last_row}")
     set_defined_name(wb, "ValsAll", f"'Player Values - Cats'!$D$2:$G${last_row}")
+    # VorpAll (A:G on CVals/Vorp) isn't created by this script -- it's a pre-existing
+    # template named range Player Values - Cats' PRNK/TIER cells vlookup into -- but its
+    # column width now matters (TIER needs column G in range) so it's kept in sync here
+    # the same way OffNights/PlayoffGames' row extent is kept in sync elsewhere in this file.
+    set_defined_name(wb, "VorpAll", f"'CVals/Vorp'!$A$2:$G${last_row}")
 
     first_row, last_row = rebuild_player_values(
-        wb["Player Values - Pts"], all_names, goalie_set, "AM")
+        wb["Player Values - Pts"], all_names, goalie_set, "AN")
     log.info("Player Values - Pts: rows %d-%d", first_row, last_row)
     set_defined_name(wb, "RecPoints", f"'Player Values - Pts'!$A$2:$I${last_row}")
     set_defined_name(wb, "FanPtsAll", f"'Player Values - Pts'!$D$2:$G${last_row}")
+    set_defined_name(wb, "PtsVorpAll", f"'FanPts/Vorp'!$A$2:$G${last_row}")
 
     n = refresh_rankings(wb["Rankings"], all_names)
     log.info("Rankings: %d rows", n)
@@ -2061,11 +2241,17 @@ if __name__ == "__main__":
     n = rebuild_source_comparison(wb)
     log.info("SourceComparison: rebuilt, ends at row %d", n)
 
-    rebuild_vorp(wb["CVals/Vorp"], "Player Values - Cats", last_row, "RosterF", "RosterD", "RosterG")
+    rebuild_vorp(wb["CVals/Vorp"], "Player Values - Cats", last_row,
+                 "RosterF", "RosterD", "RosterG", "TierGapZ")
     log.info("CVals/Vorp: rebuilt VorpAll rows 3-%d", last_row)
+    rebuild_tier_shading(wb["CVals/Vorp"], 7, last_row)
+    log.info("CVals/Vorp: TIER shading refreshed")
 
-    rebuild_vorp(wb["FanPts/Vorp"], "Player Values - Pts", last_row, "RosterF", "RosterD", "RosterG")
+    rebuild_vorp(wb["FanPts/Vorp"], "Player Values - Pts", last_row,
+                 "RosterF", "RosterD", "RosterG", "TierGapZ")
     log.info("FanPts/Vorp: rebuilt PtsVorpAll rows 3-%d", last_row)
+    rebuild_tier_shading(wb["FanPts/Vorp"], 7, last_row)
+    log.info("FanPts/Vorp: TIER shading refreshed")
 
     fh, lh = rebuild_clean_cat(wb["CleanCat"], last_row)
     log.info("CleanCat: hidden block rows %d-%d", fh, lh)
