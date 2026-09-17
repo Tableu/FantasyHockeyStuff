@@ -19,7 +19,7 @@ from nhl_pipeline.ingest.season import ensure_season
 from nhl_pipeline.projections import importer
 from nhl_pipeline.projections.sources import (
     apples_ginos_blake, apples_ginos_nate, dailyfaceoff, dtz, dom, kubota_hockey,
-    lineup_experts, scott_cullen,
+    lineup_experts, scott_cullen, steve_laidlaw,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -43,6 +43,7 @@ SOURCES = [
     ("Apples & Ginos - Nate", apples_ginos_nate, "Apples & Ginos 2026-27 NHL Skater Projections - Nate"),
     ("Scott Cullen", scott_cullen, "Scott Cullen Projections"),
     ("Kubota Hockey", kubota_hockey, "Kubota Hockey 2026-27 Projections"),
+    ("Steve Laidlaw", steve_laidlaw, "Steve Laidlaw Fantasy Hockey Rankings"),
 ]
 
 
