@@ -1,24 +1,31 @@
 #!/usr/bin/env python
 """Daily NHL ingestion entry point -- the one command to wire into a scheduler.
 
+Each run first refreshes Reference.Schedule from the start of the lookback window through
+the end of the season (so postponements rescheduled weeks out are picked up), then ingests
+any newly-final games.
+
 Usage:
     python run_daily.py                      # incremental: lookback window, skips already-ingested games
     python run_daily.py --backfill           # force full-season reload (safe: every write is an upsert)
     python run_daily.py --lookback-days 14   # override the default 7-day lookback
-    python run_daily.py --game-id 2025020740 # ingest exactly one game, by NHL game id
-    python run_daily.py --dry-run            # discovery only, no writes
+    python run_daily.py --game-id 2025020740 # ingest exactly one game, by NHL game id (no schedule refresh)
+    python run_daily.py --dry-run            # discovery only, no writes (no schedule refresh)
 
-Exits with status 1 if any game failed, 0 otherwise, so a scheduler can alert on failure.
+Exits with status 1 if any game (or the schedule refresh) failed, 0 otherwise, so a
+scheduler can alert on failure.
 """
 
 import argparse
 import logging
 import sys
+from datetime import date, datetime, timedelta
 
 from nhl_pipeline import config, db
 from nhl_pipeline.api import field_map
 from nhl_pipeline.api import play_by_play as api_play_by_play
 from nhl_pipeline.ingest import official_stats
+from nhl_pipeline.ingest import schedule as ingest_schedule
 from nhl_pipeline.ingest import season as ingest_season
 from nhl_pipeline.orchestration import discovery, pipeline
 
@@ -35,6 +42,12 @@ def parse_args():
     return parser.parse_args()
 
 
+def schedule_refresh_window(season_cfg: dict, lookback_days: int, backfill: bool) -> tuple:
+    start_cfg = datetime.strptime(season_cfg["StartDate"], "%Y-%m-%d").date()
+    start = start_cfg if backfill else max(start_cfg, date.today() - timedelta(days=lookback_days))
+    return start.isoformat(), season_cfg["EndDate"]
+
+
 def main():
     args = parse_args()
     season_cfg = config.load_season_config()
@@ -43,6 +56,20 @@ def main():
 
     season_id = ingest_season.ensure_season(cursor, season_cfg)
     conn.commit()
+
+    failures = 0
+
+    if not args.game_id and not args.dry_run:
+        start_date, end_date = schedule_refresh_window(season_cfg, args.lookback_days, args.backfill)
+        log.info("Refreshing schedule from %s to %s", start_date, end_date)
+        try:
+            counts = ingest_schedule.sync_schedule(cursor, start_date, end_date, season_id)
+            conn.commit()
+            log.info("  %d schedule game(s) refreshed", counts["games"])
+        except Exception:
+            conn.rollback()
+            failures += 1
+            log.exception("  FAILED schedule refresh -- continuing with game ingestion")
 
     if args.game_id:
         pbp = api_play_by_play.get_play_by_play(args.game_id)
@@ -60,7 +87,6 @@ def main():
             log.info("  would ingest %s (%s) on %s", game["id"], game.get("gameState"), date_str)
         return
 
-    failures = 0
     for game, date_str in games_to_run:
         nhl_game_id = game["id"]
         log.info("Ingesting game %s (%s)", nhl_game_id, date_str)

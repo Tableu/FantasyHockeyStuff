@@ -1,7 +1,7 @@
 {
-    "SeasonID_NHL": 20252026,
-    "DisplayName": "2025-26",
-    "StartDate": "2025-10-07",
-    "EndDate": "2026-06-30",
+    "SeasonID_NHL": 20262027,
+    "DisplayName": "2026-27",
+    "StartDate": "2026-09-29",
+    "EndDate": "2027-06-30",
     "IncludeGameTypes": [2]
 }
