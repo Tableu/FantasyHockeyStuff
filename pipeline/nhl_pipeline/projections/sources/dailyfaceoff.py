@@ -10,7 +10,7 @@ columns are DECIMAL for exactly this reason. Rounding here would silently throw 
 precision away before it ever reached the database.
 
 Previously imported under the source name "All Points League" and read from a since-renamed
-file (all_pts_league.csv, no longer present in Sheets/) -- same site, same column layout,
+file (all_pts_league.csv, no longer present in ProjectionSheets/) -- same site, same column layout,
 just renamed for consistency with the workbook's own "Dailyfaceoff" tab.
 """
 

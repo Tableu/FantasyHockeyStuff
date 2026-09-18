@@ -1,7 +1,7 @@
 """Apples & Ginos 2026-27 NHL Skater Projections - Nate -- same layout as
 apples_ginos_blake.py (see that module's docstring for the header-collision/broken-Pos/
 missing-category/fractional-counting-stat details); only the filename and sheet name differ.
-Filename genuinely starts with an underscore in Sheets/, not a typo introduced here.
+Filename genuinely starts with an underscore in ProjectionSheets/, not a typo introduced here.
 """
 
 from pathlib import Path

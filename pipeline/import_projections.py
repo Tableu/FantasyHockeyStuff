@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Imports every fantasy-projection source in Sheets/ into Projections.SkaterProjections /
+"""Imports every fantasy-projection source in ProjectionSheets/ into Projections.SkaterProjections /
 Projections.GoalieProjections (see nhl_pipeline/projections/). Rerunnable: sources, name
 aliases, and projection rows are all upserted, so re-running after a sheet is refreshed just
 updates the numbers. Names that don't resolve to exactly one player accumulate in
@@ -25,11 +25,11 @@ from nhl_pipeline.projections.sources import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("import_projections")
 
-# The source files live in the sibling AggregateWorkbook/Sheets/ folder (next to pipeline/,
-# not inside it -- see the repo-root .gitignore entry that keeps them out of git).
-SHEETS_DIR = config.PROJECT_ROOT.parent / "AggregateWorkbook" / "Sheets"
+# The downloaded source files live in ProjectionSheets/ at the pipeline root (kept out of
+# git by pipeline/.gitignore).
+SHEETS_DIR = config.PROJECT_ROOT / "ProjectionSheets"
 
-# All sheets in Sheets/ are 2026-27 projections, a season that hasn't started yet and so
+# All sheets in ProjectionSheets/ are 2026-27 projections, a season that hasn't started yet and so
 # isn't in Reference.Seasons via the normal ingestion path (season_config.json/ensure_season
 # only ever run for the season currently being ingested). Ensured here instead.
 PROJECTIONS_SEASON_CFG = {"SeasonID_NHL": 20262027, "DisplayName": "2026-27"}
@@ -60,7 +60,7 @@ def main():
             importer.import_rows(cursor, source_name, season_id, module.rows(SHEETS_DIR), description)
         except FileNotFoundError as exc:
             # Fantrax's own source file is retired (see ACTIVE_SOURCES in
-            # build_aggregate_workbook.py) -- not present in Sheets/ until it's manually
+            # build_aggregate_workbook.py) -- not present in ProjectionSheets/ until it's manually
             # added back, so a missing file here shouldn't abort every other source's import.
             log.warning("Skipping %s: %s", source_name, exc)
             continue

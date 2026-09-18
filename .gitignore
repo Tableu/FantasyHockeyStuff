@@ -1,7 +1,6 @@
 ai_assistant/.mcp.json
 ai_assistant/fantasy_assistant_mcp_config.json
 data/
-AggregateWorkbook/Sheets/
 AggregateWorkbook/googleSheetsCredentials.json
 ai_assistant/clips/
 __pycache__/
