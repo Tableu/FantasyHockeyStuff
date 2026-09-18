@@ -51,9 +51,9 @@ from datetime import timedelta
 from pathlib import Path
 
 # Makes "python build_aggregate_workbook.py" work regardless of the caller's cwd, matching
-# this module's own documented usage -- nhl_pipeline lives one directory up, which is only on
-# sys.path automatically when this script is run from the pipeline root itself.
-_PIPELINE_ROOT = str(Path(__file__).resolve().parent.parent)
+# this module's own documented usage -- nhl_pipeline lives in the sibling pipeline/ folder,
+# which is never on sys.path by itself.
+_PIPELINE_ROOT = str(Path(__file__).resolve().parent.parent / "pipeline")
 if _PIPELINE_ROOT not in sys.path:
     sys.path.insert(0, _PIPELINE_ROOT)
 

@@ -40,8 +40,15 @@ from pathlib import Path
 
 import requests
 
-from nhl_pipeline import db
-from nhl_pipeline.media import clip_resolver
+# nhl_pipeline (the DB connection and clip resolver) lives in the sibling pipeline/ folder,
+# so this works regardless of the caller's cwd, the same way AggregateWorkbook's build script
+# reaches it.
+_PIPELINE_ROOT = str(Path(__file__).resolve().parent.parent / "pipeline")
+if _PIPELINE_ROOT not in sys.path:
+    sys.path.insert(0, _PIPELINE_ROOT)
+
+from nhl_pipeline import db  # noqa: E402
+from nhl_pipeline.media import clip_resolver  # noqa: E402
 
 DEFAULT_CLIPS_DIR = Path(__file__).resolve().parent / "clips"
 DOWNLOAD_CHUNK_BYTES = 256 * 1024

@@ -25,9 +25,9 @@ from nhl_pipeline.projections.sources import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("import_projections")
 
-# AggregateWorkbook/Sheets/, not a bare "Sheets/" off the repo root -- that's where every
-# source file actually lives (see AggregateWorkbook/Sheets' explicit .gitignore entry).
-SHEETS_DIR = config.PROJECT_ROOT / "AggregateWorkbook" / "Sheets"
+# The source files live in the sibling AggregateWorkbook/Sheets/ folder (next to pipeline/,
+# not inside it -- see the repo-root .gitignore entry that keeps them out of git).
+SHEETS_DIR = config.PROJECT_ROOT.parent / "AggregateWorkbook" / "Sheets"
 
 # All sheets in Sheets/ are 2026-27 projections, a season that hasn't started yet and so
 # isn't in Reference.Seasons via the normal ingestion path (season_config.json/ensure_season
