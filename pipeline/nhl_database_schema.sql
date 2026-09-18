@@ -22,7 +22,8 @@
          is NOT separately ingested — it is derived by joining Shifts against each play's
          period/time during ingestion workflow step 8.
 
-    Naming: schemas (Reference, Game, Stats, Analytics, Ingestion) live inside a dedicated
+    Naming: schemas (Reference, Game, Stats, Analytics, Ingestion, Projections, Fantasy,
+    Injuries) live inside a dedicated
     `NHLStats` database rather than a separate `nhl` database (the report's
     `nhl.Reference.Seasons`-style names are 3-part database.schema.table identifiers), and
     rather than the `model` database used earlier in development -- NHLStats keeps this
@@ -68,6 +69,9 @@ IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Projections')
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Fantasy')
     EXEC('CREATE SCHEMA Fantasy');
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Injuries')
+    EXEC('CREATE SCHEMA Injuries');
 GO
 
 -- ============================================================================
@@ -900,7 +904,101 @@ CREATE TABLE Fantasy.UnresolvedPlayerNames
 GO
 
 -- ============================================================================
--- 8. Indexes
+-- 8. Injuries schema
+-- ============================================================================
+
+-- An external injury-history publisher (first: the NHL Injury Viz Tableau workbook, see
+-- nhl_pipeline/api/nhl_injury_viz.py). Not per-season like Projections.Sources -- one source
+-- file covers every season at once, and re-importing it replaces that source's rows wholesale.
+CREATE TABLE Injuries.Sources
+(
+    SourceID        INT IDENTITY(1,1) NOT NULL,
+    SourceName      VARCHAR(100) NOT NULL,     -- e.g. 'NHL Injury Viz'
+    Description     VARCHAR(500) NULL,
+    ImportedAt      DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_InjurySources PRIMARY KEY (SourceID),
+    CONSTRAINT UQ_InjurySources_Name UNIQUE (SourceName)
+);
+GO
+
+-- Same name-resolution pair as Projections/Fantasy (see Fantasy.PlayerNameAliases' comment),
+-- shared with nhl_pipeline.name_resolver. An injury source is keyed by "Last, First" name
+-- strings spanning 25 seasons, so most of what lands here is a retired player resolved once
+-- through NHL player search (ingest/injury_history.py) and reused on every re-import.
+CREATE TABLE Injuries.PlayerNameAliases
+(
+    PlayerNameAliasID  BIGINT IDENTITY(1,1) NOT NULL,
+    SourceID            INT NOT NULL,
+    RawName             VARCHAR(200) NOT NULL,
+    PlayerID            BIGINT NOT NULL,
+    CreatedAt           DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_InjuryPlayerNameAliases PRIMARY KEY (PlayerNameAliasID),
+    CONSTRAINT UQ_InjuryPlayerNameAliases_SourceRaw UNIQUE (SourceID, RawName),
+    CONSTRAINT FK_INA_Source FOREIGN KEY (SourceID)
+        REFERENCES Injuries.Sources(SourceID),
+    CONSTRAINT FK_INA_Player FOREIGN KEY (PlayerID)
+        REFERENCES Reference.Players(PlayerID)
+);
+GO
+
+CREATE TABLE Injuries.UnresolvedPlayerNames
+(
+    UnresolvedPlayerNameID  BIGINT IDENTITY(1,1) NOT NULL,
+    SourceID                 INT NOT NULL,
+    RawName                  VARCHAR(200) NOT NULL,
+    CandidatePlayerIDs       VARCHAR(200) NULL,
+    FirstSeenAt               DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_InjuryUnresolvedPlayerNames PRIMARY KEY (UnresolvedPlayerNameID),
+    CONSTRAINT UQ_InjuryUnresolvedPlayerNames_SourceRaw UNIQUE (SourceID, RawName),
+    CONSTRAINT FK_IUPN_Source FOREIGN KEY (SourceID)
+        REFERENCES Injuries.Sources(SourceID)
+);
+GO
+
+-- One realized absence: a player missed team games StartGameNumber..EndGameNumber of a
+-- regular season (the source records absences, not pre-game designations -- no DTD/IR
+-- flags, and the first game of a spell is the only one whose lockout-time knowability is
+-- ambiguous). Game numbers are what the source publishes; the dates/NHLGameIDs are derived
+-- from that team's schedule (Reference.Schedule, filled for the same seasons by the import)
+-- and left NULL rather than guessed when a game number falls outside the team's schedule.
+-- PlayerID is NULL only while the name sits in Injuries.UnresolvedPlayerNames.
+CREATE TABLE Injuries.Spells
+(
+    SpellID             BIGINT IDENTITY(1,1) NOT NULL,
+    SourceID            INT NOT NULL,
+    SeasonID            INT NOT NULL,
+    TeamID              INT NOT NULL,
+    PlayerID            BIGINT NULL,
+    RawPlayerName       VARCHAR(200) NOT NULL,     -- source's disambiguated name, e.g. 'Erik Gustafsson (2)'
+    PositionGroup       CHAR(1) NOT NULL,          -- 'F' / 'D' / 'G' (the source doesn't split C/L/R)
+    IsRetiredContract   BIT NOT NULL DEFAULT 0,    -- source tags LTIR contract dumps (e.g. a retired-in-practice
+                                                   -- player still on a team's books) with a "Retired" suffix
+    InjuryType          VARCHAR(100) NULL,
+    InjuryTypeGroup     SMALLINT NULL,             -- source's 1..15 body-region grouping of InjuryType
+    GamesMissed         SMALLINT NOT NULL,
+    StartGameNumber     SMALLINT NOT NULL,         -- team game number (1..82) of the first game missed
+    EndGameNumber       SMALLINT NOT NULL,         -- team game number of the last game missed
+    StartDate           DATE NULL,
+    EndDate             DATE NULL,
+    StartNHLGameID      INT NULL,                  -- joins Reference.Schedule.NHLGameID
+    EndNHLGameID        INT NULL,
+    CapHitMillions      DECIMAL(8,4) NULL,
+    ImportedAt          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_InjurySpells PRIMARY KEY (SpellID),
+    CONSTRAINT UQ_InjurySpells UNIQUE (SourceID, SeasonID, TeamID, RawPlayerName, StartGameNumber),
+    CONSTRAINT FK_InjurySpells_Source FOREIGN KEY (SourceID)
+        REFERENCES Injuries.Sources(SourceID),
+    CONSTRAINT FK_InjurySpells_Season FOREIGN KEY (SeasonID)
+        REFERENCES Reference.Seasons(SeasonID),
+    CONSTRAINT FK_InjurySpells_Team FOREIGN KEY (TeamID)
+        REFERENCES Reference.Teams(TeamID),
+    CONSTRAINT FK_InjurySpells_Player FOREIGN KEY (PlayerID)
+        REFERENCES Reference.Players(PlayerID)
+);
+GO
+
+-- ============================================================================
+-- 9. Indexes
 -- ============================================================================
 
 CREATE INDEX IX_Plays_GameID
@@ -974,10 +1072,19 @@ CREATE INDEX IX_PlayerADP_Player
 
 CREATE INDEX IX_FantasyPlayerNameAliases_Player
     ON Fantasy.PlayerNameAliases(PlayerID);
+
+CREATE INDEX IX_InjuryPlayerNameAliases_Player
+    ON Injuries.PlayerNameAliases(PlayerID);
+
+CREATE INDEX IX_InjurySpells_PlayerStart
+    ON Injuries.Spells(PlayerID, StartDate);
+
+CREATE INDEX IX_InjurySpells_SeasonTeam
+    ON Injuries.Spells(SeasonID, TeamID);
 GO
 
 -- ============================================================================
--- 9. Seed data
+-- 10. Seed data
 -- ============================================================================
 
 -- Situations. "ALL" is the aggregate row (no strength filter) used when a metric is

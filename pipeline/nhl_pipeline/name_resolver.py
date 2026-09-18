@@ -30,8 +30,9 @@ _SUFFIX_RE = re.compile(r"\s+(jr\.?|sr\.?|ii|iii|iv)$", re.IGNORECASE)
 # before matching since it isn't part of the name itself. When a source's raw name really is
 # ambiguous between two real players in Reference.Players, stripping this doesn't lose
 # anything: it still lands on more than one candidate and falls through to the same
-# unresolved-name review queue as before.
-_POS_SUFFIX_RE = re.compile(r"\s*\([a-z]{1,3}\)\s*$", re.IGNORECASE)
+# unresolved-name review queue as before. The NHL Injury Viz source numbers its same-named
+# players instead ("Erik Gustafsson (2)"), hence the digits.
+_POS_SUFFIX_RE = re.compile(r"\s*\([a-z0-9]{1,3}\)\s*$", re.IGNORECASE)
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9 ]")
 
 # Common first-name nicknames seen across sheets so far, each a group of interchangeable
@@ -64,10 +65,25 @@ _NICKNAME_GROUPS = [
 _NICKNAME_LOOKUP = {name: group for group in _NICKNAME_GROUPS for name in group}
 
 
+# Letters NFKD can't decompose to an ASCII base plus a combining mark -- they'd be dropped
+# outright ('Røndbjerg' -> 'Rndbjerg') instead of folded the way the NHL's own ASCII
+# spellings do ('Rondbjerg').
+_ASCII_FOLD = str.maketrans({
+    "ø": "o", "Ø": "O", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "ð": "d", "Ð": "D",
+    "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE", "ß": "ss", "þ": "th", "Þ": "Th",
+})
+
+
+def ascii_fold(name: str) -> str:
+    """Accent-stripped ASCII spelling of a name, matching how the NHL API/search spell it."""
+    name = unicodedata.normalize("NFKD", name.translate(_ASCII_FOLD))
+    return name.encode("ascii", "ignore").decode("ascii")
+
+
 def normalize_name(name: str) -> str:
     name = html.unescape(name)
     name = _POS_SUFFIX_RE.sub("", name)
-    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    name = ascii_fold(name)
     name = _SUFFIX_RE.sub("", name.lower().strip())
     name = _NON_ALNUM_RE.sub("", name)
     return re.sub(r"\s+", " ", name).strip()
@@ -97,14 +113,17 @@ def load_alias_map(cursor, alias_table: str, source_id: int) -> dict:
     return {row.RawName: row.PlayerID for row in cursor.fetchall()}
 
 
-def _candidates(raw_name: str, player_index: dict) -> dict:
+def candidates(raw_name: str, player_index: dict) -> dict:
     """{PlayerID: PositionCode} for every real player raw_name could plausibly be (across
-    nickname-variant spellings)."""
-    candidates: dict = {}
+    nickname-variant spellings). Public so a caller with its own per-record position can
+    check *before* resolve_player_id whether the lone local candidate is even the right
+    position (ingest/injury_history.py -- a source that numbers same-named players can name
+    one this database hasn't seen yet, and auto-aliasing it to the one it has would be wrong)."""
+    found: dict = {}
     for variant in _name_variants(normalize_name(raw_name)):
         for player_id, position_code in player_index.get(variant, []):
-            candidates[player_id] = position_code
-    return candidates
+            found[player_id] = position_code
+    return found
 
 
 def has_known_name(raw_name: str, alias_map: dict, player_index: dict) -> bool:
@@ -115,7 +134,7 @@ def has_known_name(raw_name: str, alias_map: dict, player_index: dict) -> bool:
     (e.g. Fantrax's full prospect pool -- see ingest/fantasy_fantrax.py)."""
     if raw_name in alias_map:
         return True
-    return bool(_candidates(raw_name, player_index))
+    return bool(candidates(raw_name, player_index))
 
 
 def resolve_player_id(
@@ -134,10 +153,10 @@ def resolve_player_id(
     if raw_name in alias_map:
         return alias_map[raw_name]
 
-    candidates = _candidates(raw_name, player_index)
+    found = candidates(raw_name, player_index)
 
-    if len(candidates) == 1:
-        player_id = next(iter(candidates))
+    if len(found) == 1:
+        player_id = next(iter(found))
         db.upsert(
             cursor, alias_table,
             {"SourceID": source_id, "RawName": raw_name},
@@ -151,7 +170,7 @@ def resolve_player_id(
         return player_id
 
     if position_codes:
-        matches = [player_id for player_id, pos in candidates.items() if pos in position_codes]
+        matches = [player_id for player_id, pos in found.items() if pos in position_codes]
         if len(matches) == 1:
             # Best-effort cleanup of a stale row from before this record's position could
             # disambiguate it -- if a different raw record sharing this exact name still can't
@@ -165,6 +184,6 @@ def resolve_player_id(
     db.upsert(
         cursor, unresolved_table,
         {"SourceID": source_id, "RawName": raw_name},
-        {"CandidatePlayerIDs": ",".join(str(c) for c in sorted(candidates)) if candidates else None},
+        {"CandidatePlayerIDs": ",".join(str(c) for c in sorted(found)) if found else None},
     )
     return None

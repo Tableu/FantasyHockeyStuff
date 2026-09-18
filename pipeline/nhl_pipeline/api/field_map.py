@@ -4,6 +4,10 @@ confirmed by curling live endpoints for gameId=2025020740 (MTL @ BUF, 2026-01-15
 planning -- see the plan doc for the raw samples.
 """
 
+import re
+
+from nhl_pipeline.name_resolver import ascii_fold
+
 # Event types (Plays.EventType / typeDescKey) that represent a shot attempt.
 SHOT_ATTEMPT_EVENT_TYPES = {"shot-on-goal", "missed-shot", "blocked-shot", "goal"}
 
@@ -350,4 +354,61 @@ def schedule_row_fields(game: dict, game_date: str) -> dict:
         "home_nhl_team_id": game["homeTeam"]["id"],
         "away_nhl_team_id": game["awayTeam"]["id"],
         "game_state": game.get("gameState"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# NHL Injury Viz: "Extract"."Extract" rows (see api/nhl_injury_viz.py)
+# ---------------------------------------------------------------------------
+
+_INJURY_VIZ_NAME_SUFFIX_RE = re.compile(r"\s*\(([^)]{1,3})\)\s*$")
+_INJURY_VIZ_RETIRED_RE = re.compile(r'\s*"?retired"?\s*$', re.IGNORECASE)
+
+
+def _injury_viz_name(last_first: str) -> tuple:
+    """'Gustafsson, Erik (2)' -> ('Erik Gustafsson (2)', 'Erik', 'Gustafsson', 'Erik Gustafsson').
+    The suffix stays on the raw name (it's what makes two same-named players distinct rows in
+    the source) but comes off the search name and the first/last split. raw_name and
+    search_name are ASCII-folded: they're VARCHAR match keys (alias/unresolved/spell rows) and
+    the NHL search query, and a character outside Latin-1 ('Bļugers') would otherwise be
+    best-fit-mapped on insert ('Blugers') and then never match its own stored row. First/last
+    keep their accents, same as NHL-sourced Reference.Players rows."""
+    suffix_match = _INJURY_VIZ_NAME_SUFFIX_RE.search(last_first or "")
+    bare = _INJURY_VIZ_NAME_SUFFIX_RE.sub("", last_first or "").strip()
+    last, _, first = bare.partition(", ")
+    search_name = ascii_fold(f"{first} {last}".strip() if first else last)
+    raw_name = f"{search_name} ({suffix_match.group(1)})" if suffix_match else search_name
+    return raw_name, (first or None), (last or None), search_name
+
+
+def _injury_viz_season(season: str) -> tuple:
+    """'2025/26' -> (20252026, '2025-26', False); '2019/20 (playoffs+)' -> (..., True)."""
+    is_playoffs = "playoff" in season.lower()
+    start_year = int(season[:4])
+    end_year = start_year + 1
+    return int(f"{start_year}{end_year}"), f"{start_year}-{str(end_year)[2:]}", is_playoffs
+
+
+def injury_viz_row_fields(row: dict) -> dict:
+    raw_name, first_name, last_name, search_name = _injury_viz_name(row.get("Player2") or row.get("Player"))
+    nhl_season_id, season_display, is_playoffs = _injury_viz_season(row["Season"])
+    position = (row.get("Position") or "").strip()
+    is_retired = bool(_INJURY_VIZ_RETIRED_RE.search(position))
+    return {
+        "raw_team": row.get("Team"),
+        "raw_name": raw_name,
+        "search_name": search_name,
+        "first_name": first_name,
+        "last_name": last_name,
+        "position_group": (_INJURY_VIZ_RETIRED_RE.sub("", position)[:1] or None),
+        "is_retired_contract": is_retired,
+        "nhl_season_id": nhl_season_id,
+        "season_display": season_display,
+        "is_playoffs": is_playoffs,
+        "injury_type": row.get("Injury Type"),
+        "injury_type_group": row.get("Injury type group"),
+        "games_missed": row.get("Games Missed"),
+        "start_game": row.get("Start"),
+        "end_game": row.get("End"),
+        "cap_hit": row.get("Cap Hit"),
     }
