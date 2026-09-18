@@ -40,28 +40,23 @@ reference row a given player uses, is still this module's job.
 
 Player-name matching across sources is exact-string (per user: already reconciled).
 
+Reads NHLStats through the read-only FantasyAssistant login (nhlstats_db.py) -- nothing here
+depends on the pipeline/ package, so this folder runs on its own.
+
 Usage:
     python build_aggregate_workbook.py
 """
 
 import logging
 import re
-import sys
 from datetime import timedelta
 from pathlib import Path
-
-# Makes "python build_aggregate_workbook.py" work regardless of the caller's cwd, matching
-# this module's own documented usage -- nhl_pipeline lives in the sibling pipeline/ folder,
-# which is never on sys.path by itself.
-_PIPELINE_ROOT = str(Path(__file__).resolve().parent.parent / "pipeline")
-if _PIPELINE_ROOT not in sys.path:
-    sys.path.insert(0, _PIPELINE_ROOT)
 
 from openpyxl.utils import column_index_from_string as ci, get_column_letter as cl
 
 import gsheets_io
+import nhlstats_db
 from gsheets_io import set_defined_name, set_defined_names
-from nhl_pipeline import db as nhl_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("build_aggregate_workbook")
@@ -2102,7 +2097,7 @@ def rebuild_available(ws, pv_ws, pv_sheet_name, last_pv_row, value_col_letter, v
 
 if __name__ == "__main__":
     log.info("Loading source data from the database...")
-    conn = nhl_db.connect()
+    conn = nhlstats_db.connect()
     cursor = conn.cursor()
     master = load_master_data(cursor)
     conn.close()
@@ -2116,7 +2111,7 @@ if __name__ == "__main__":
     clear_namefix(wb["NameFix"])
     log.info("NameFix: cleared manual alias rows only (dropdown/NO MATCH scratchpad in C: left untouched)")
 
-    sched_conn = nhl_db.connect()
+    sched_conn = nhlstats_db.connect()
     sched_info = rebuild_schedule_info(wb, sched_conn.cursor(), SEASON_NHL_ID)
     sched_conn.close()
     log.info(
