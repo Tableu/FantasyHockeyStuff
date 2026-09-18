@@ -23,7 +23,7 @@
          period/time during ingestion workflow step 8.
 
     Naming: schemas (Reference, Game, Stats, Analytics, Ingestion, Projections, Fantasy,
-    Injuries) live inside a dedicated
+    Injuries, Lineups) live inside a dedicated
     `NHLStats` database rather than a separate `nhl` database (the report's
     `nhl.Reference.Seasons`-style names are 3-part database.schema.table identifiers), and
     rather than the `model` database used earlier in development -- NHLStats keeps this
@@ -72,6 +72,9 @@ IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Fantasy')
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Injuries')
     EXEC('CREATE SCHEMA Injuries');
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Lineups')
+    EXEC('CREATE SCHEMA Lineups');
 GO
 
 -- ============================================================================
@@ -998,7 +1001,51 @@ CREATE TABLE Injuries.Spells
 GO
 
 -- ============================================================================
--- 9. Indexes
+-- 9. Lineups schema
+-- ============================================================================
+
+-- A team's deployment for one game, derived from Game.Shifts (calc/lineups.py): who
+-- dressed, which forward trio / defence pair each skater opened the game in, PP/PK units,
+-- and the starting goalie. Unit membership comes from shared 5v5 seconds in the opening
+-- minutes of period 1 (clustered greedily into trios/pairs); unit RANK comes from period-1
+-- EV ice time only, never full-game TOI -- full-game TOI encodes in-game injuries and
+-- benchings, and this table is used as a lockout-time lineup feature/label for training
+-- (see docs/fantasy-ai/data-sources.md), so a rank that leaked game-N events would
+-- overstate backtest accuracy. Linemates are recovered by grouping on (GameID, TeamID,
+-- ForwardLine / DefensePair / PowerPlayUnit / PenaltyKillUnit).
+CREATE TABLE Lineups.GameLineups
+(
+    GameLineupID        BIGINT IDENTITY(1,1) NOT NULL,
+    GameID              BIGINT NOT NULL,
+    TeamID              INT NOT NULL,
+    PlayerID            BIGINT NOT NULL,
+    PositionCode        VARCHAR(5) NOT NULL,       -- that game's position (Stats.PlayerGameStats), not the player's current one
+    Dressed             BIT NOT NULL,              -- in the boxscore; the backup goalie counts, a scratched skater doesn't appear at all
+    IsStartingGoalie    BIT NOT NULL DEFAULT 0,    -- goalie on the ice at P1 0:00
+    ForwardLine         TINYINT NULL,              -- 1..4; NULL for non-forwards and a 13th F left out of every trio
+    DefensePair         TINYINT NULL,              -- 1..3; NULL for non-defence and a 7th D left out of every pair
+    PowerPlayUnit       TINYINT NULL,              -- 1..2; NULL when the team had no PP unit *or* too little PP time to tell (TeamHadPowerPlay)
+    PenaltyKillUnit     TINYINT NULL,              -- 1..2; same rule with SH time (TeamHadPenaltyKill)
+    Period1EVSeconds    SMALLINT NOT NULL DEFAULT 0,   -- the unit-ranking signal
+    EVSeconds           SMALLINT NOT NULL DEFAULT 0,
+    PPSeconds           SMALLINT NOT NULL DEFAULT 0,
+    SHSeconds           SMALLINT NOT NULL DEFAULT 0,
+    TeamHadPowerPlay    BIT NOT NULL DEFAULT 0,    -- team had >= 60 s of PP time, so PowerPlayUnit NULL really means "not on a unit"
+    TeamHadPenaltyKill  BIT NOT NULL DEFAULT 0,
+    CreatedAt           DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_GameLineups PRIMARY KEY (GameLineupID),
+    CONSTRAINT UQ_GameLineups UNIQUE (GameID, TeamID, PlayerID),
+    CONSTRAINT FK_GameLineups_Game FOREIGN KEY (GameID)
+        REFERENCES Game.Games(GameID),
+    CONSTRAINT FK_GameLineups_Team FOREIGN KEY (TeamID)
+        REFERENCES Reference.Teams(TeamID),
+    CONSTRAINT FK_GameLineups_Player FOREIGN KEY (PlayerID)
+        REFERENCES Reference.Players(PlayerID)
+);
+GO
+
+-- ============================================================================
+-- 10. Indexes
 -- ============================================================================
 
 CREATE INDEX IX_Plays_GameID
@@ -1081,10 +1128,16 @@ CREATE INDEX IX_InjurySpells_PlayerStart
 
 CREATE INDEX IX_InjurySpells_SeasonTeam
     ON Injuries.Spells(SeasonID, TeamID);
+
+CREATE INDEX IX_GameLineups_TeamGame
+    ON Lineups.GameLineups(TeamID, GameID);
+
+CREATE INDEX IX_GameLineups_PlayerGame
+    ON Lineups.GameLineups(PlayerID, GameID);
 GO
 
 -- ============================================================================
--- 10. Seed data
+-- 11. Seed data
 -- ============================================================================
 
 -- Situations. "ALL" is the aggregate row (no strength filter) used when a metric is

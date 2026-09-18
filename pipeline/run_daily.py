@@ -11,6 +11,8 @@ Usage:
     python run_daily.py --lookback-days 14   # override the default 7-day lookback
     python run_daily.py --game-id 2025020740 # ingest exactly one game, by NHL game id (no schedule refresh)
     python run_daily.py --dry-run            # discovery only, no writes (no schedule refresh)
+    python run_daily.py --season 20242025    # backfill a past season instead of season_config.json's
+                                             # (date range from Reference.Schedule; no schedule refresh)
 
 Exits with status 1 if any game (or the schedule refresh) failed, 0 otherwise, so a
 scheduler can alert on failure.
@@ -39,7 +41,31 @@ def parse_args():
     parser.add_argument("--lookback-days", type=int, default=discovery.DEFAULT_LOOKBACK_DAYS)
     parser.add_argument("--game-id", type=int, default=None, help="Ingest exactly one NHL game id")
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no writes")
+    parser.add_argument("--season", type=int, default=None, metavar="YYYYYYYY",
+                        help="Backfill this past season (NHL season id, e.g. 20242025) instead of season_config.json")
     return parser.parse_args()
+
+
+def season_config_from_schedule(cursor, nhl_season_id: int) -> dict:
+    """A season_config.json-shaped dict for a past season, bounded by that season's
+    regular-season games in Reference.Schedule (filled for every season back to 2000-01 by
+    import_injury_history.py) so nothing has to be hand-written per season."""
+    cursor.execute(
+        "SELECT MIN(sc.GameDate), MAX(sc.GameDate) FROM Reference.Schedule sc "
+        "JOIN Reference.Seasons s ON s.SeasonID = sc.SeasonID WHERE s.NHLSeasonID = ? AND sc.GameType = '2'",
+        nhl_season_id,
+    )
+    start, end = cursor.fetchone()
+    if start is None:
+        raise SystemExit(f"Reference.Schedule has no regular-season games for {nhl_season_id} -- import the schedule first")
+    start_year = str(nhl_season_id)[:4]
+    return {
+        "SeasonID_NHL": nhl_season_id,
+        "DisplayName": f"{start_year}-{str(nhl_season_id)[6:]}",
+        "StartDate": start.isoformat(),
+        "EndDate": end.isoformat(),
+        "IncludeGameTypes": [2],
+    }
 
 
 def schedule_refresh_window(season_cfg: dict, lookback_days: int, backfill: bool) -> tuple:
@@ -50,16 +76,22 @@ def schedule_refresh_window(season_cfg: dict, lookback_days: int, backfill: bool
 
 def main():
     args = parse_args()
-    season_cfg = config.load_season_config()
     conn = db.connect()
     cursor = conn.cursor()
+
+    if args.season:
+        # A past season is always a full reload, and its schedule is already on hand.
+        season_cfg = season_config_from_schedule(cursor, args.season)
+        args.backfill = True
+    else:
+        season_cfg = config.load_season_config()
 
     season_id = ingest_season.ensure_season(cursor, season_cfg)
     conn.commit()
 
     failures = 0
 
-    if not args.game_id and not args.dry_run:
+    if not args.game_id and not args.dry_run and not args.season:
         start_date, end_date = schedule_refresh_window(season_cfg, args.lookback_days, args.backfill)
         log.info("Refreshing schedule from %s to %s", start_date, end_date)
         try:

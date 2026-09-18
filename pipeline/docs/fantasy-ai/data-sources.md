@@ -69,10 +69,24 @@ status and compute eligibility per the league's platform (not yet confirmed whic
 
 ## Chosen approach for historical lineups: derive opening lines from Game.Shifts
 
-Prototype: `lines_from_shifts.py` (next to this file). For each team, count seconds each
-pair of forwards (or defensemen) shares on ice at 5v5 during the opening window of period 1,
-greedily cluster into trios/pairs, rank units by TOI; PP units the same way over all seconds
-the team has the man advantage.
+**In the DB (2026-09-17):** `Lineups.GameLineups` (one row per game/team/player: dressed,
+F line 1-4, D pair 1-3, PP/PK unit 1-2, starting goalie, P1-EV/5v5/PP/SH seconds), derived by
+`nhl_pipeline/calc/lineups.py` as the `LINEUPS` stage of every game ingest and by
+`backfill_lineups.py` for games already loaded. `run_daily.py --season YYYYYYYY` backfills a
+past season (date range from `Reference.Schedule`). Prototype: `lines_from_shifts.py` (next
+to this file). For each team, count seconds each pair of forwards (or defensemen) shares on
+ice at 5v5 during the opening window of period 1, greedily cluster into trios/pairs; PP/PK
+units the same way over all seconds the team is up/down a skater (strength from the
+play-event timeline, since shift charts overlap at every line change).
+
+**Unit rank comes from period-1 EV TOI, not full-game TOI** (revises the note below):
+full-game TOI encodes in-game injuries/benchings, i.e. game-N information, into what is used
+as a lockout-time feature. Measured on 2025-26: the line *number* changes between consecutive
+games 60% of the time under P1 ranking and still 52% under full-game ranking, so line number
+is a weak signal either way; trio *membership* (36% of forwards get a new linemate, 20% of D
+a new partner) is the stable feature. Structure check: 93% of team-games cluster into four
+full trios, 99% into three full pairs; the derived starter is the most-used goalie 97% of the
+time (the rest are pulls).
 
 Validation on 2025-26 (`Game.Shifts` already holds all 1,312 games):
 - TOR vs ANA 2026-03-12: derived PP1 includes Maccelli and PP2 includes Groulx, matching a
@@ -91,13 +105,35 @@ live Daily Faceoff feature, quantifying the gap on 2025-26 via 5v5hockey.
 
 ## Agreed design directions
 
-**Noise injection (interim):** at training time only, perturb a calibrated fraction of
-team-games' opening lines with structured edits — adjacent-line winger swap (L2↔L3 most
-likely), game-time-decision scratch replaced by the healthy extra with everyone bumping, D pair
-flip, PP2→PP1 promotion — so the projection models don't over-trust lineup features. Calibrate
-rates from the 5v5hockey overlap when available; until then use game N-1 → N opening-line churn
-from the DB as an upper bound. Implement as `perturb(opening_lineup, healthy_extras, rng)` so
-it can be swapped for model predictions later.
+**Training feature for the projection models (decided 2026-09-17): variant B primary,
+variant A control, projected-lineup model deferred.** The training feature must have the same
+error distribution as the live feature (Daily Faceoff's pre-game chart, which differs from the
+opening lineup only by late scratches / a winger swap / PP changes):
+- **B** = actual opening lineup of game N through `perturb()` (structured, calibrated noise).
+  Matches live best; the failure mode is under-calibrated noise → the model over-trusts
+  lineup features → backtest overstates live. Guarded by calibrating from an over-estimate.
+- **A** = previous game's opening lineup. Leak-proof, noisier than live → the model
+  under-weights lineup info (safe direction). Kept as the control: train on A and on B,
+  score the B-model on A-features; the gap bounds the bet on the live feed's quality.
+- **C** = projected-lineup model: a smarter A; its job is P(plays) and the DFO-outage
+  fallback, not the training feature. Not built yet.
+
+Built: `nhl_pipeline/lineups/{store,calibration,perturb,features}.py` and
+`build_lineup_features.py` → `data/lineups/features_{A|B}_{season}.parquet` (one row per
+game/team/lockout-knowable candidate: dressed in the team's last 10 games ∪ injured for the
+team that day ∪ actually dressed; `feat_*` columns from the variant's source lineup,
+`label_*` from the actual one, linemate ids for feature lookups). Leakage is asserted in
+code: A only reads games dated before the target; B's healthy-extras pool is the lookback
+pool minus `Injuries.Spells` — never a later game.
+
+**Noise calibration, staged:** `calibration.measure_churn` measures game N-1 → N churn from
+`GameLineups` (2025-26: scratch 4.2% of healthy skaters, new linemate 36% F / 20% D, PP unit
+change 22%, PK 36%) and `perturb_rates` turns it into per-game edit counts; these are a
+deliberate over-estimate of chart error and get replaced by the measured DFO-vs-opening
+discrepancy once the live snapshot job has run (`build_lineup_features.py --rates`). The
+goalie rate is a fixed 10% judgment call (consecutive-game starter churn is rotation, not
+chart error). The churn → edit-count mapping is approximate: membership-based rates land
+within ~10-20% of target, rank-based ones ~35% under (adjacent reorders cancel).
 
 **Projected-lineup model:** predicts, as of lockout for game N, P(dresses) per rostered skater
 and unit assignment (trio / pair / PP unit). Labels = opening lines of game N. Features (all
@@ -110,11 +146,11 @@ with the same greedy clustering → evaluate on held-out seasons vs baseline and
 and the model supplies P(plays) and the ingest-failure fallback.
 
 ## Next steps
-1. `nhl_pipeline/calc` module + `GameLineups` table (game, team, player, unit type, unit rank,
-   opening TOI) for all ingested games, wired into `orchestration/pipeline.py`.
-2. ~~`import_injury_history.py`~~ — done 2026-09-17 (see above). Remaining: clear
-   `Injuries.UnresolvedPlayerNames` by hand and re-run the affected seasons.
-3. Backfill older seasons into the DB (older `season_config.json` + `run_daily.py --backfill`);
-   `Reference.Schedule` already has them.
+1. ~~`GameLineups` derivation~~ — done 2026-09-17 (`Lineups.GameLineups`, feature variants A/B).
+2. ~~`import_injury_history.py`~~ — done 2026-09-17. Two names remain unresolved (Tommy
+   Westlund, Scott Thomas: not in the NHL search index).
+3. Backfill older seasons: `python run_daily.py --season YYYYYYYY` (~45 min each; 2024-25 done
+   as the smoke test), then `backfill_lineups.py --season YYYY-YY` if the season was loaded
+   before the LINEUPS stage existed. Shift charts exist from 2010-11.
 4. Daily lockout snapshot job for the live sources above (`Lineups.*` tables keyed by
    game/date/snapshot time), after confirming the league's hosting platform.

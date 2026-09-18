@@ -4,3 +4,5 @@ openpyxl>=3.1
 gspread>=6.0
 google-auth>=2.30
 tableauhyperapi>=0.0.26558
+pandas>=2.2
+pyarrow>=17

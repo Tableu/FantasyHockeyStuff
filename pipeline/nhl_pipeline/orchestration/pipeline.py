@@ -1,7 +1,7 @@
 """Runs the full ingestion workflow for one game, in dependency order:
 fetch -> teams/players -> game -> raw responses -> plays -> shots -> goals -> shifts ->
-on-ice players -> official stats -> xG -> on-ice analytics -> individual analytics ->
-goalie analytics. Every stage is wrapped by logging_utils.run_stage, which records
+on-ice players -> official stats -> lineups -> xG -> on-ice analytics -> individual
+analytics -> goalie analytics. Every stage is wrapped by logging_utils.run_stage, which records
 SUCCESS/FAILED to Ingestion.IngestionRuns and re-raises on failure so run_daily's outer
 loop can skip to the next game without losing the failure record.
 
@@ -14,7 +14,7 @@ from nhl_pipeline import db
 from nhl_pipeline.api import boxscore as api_boxscore
 from nhl_pipeline.api import play_by_play as api_play_by_play
 from nhl_pipeline.api import shift_charts as api_shift_charts
-from nhl_pipeline.calc import goalie_stats, individual_stats, on_ice_stats, situation_resolver, strength_toi, xg_model
+from nhl_pipeline.calc import goalie_stats, individual_stats, lineups, on_ice_stats, situation_resolver, strength_toi, xg_model
 from nhl_pipeline.ingest import games, goals, official_stats, on_ice, raw_responses
 from nhl_pipeline.ingest import plays as ingest_plays
 from nhl_pipeline.ingest import shifts as ingest_shifts
@@ -100,6 +100,7 @@ def run_game(conn, schedule_game: dict, game_date: str, season_id: int) -> None:
         )
         stage("OFFICIAL_STATS_PP_SH", official_stats.apply_pp_sh_goals_assists, cursor, game_id)
         stage("STRENGTH_TOI", strength_toi.apply_toi_by_strength, cursor, game_id, code_map)
+        stage("LINEUPS", lineups.compute_and_store, cursor, game_id, code_map)
         conn.commit()
 
         xg_version_id = db.fetch_scalar(
