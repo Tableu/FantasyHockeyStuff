@@ -3,6 +3,7 @@ ai_assistant/fantasy_assistant_mcp_config.json
 data/
 AggregateWorkbook/googleSheetsCredentials.json
 AggregateWorkbook/databaseCredentials.txt
+ModelFeatures/databaseCredentials.txt
 ai_assistant/clips/
 __pycache__/
 *.pyc

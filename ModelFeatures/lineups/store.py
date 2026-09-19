@@ -96,5 +96,13 @@ def load_injury_spells(cursor, season_ids: list) -> dict:
     return dict(spells)
 
 
+def load_player_positions(cursor) -> dict:
+    """{PlayerID: PositionCode} from Reference.Players -- the fallback for a candidate whose
+    position no lineup in the window reveals (an injured player who never dressed in it).
+    Position is a static player attribute, so reading it leaks nothing about the game."""
+    cursor.execute("SELECT PlayerID, PositionCode FROM Reference.Players WHERE PositionCode IS NOT NULL")
+    return {r.PlayerID: r.PositionCode for r in cursor.fetchall()}
+
+
 def injured_on(spells: dict, team_id: int, player_id: int, on_date: date) -> bool:
     return any(start <= on_date <= end for start, end in spells.get((team_id, player_id), ()))

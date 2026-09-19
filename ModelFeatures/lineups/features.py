@@ -22,7 +22,7 @@ import random
 
 import pandas as pd
 
-from nhl_pipeline.lineups import perturb, store
+from lineups import perturb, store
 
 CANDIDATE_LOOKBACK = 10
 
@@ -69,6 +69,7 @@ def build_lineup_features(cursor, season_ids: list, variant: str, rates: dict | 
         raise ValueError("variant B needs perturb rates (calibration.perturb_rates)")
     team_games = store.load_team_games(cursor, season_ids)
     spells = store.load_injury_spells(cursor, season_ids)
+    static_positions = store.load_player_positions(cursor)
     rng = random.Random(seed)
 
     rows = []
@@ -90,7 +91,10 @@ def build_lineup_features(cursor, season_ids: list, variant: str, rates: dict | 
             positions = dict(pool)
             positions.update({p: pl.position for p, pl in target.players.items()})
             for p in injured_today - set(positions):
-                positions[p] = None
+                # An injured candidate who dressed in none of the lookback games has no
+                # position from any lineup; fall back to his static one so the row can still
+                # be classified as a skater downstream.
+                positions[p] = static_positions.get(p)
 
             healthy_extras = {
                 p: pos for p, pos in pool.items()

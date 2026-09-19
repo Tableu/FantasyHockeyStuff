@@ -187,8 +187,11 @@ opening lineup only by late scratches / a winger swap / PP changes):
 - **C** = projected-lineup model: a smarter A; its job is P(plays) and the DFO-outage
   fallback, not the training feature. Not built yet.
 
-Built: `nhl_pipeline/lineups/{store,calibration,perturb,features}.py` and
-`build_lineup_features.py` → `data/lineups/features_{A|B}_{season}.parquet` (one row per
+Built: `ModelFeatures/lineups/{store,calibration,perturb,features}.py` and
+`ModelFeatures/build_lineup_features.py` → `ModelFeatures/data/lineups/features_{A|B}_{season}.parquet`
+(moved out of `pipeline/` on 2026-09-18: feature generation is read-only and lives beside it,
+connecting as the `FantasyAssistant` reader login. `calc/lineups.py` stays here -- it writes
+`Lineups.GameLineups` as the LINEUPS ingest stage.) One row per
 game/team/lockout-knowable candidate: dressed in the team's last 10 games ∪ injured for the
 team that day ∪ actually dressed; `feat_*` columns from the variant's source lineup,
 `label_*` from the actual one, linemate ids for feature lookups). Leakage is asserted in
@@ -199,7 +202,8 @@ pool minus `Injuries.Spells` — never a later game.
 `GameLineups` (2025-26: scratch 4.2% of healthy skaters, new linemate 36% F / 20% D, PP unit
 change 22%, PK 36%) and `perturb_rates` turns it into per-game edit counts; these are a
 deliberate over-estimate of chart error and get replaced by the measured DFO-vs-opening
-discrepancy once the live snapshot job has run (`build_lineup_features.py --rates`). The
+discrepancy once the live snapshot job has run (`ModelFeatures/build_lineup_features.py
+--rates`). The
 goalie rate is a fixed 10% judgment call (consecutive-game starter churn is rotation, not
 chart error). The churn → edit-count mapping is approximate: membership-based rates land
 within ~10-20% of target, rank-based ones ~35% under (adjacent reorders cancel).

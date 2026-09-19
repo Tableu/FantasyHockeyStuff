@@ -16,7 +16,7 @@ error) until the live snapshot job can measure the real thing; see that module.
 
 import random
 
-from nhl_pipeline.lineups.store import PlayerLineup, TeamGame
+from lineups.store import PlayerLineup, TeamGame
 
 # The goalie rate is a judgment call, not a measurement: consecutive-game starter churn
 # (~60%) is rotation, not chart error. A pre-game chart names the wrong starter far less

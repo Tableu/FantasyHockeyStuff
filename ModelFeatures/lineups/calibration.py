@@ -13,7 +13,7 @@ scratch is only counted when the player wasn't in an Injuries.Spells spell on ga
 
 from collections import Counter
 
-from nhl_pipeline.lineups import store
+from lineups import store
 
 
 def _rate(hits: int, tries: int) -> float | None:

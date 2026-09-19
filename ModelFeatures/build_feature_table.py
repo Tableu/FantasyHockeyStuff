@@ -1,0 +1,124 @@
+#!/usr/bin/env python
+"""Builds the shared skater feature table the projection models train on.
+
+Two stages, matching the two kinds of feature (see features/base.py and features/assemble.py):
+
+    base       one row per (game, team, skater candidate) -- the player's history as of the
+               lineup lock, his team's and opponent's form, schedule, rink and injuries.
+               Lineup-independent, so it is built once per season and reused.
+    assemble   joins a lineup variant onto it (A, or B with --copies perturbed copies) and
+               derives the features that need both: line-mate quality, the opposing starting
+               goalie's form, and the unit-known flags.
+
+The candidate universe is the lineup features' own keys, filtered to skaters, so the join is
+1:1 by construction. Missing lineup parquets are built by build_lineup_features.py first.
+
+Read-only: every database access here is a SELECT through the FantasyAssistant reader login
+(nhlstats_db.py). Writes to NHLStats belong to pipeline/.
+
+Usage:
+    python build_feature_table.py --season 2025-26
+    python build_feature_table.py --season 2025-26 --season 2024-25 --variant B --copies 3
+    python build_feature_table.py --season 2025-26 --verify      # + the leakage/sanity suite
+"""
+
+import argparse
+import logging
+import subprocess
+import sys
+
+import pandas as pd
+
+import nhlstats_db
+import paths
+from features import assemble as assemble_module
+from features import base as base_module
+from features import columns as columns_module
+from features import extract
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("build_feature_table")
+
+SKATER_POSITIONS = ("C", "L", "R", "D")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Build the skater feature table")
+    parser.add_argument("--season", action="append", required=True, metavar="YYYY-YY",
+                        help="Season to build; repeat for more than one")
+    parser.add_argument("--variant", choices=("A", "B"), default="A",
+                        help="Lineup variant to assemble against (default A)")
+    parser.add_argument("--copies", type=int, default=3, help="Perturbed copies for variant B")
+    parser.add_argument("--verify", action="store_true", help="Run the verification suite after building")
+    return parser.parse_args()
+
+
+def lineup_parquet(season: str, variant: str, copies: int) -> pd.DataFrame:
+    path = paths.LINEUPS_DIR / f"features_{variant}_{season}.parquet"
+    if not path.exists():
+        log.info("%s missing -- building it", path.name)
+        command = [sys.executable, str(paths.PROJECT_ROOT / "build_lineup_features.py"),
+                   "--season", season, "--variant", variant]
+        if variant == "B":
+            command += ["--copies", str(copies)]
+        subprocess.run(command, check=True, cwd=paths.PROJECT_ROOT)
+    return pd.read_parquet(path)
+
+
+def candidates_from(lineup: pd.DataFrame) -> pd.DataFrame:
+    """The base table's universe: the variant's skater keys, one row each."""
+    return (lineup.loc[lineup["position"].isin(SKATER_POSITIONS),
+                       ["season_id", "game_id", "game_date", "team_id", "player_id", "position"]]
+            .drop_duplicates()
+            .reset_index(drop=True))
+
+
+def main():
+    args = parse_args()
+    seasons = list(dict.fromkeys(args.season))
+    conn = nhlstats_db.connect()
+    cursor = conn.cursor()
+    season_ids = extract.season_ids_for(cursor, seasons)
+    paths.ensure(paths.FEATURES_DIR)
+    paths.ensure(paths.DOCS_DIR)
+
+    for season in seasons:
+        season_id = season_ids[season]
+        log.info("=== %s (SeasonID %d) ===", season, season_id)
+
+        variant_a = lineup_parquet(season, "A", args.copies)
+        candidates = candidates_from(variant_a)
+        log.info("candidate universe: %d skater rows over %d games", len(candidates), candidates["game_id"].nunique())
+
+        skaters, goalies = base_module.build_base(cursor, [season_id], candidates)
+        base_path = paths.FEATURES_DIR / f"base_{season}.parquet"
+        goalie_path = paths.FEATURES_DIR / f"goalies_rolling_{season}.parquet"
+        skaters.to_parquet(base_path, index=False)
+        goalies.to_parquet(goalie_path, index=False)
+        log.info("base: %d rows x %d columns -> %s", len(skaters), skaters.shape[1], base_path.name)
+
+        lineup = variant_a if args.variant == "A" else lineup_parquet(season, "B", args.copies)
+        table = assemble_module.assemble(skaters, goalies, lineup)
+        out_path = paths.FEATURES_DIR / f"skaters_{args.variant}_{season}.parquet"
+        table.to_parquet(out_path, index=False)
+        log.info("variant %s: %d rows x %d columns -> %s", args.variant, len(table), table.shape[1], out_path.name)
+
+        doc = columns_module.render(
+            table,
+            f"Skater feature table -- {season}, lineup variant {args.variant}",
+            "Generated by `build_feature_table.py`; every column below is asserted to exist in the parquet.\n"
+            "Each feature is computable at the daily lineup lock: see `features/base.py` for the leakage rule.",
+        )
+        doc_path = paths.DOCS_DIR / f"feature-table-{args.variant}-{season}.md"
+        doc_path.write_text(doc, encoding="utf-8", newline="\n")
+        log.info("documented %d columns -> docs/%s", table.shape[1], doc_path.name)
+
+        if args.verify:
+            from features import verify
+            verify.run(cursor, table, skaters, candidates, season_id)
+
+    log.info("Done")
+
+
+if __name__ == "__main__":
+    main()

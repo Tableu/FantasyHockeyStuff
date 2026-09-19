@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""Builds the lockout-time lineup feature table (nhl_pipeline/lineups/features.py) for the
+"""Builds the lockout-time lineup feature table (lineups/features.py) for the
 projection models, in variant A (previous game's lineup) or B (this game's lineup with
-calibrated noise, nhl_pipeline/lineups/perturb.py), from Lineups.GameLineups. Writes
+calibrated noise, lineups/perturb.py), from Lineups.GameLineups. Writes
 data/lineups/features_{variant}_{season}.parquet (gitignored; regenerate whenever the
 derivation or the feature set changes).
 
-Variant B's noise rates come from measured game-to-game churn (nhl_pipeline/lineups/
+Variant B's noise rates come from measured game-to-game churn (lineups/
 calibration.py) unless --rates points at a JSON file -- which is where the measured
 Daily Faceoff discrepancy goes once the live snapshot job has produced it. --calibrate
 alone just measures and writes data/lineups/churn_{season}.json.
@@ -20,14 +20,14 @@ import argparse
 import json
 import logging
 
-from nhl_pipeline import db
-from nhl_pipeline.config import PROJECT_ROOT
-from nhl_pipeline.lineups import calibration, features
+import nhlstats_db
+import paths
+from lineups import calibration, features
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("build_lineup_features")
 
-DATA_DIR = PROJECT_ROOT / "data" / "lineups"
+DATA_DIR = paths.LINEUPS_DIR
 
 
 def parse_args():
@@ -43,7 +43,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    conn = db.connect()
+    conn = nhlstats_db.connect()
     cursor = conn.cursor()
     cursor.execute(
         f"SELECT SeasonID, DisplayName FROM Reference.Seasons WHERE DisplayName IN ({','.join('?' * len(args.season))})",
