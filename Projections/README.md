@@ -16,7 +16,8 @@ parquet. There is no `pyodbc` in `requirements.txt`, and that is the point.
 
 ```
 pip install -r requirements.txt
-python train.py --all                 # fit the stack on variant B (the default)
+python train.py --all                 # fit on 2023-24+2024-25, hold 2025-26 out (scored)
+python train.py --all --no-holdout     --train-seasons 2023-24,2024-25,2025-26   # the deployment build: nothing held back
 python calibrate.py                   # fit the dispersion section 5 needs
 python evaluate.py --cross-features A # score the holdout, and bound the live-feed risk
 python evaluate.py --recalibrate      # ... with drift.py's rolling level correction
@@ -105,7 +106,27 @@ should read that table first.
 ## Splits
 
 Fit on 2023-24 + 2024-25, early-stop on the last 25% of 2024-25 by date, hold 2025-26 out
-whole. Nothing is shuffled across time. Variant B holds three perturbed copies of every
+whole. Nothing is shuffled across time. That is the *scored* build, and every number in this
+file comes from it.
+
+`--no-holdout` is the **deployment** build: every available season goes into the fit, nothing
+is held back, and no metrics come out. That is what currently sits in `models/` — trained on
+all three seasons, for projecting 2026-27. The distinction matters, and `docs/model-cards-B.md`
+states it at the top: the shipped boosters are not the ones the accuracy tables describe.
+
+Withholding the most recent season from a model you intend to *use* costs real accuracy.
+Measured by training on one season at a time and scoring 2025-26:
+
+```
+training data                     shots MAE   hits MAE   plays AUC
+2023-24 only (2 seasons stale)      1.0349     0.8876     0.9893
+2024-25 only (1 season stale)       1.0123     0.8656     0.9898
+2023-24 + 2024-25                   1.0137     0.8606     0.9906
+```
+
+**Recency beats volume.** One recent season clearly beats one stale season, while adding the
+older season on top was close to a wash. Retrain before each season; backfilling further into
+the past is a much weaker lever than staying current. Variant B holds three perturbed copies of every
 candidate; they share a game date, so date-based splitting keeps them on the same side, which
 `data.chronological_split` asserts, and each row carries `weight = 1/copies`.
 

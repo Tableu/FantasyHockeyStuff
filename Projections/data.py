@@ -148,12 +148,20 @@ class Split:
 def chronological_split(table: pd.DataFrame, train_seasons, holdout_season,
                         early_stop_fraction=0.25) -> Split:
     """Fit on `train_seasons`, early-stop on the last `early_stop_fraction` of the latest one
-    by date, hold `holdout_season` out whole."""
+    by date, hold `holdout_season` out whole.
+
+    `holdout_season=None` is the deployment case: every available season goes into the fit
+    and there is nothing left to score against. Legitimate once the holdout has done its job
+    -- a model shipped for next season should not be handicapped by withholding the most
+    recent one, which is also the most relevant one. It does mean the run produces no
+    metrics, so the numbers in `docs/` keep describing the last model that *was* scored.
+    """
     in_train = table["season"].isin(train_seasons)
-    in_holdout = table["season"] == holdout_season
+    in_holdout = (table["season"] == holdout_season) if holdout_season else pd.Series(
+        False, index=table.index)
     if not in_train.any():
         raise ValueError(f"no rows for training seasons {train_seasons}")
-    if not in_holdout.any():
+    if holdout_season and not in_holdout.any():
         raise ValueError(f"no rows for holdout season {holdout_season}")
 
     latest = max(train_seasons)

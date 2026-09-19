@@ -55,6 +55,10 @@ def parse_args():
                         help="Lineup variant to train on (default B: actual lineup + noise)")
     parser.add_argument("--train-seasons", default=",".join(TRAIN_SEASONS))
     parser.add_argument("--holdout-season", default=HOLDOUT_SEASON)
+    parser.add_argument("--no-holdout", action="store_true",
+                        help="Train on every --train-seasons season with nothing held back. "
+                             "The deployment build: no metrics come out of it, so docs/ keeps "
+                             "describing the last model that was actually scored.")
     parser.add_argument("--features-dir", type=Path, default=None)
     parser.add_argument("--walk-forward", action="store_true",
                         help="Refit monthly across the holdout season instead of once")
@@ -220,10 +224,13 @@ def top_features(booster, columns, count):
 
 def run(args):
     train_seasons = [s.strip() for s in args.train_seasons.split(",") if s.strip()]
-    seasons = train_seasons + [args.holdout_season]
+    holdout_season = None if args.no_holdout else args.holdout_season
+    seasons = train_seasons + ([holdout_season] if holdout_season else [])
     table = data.load_seasons(seasons, args.variant, args.features_dir)
     matrix, columns = data.build_feature_matrix(table)
-    split = data.chronological_split(table, train_seasons, args.holdout_season)
+    split = data.chronological_split(table, train_seasons, holdout_season)
+    if holdout_season is None:
+        log.warning("no holdout: this is a deployment build, and it produces no metrics")
     log.info("%s over %d features, variant %s", split, len(columns), args.variant)
 
     weights = data.copy_weights(table)
@@ -260,13 +267,14 @@ def run(args):
                 json.dumps({**record, "params": target.lgb_params(),
                             "feature_columns": columns}, indent=2), encoding="utf-8")
 
-    save_predictions(table, split, chain, args.variant)
+    if len(split.holdout):
+        save_predictions(table, split, chain, args.variant)
 
     summary_path = paths.REPORTS_DIR / f"training_{args.variant}.json"
     summary_path.write_text(json.dumps({
         "variant": args.variant,
         "train_seasons": train_seasons,
-        "holdout_season": args.holdout_season,
+        "holdout_season": holdout_season,
         "early_stop_cutoff": split.cutoff.strftime("%Y-%m-%d"),
         "features": len(columns),
         "models": records,
