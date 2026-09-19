@@ -10,8 +10,11 @@ step numbers) because IndividualCorsiForPct is defined relative to the player's 
 CorsiFor, which on_ice_stats produces.
 """
 
+import logging
+
 from nhl_pipeline import db
 from nhl_pipeline.api import boxscore as api_boxscore
+from nhl_pipeline.api import html_shift_report as api_html_shift_report
 from nhl_pipeline.api import play_by_play as api_play_by_play
 from nhl_pipeline.api import shift_charts as api_shift_charts
 from nhl_pipeline.calc import goalie_stats, individual_stats, lineups, on_ice_stats, situation_resolver, strength_toi, xg_model
@@ -24,6 +27,12 @@ from nhl_pipeline.orchestration import logging_utils
 
 TERMINAL_STAGE = "GOALIE_STATS"
 
+log = logging.getLogger("pipeline")
+
+
+def _has_shift_rows(shift_data: dict) -> bool:
+    return any(row.get("startTime") and row.get("endTime") for row in shift_data.get("data", []))
+
 
 def run_game(conn, schedule_game: dict, game_date: str, season_id: int) -> None:
     nhl_game_id = schedule_game["id"]
@@ -33,6 +42,20 @@ def run_game(conn, schedule_game: dict, game_date: str, season_id: int) -> None:
         pbp = logging_utils.run_stage(cursor, None, season_id, "FETCH_PLAY_BY_PLAY", api_play_by_play.get_play_by_play, nhl_game_id)
         box = logging_utils.run_stage(cursor, None, season_id, "FETCH_BOXSCORE", api_boxscore.get_boxscore, nhl_game_id)
         shift_data = logging_utils.run_stage(cursor, None, season_id, "FETCH_SHIFT_CHARTS", api_shift_charts.get_shift_charts, nhl_game_id)
+
+        if not _has_shift_rows(shift_data):
+            # The JSON feed returns an empty data[] for whole stretches of a season (all 57
+            # of 2024021235..2024021291, say) while the static HTML TOI reports still have
+            # the shifts -- see api/html_shift_report.py. The fallback payload has the same
+            # shape, so every stage below is unaware of which source it came from; the
+            # FETCH_SHIFT_CHARTS_HTML row in Ingestion.IngestionRuns is the audit trail.
+            log.warning("Shift chart JSON empty for game %s -- falling back to the HTML shift report", nhl_game_id)
+            shift_data = logging_utils.run_stage(
+                cursor, None, season_id, "FETCH_SHIFT_CHARTS_HTML",
+                api_html_shift_report.get_shift_chart_payload, nhl_game_id,
+                pbp.get("rosterSpots", []), schedule_game["homeTeam"]["id"], schedule_game["awayTeam"]["id"],
+            )
+
         conn.commit()
 
         team_id_by_nhl = logging_utils.run_stage(

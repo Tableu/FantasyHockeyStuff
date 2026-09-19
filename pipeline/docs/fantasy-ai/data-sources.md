@@ -67,6 +67,40 @@ status and compute eligibility per the league's platform (not yet confirmed whic
 - Wayback Machine captures of Daily Faceoff team pages: ~10–35 captured days per year per
   team — spot checks only.
 
+### Shift charts: HTML TOI reports as a fallback — IMPLEMENTED (2026-09-18)
+The JSON endpoint the pipeline ingests from
+(`api.nhle.com/stats/rest/en/shiftcharts?cayenneExp=gameId={id}`) returns an empty `data[]`
+for whole stretches of a season with no error: every game from **2024021235 to 2024021291**
+(the last 57 of 2024-25) came back with 0 rows, leaving those games with no shifts, no on-ice
+players, no strength TOI and no lineups.
+
+The static HTML reports still carry the data:
+`https://www.nhl.com/scores/htmlreports/{season}/TH{gametype}{gameno}.HTM` (home) and `TV…`
+(visitor) — e.g. `20242025/TH021291.HTM`. All 114 reports for those 57 games return 200, and
+the same markup is served back to at least 2010-11 and for playoff games, so this also covers
+the older-season backfills.
+
+`nhl_pipeline/api/html_shift_report.py` parses them with the stdlib (no new dependency) into
+the JSON endpoint's payload shape, resolving the reports' sweater number + "LAST, FIRST" to
+player ids via the play-by-play's `rosterSpots[]`. `pipeline.run_game` falls back to it
+automatically whenever the JSON has no shift rows, logging a `FETCH_SHIFT_CHARTS_HTML` stage
+as the audit trail. `run_daily.py --missing-shifts` re-ingests any already-loaded game that
+has no `Game.Shifts` rows.
+
+Parsing notes: only the shift rows carry "MM:SS / MM:SS" (elapsed / remaining) in the start
+and end cells, which separates them from each player's per-period summary table; overtime is
+labelled `OT` (period 4); shootout rows are dropped because the JSON feed omits them too
+(2024021155 went to a shootout yet its shift chart stops at period 4).
+
+Verified: for 2024021234 (a game the JSON still covers) both sources give 766 shift rows with
+identical (player, period, start, end) tuples and identical per-player durations; for
+2024021291 the HTML gives 787 rows against the JSON's 0, and every one of the 40 players'
+shift-summed TOI matches the boxscore's exactly.
+
+Related fix: the JSON `data[]` also contains `typeCode: 505` goal markers with
+`startTime == endTime`, which `ingest/shifts.py` had been storing as zero-second shifts
+(~6 per game). They are now skipped.
+
 ## Chosen approach for historical lineups: derive opening lines from Game.Shifts
 
 **In the DB (2026-09-17):** `Lineups.GameLineups` (one row per game/team/player: dressed,
@@ -151,6 +185,7 @@ and the model supplies P(plays) and the ingest-failure fallback.
    Westlund, Scott Thomas: not in the NHL search index).
 3. Backfill older seasons: `python run_daily.py --season YYYYYYYY` (~45 min each; 2024-25 done
    as the smoke test), then `backfill_lineups.py --season YYYY-YY` if the season was loaded
-   before the LINEUPS stage existed. Shift charts exist from 2010-11.
+   before the LINEUPS stage existed. Shift charts exist from 2010-11, and games the JSON feed
+   drops are picked up from the HTML reports automatically (see above).
 4. Daily lockout snapshot job for the live sources above (`Lineups.*` tables keyed by
    game/date/snapshot time), after confirming the league's hosting platform.

@@ -13,6 +13,10 @@ Usage:
     python run_daily.py --dry-run            # discovery only, no writes (no schedule refresh)
     python run_daily.py --season 20242025    # backfill a past season instead of season_config.json's
                                              # (date range from Reference.Schedule; no schedule refresh)
+    python run_daily.py --missing-shifts     # re-ingest every ingested game that has no Game.Shifts
+                                             # rows (the shift-charts JSON returns an empty data[]
+                                             # for whole stretches of a season; api/html_shift_report.py
+                                             # now covers those, so this repairs the affected games)
 
 Exits with status 1 if any game (or the schedule refresh) failed, 0 otherwise, so a
 scheduler can alert on failure.
@@ -43,7 +47,43 @@ def parse_args():
     parser.add_argument("--dry-run", action="store_true", help="Discovery only, no writes")
     parser.add_argument("--season", type=int, default=None, metavar="YYYYYYYY",
                         help="Backfill this past season (NHL season id, e.g. 20242025) instead of season_config.json")
+    parser.add_argument("--missing-shifts", action="store_true",
+                        help="Re-ingest every already-ingested game that has no Game.Shifts rows")
     return parser.parse_args()
+
+
+def games_missing_shifts(cursor) -> list:
+    """(NHLGameID, GameDate, SeasonID) for every ingested game with no shift rows, across
+    every season. Shifts feed the on-ice players, strength TOI, lineups and all the on-ice
+    analytics, so these games are re-run whole rather than patched stage by stage -- safe
+    because every write in the pipeline is an upsert."""
+    cursor.execute(
+        """
+        SELECT g.NHLGameID, g.GameDate, g.SeasonID
+        FROM Game.Games g
+        WHERE NOT EXISTS (SELECT 1 FROM Game.Shifts s WHERE s.GameID = g.GameID)
+        ORDER BY g.GameDate, g.NHLGameID
+        """
+    )
+    return [(row.NHLGameID, row.GameDate, row.SeasonID) for row in cursor.fetchall()]
+
+
+def run_missing_shifts(conn, cursor) -> int:
+    games = games_missing_shifts(cursor)
+    log.info("%d ingested game(s) with no shift rows", len(games))
+    failures = 0
+    for nhl_game_id, game_date, game_season_id in games:
+        log.info("Re-ingesting game %s (%s)", nhl_game_id, game_date)
+        try:
+            pbp = api_play_by_play.get_play_by_play(nhl_game_id)
+            schedule_game = field_map.schedule_game_from_play_by_play(pbp)
+            pipeline.run_game(conn, schedule_game, pbp["gameDate"], game_season_id)
+            log.info("  OK")
+        except Exception:
+            failures += 1
+            log.exception("  FAILED game %s -- continuing with next game", nhl_game_id)
+    log.info("Done: %d game(s) processed, %d failure(s)", len(games), failures)
+    return failures
 
 
 def season_config_from_schedule(cursor, nhl_season_id: int) -> dict:
@@ -68,6 +108,19 @@ def season_config_from_schedule(cursor, nhl_season_id: int) -> dict:
     }
 
 
+def season_config_from_game_id(cursor, nhl_game_id: int) -> dict:
+    """The season config for the season a game id belongs to (its first four digits are the
+    season's starting year). --game-id used to run every game under season_config.json's
+    season, which silently re-stamped a past-season game's Game.Games.SeasonID with the
+    current one."""
+    start_year = int(str(nhl_game_id)[:4])
+    nhl_season_id = int(f"{start_year}{start_year + 1}")
+    current = config.load_season_config()
+    if nhl_season_id == current["SeasonID_NHL"]:
+        return current
+    return season_config_from_schedule(cursor, nhl_season_id)
+
+
 def schedule_refresh_window(season_cfg: dict, lookback_days: int, backfill: bool) -> tuple:
     start_cfg = datetime.strptime(season_cfg["StartDate"], "%Y-%m-%d").date()
     start = start_cfg if backfill else max(start_cfg, date.today() - timedelta(days=lookback_days))
@@ -79,10 +132,15 @@ def main():
     conn = db.connect()
     cursor = conn.cursor()
 
+    if args.missing_shifts:
+        sys.exit(1 if run_missing_shifts(conn, cursor) else 0)
+
     if args.season:
         # A past season is always a full reload, and its schedule is already on hand.
         season_cfg = season_config_from_schedule(cursor, args.season)
         args.backfill = True
+    elif args.game_id:
+        season_cfg = season_config_from_game_id(cursor, args.game_id)
     else:
         season_cfg = config.load_season_config()
 
