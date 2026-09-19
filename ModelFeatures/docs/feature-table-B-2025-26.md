@@ -45,8 +45,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_l5` | 97.4% | giveaways over the previous 5 games played. |
 | `takeaways_l5` | 97.4% | takeaways over the previous 5 games played. |
 | `pim_l5` | 97.4% | pim over the previous 5 games played. |
-| `ppp_l5` | 72.7% | ppp over the previous 5 games played. |
-| `shp_l5` | 72.7% | shp over the previous 5 games played. |
+| `ppp_l5` | 97.4% | ppp over the previous 5 games played. |
+| `shp_l5` | 97.4% | shp over the previous 5 games played. |
 | `faceoff_wins_l5` | 97.4% | faceoff wins over the previous 5 games played. |
 | `faceoff_losses_l5` | 97.4% | faceoff losses over the previous 5 games played. |
 | `toi_l5` | 97.4% | Total toi seconds over the previous 5 games played. |
@@ -73,8 +73,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_l10` | 97.4% | giveaways over the previous 10 games played. |
 | `takeaways_l10` | 97.4% | takeaways over the previous 10 games played. |
 | `pim_l10` | 97.4% | pim over the previous 10 games played. |
-| `ppp_l10` | 84.5% | ppp over the previous 10 games played. |
-| `shp_l10` | 84.5% | shp over the previous 10 games played. |
+| `ppp_l10` | 97.4% | ppp over the previous 10 games played. |
+| `shp_l10` | 97.4% | shp over the previous 10 games played. |
 | `faceoff_wins_l10` | 97.4% | faceoff wins over the previous 10 games played. |
 | `faceoff_losses_l10` | 97.4% | faceoff losses over the previous 10 games played. |
 | `toi_l10` | 97.4% | Total toi seconds over the previous 10 games played. |
@@ -101,8 +101,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_l20` | 97.4% | giveaways over the previous 20 games played. |
 | `takeaways_l20` | 97.4% | takeaways over the previous 20 games played. |
 | `pim_l20` | 97.4% | pim over the previous 20 games played. |
-| `ppp_l20` | 88.4% | ppp over the previous 20 games played. |
-| `shp_l20` | 88.4% | shp over the previous 20 games played. |
+| `ppp_l20` | 97.4% | ppp over the previous 20 games played. |
+| `shp_l20` | 97.4% | shp over the previous 20 games played. |
 | `faceoff_wins_l20` | 97.4% | faceoff wins over the previous 20 games played. |
 | `faceoff_losses_l20` | 97.4% | faceoff losses over the previous 20 games played. |
 | `toi_l20` | 97.4% | Total toi seconds over the previous 20 games played. |
@@ -129,8 +129,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_std` | 97.4% | giveaways over the season to date. |
 | `takeaways_std` | 97.4% | takeaways over the season to date. |
 | `pim_std` | 97.4% | pim over the season to date. |
-| `ppp_std` | 89.0% | ppp over the season to date. |
-| `shp_std` | 89.0% | shp over the season to date. |
+| `ppp_std` | 97.4% | ppp over the season to date. |
+| `shp_std` | 97.4% | shp over the season to date. |
 | `faceoff_wins_std` | 97.4% | faceoff wins over the season to date. |
 | `faceoff_losses_std` | 97.4% | faceoff losses over the season to date. |
 | `toi_std` | 97.4% | Total toi seconds over the season to date. |
@@ -197,8 +197,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_p60_l5` | 97.4% | giveaways per 60 minutes of all-situations ice time over the previous 5 games played. |
 | `takeaways_p60_l5` | 97.4% | takeaways per 60 minutes of all-situations ice time over the previous 5 games played. |
 | `pim_p60_l5` | 97.4% | pim per 60 minutes of all-situations ice time over the previous 5 games played. |
-| `ppp_p60_l5` | 72.7% | ppp per 60 minutes of all-situations ice time over the previous 5 games played. |
-| `shp_p60_l5` | 72.7% | shp per 60 minutes of all-situations ice time over the previous 5 games played. |
+| `ppp_p60_l5` | 97.4% | ppp per 60 minutes of all-situations ice time over the previous 5 games played. |
+| `shp_p60_l5` | 97.4% | shp per 60 minutes of all-situations ice time over the previous 5 games played. |
 | `faceoff_wins_p60_l5` | 97.4% | faceoff wins per 60 minutes of all-situations ice time over the previous 5 games played. |
 | `faceoff_losses_p60_l5` | 97.4% | faceoff losses per 60 minutes of all-situations ice time over the previous 5 games played. |
 | `icf_all_p60_l5` | 97.4% | icf all per 60 minutes of all-situations ice time over the previous 5 games played. |
@@ -217,8 +217,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_p60_l10` | 97.4% | giveaways per 60 minutes of all-situations ice time over the previous 10 games played. |
 | `takeaways_p60_l10` | 97.4% | takeaways per 60 minutes of all-situations ice time over the previous 10 games played. |
 | `pim_p60_l10` | 97.4% | pim per 60 minutes of all-situations ice time over the previous 10 games played. |
-| `ppp_p60_l10` | 84.5% | ppp per 60 minutes of all-situations ice time over the previous 10 games played. |
-| `shp_p60_l10` | 84.5% | shp per 60 minutes of all-situations ice time over the previous 10 games played. |
+| `ppp_p60_l10` | 97.4% | ppp per 60 minutes of all-situations ice time over the previous 10 games played. |
+| `shp_p60_l10` | 97.4% | shp per 60 minutes of all-situations ice time over the previous 10 games played. |
 | `faceoff_wins_p60_l10` | 97.4% | faceoff wins per 60 minutes of all-situations ice time over the previous 10 games played. |
 | `faceoff_losses_p60_l10` | 97.4% | faceoff losses per 60 minutes of all-situations ice time over the previous 10 games played. |
 | `icf_all_p60_l10` | 97.4% | icf all per 60 minutes of all-situations ice time over the previous 10 games played. |
@@ -237,8 +237,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_p60_l20` | 97.4% | giveaways per 60 minutes of all-situations ice time over the previous 20 games played. |
 | `takeaways_p60_l20` | 97.4% | takeaways per 60 minutes of all-situations ice time over the previous 20 games played. |
 | `pim_p60_l20` | 97.4% | pim per 60 minutes of all-situations ice time over the previous 20 games played. |
-| `ppp_p60_l20` | 88.4% | ppp per 60 minutes of all-situations ice time over the previous 20 games played. |
-| `shp_p60_l20` | 88.4% | shp per 60 minutes of all-situations ice time over the previous 20 games played. |
+| `ppp_p60_l20` | 97.4% | ppp per 60 minutes of all-situations ice time over the previous 20 games played. |
+| `shp_p60_l20` | 97.4% | shp per 60 minutes of all-situations ice time over the previous 20 games played. |
 | `faceoff_wins_p60_l20` | 97.4% | faceoff wins per 60 minutes of all-situations ice time over the previous 20 games played. |
 | `faceoff_losses_p60_l20` | 97.4% | faceoff losses per 60 minutes of all-situations ice time over the previous 20 games played. |
 | `icf_all_p60_l20` | 97.4% | icf all per 60 minutes of all-situations ice time over the previous 20 games played. |
@@ -257,8 +257,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `giveaways_p60_std` | 97.4% | giveaways per 60 minutes of all-situations ice time over the season to date. |
 | `takeaways_p60_std` | 97.4% | takeaways per 60 minutes of all-situations ice time over the season to date. |
 | `pim_p60_std` | 97.4% | pim per 60 minutes of all-situations ice time over the season to date. |
-| `ppp_p60_std` | 89.0% | ppp per 60 minutes of all-situations ice time over the season to date. |
-| `shp_p60_std` | 89.0% | shp per 60 minutes of all-situations ice time over the season to date. |
+| `ppp_p60_std` | 97.4% | ppp per 60 minutes of all-situations ice time over the season to date. |
+| `shp_p60_std` | 97.4% | shp per 60 minutes of all-situations ice time over the season to date. |
 | `faceoff_wins_p60_std` | 97.4% | faceoff wins per 60 minutes of all-situations ice time over the season to date. |
 | `faceoff_losses_p60_std` | 97.4% | faceoff losses per 60 minutes of all-situations ice time over the season to date. |
 | `icf_all_p60_std` | 97.4% | icf all per 60 minutes of all-situations ice time over the season to date. |
@@ -268,10 +268,10 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `iff_5v5_p60_std` | 97.4% | iff 5v5 per 60 minutes of all-situations ice time over the season to date. |
 | `ixg_5v5_p60_std` | 97.4% | ixg 5v5 per 60 minutes of all-situations ice time over the season to date. |
 | `ixg_5v4_p60_std` | 97.4% | ixg 5v4 per 60 minutes of all-situations ice time over the season to date. |
-| `pp_ppp_p60_l5` | 68.6% | ppp per 60 minutes of pp-strength ice time over the previous 5 games played. |
-| `pp_ppp_p60_l10` | 82.4% | ppp per 60 minutes of pp-strength ice time over the previous 10 games played. |
-| `pp_ppp_p60_l20` | 87.0% | ppp per 60 minutes of pp-strength ice time over the previous 20 games played. |
-| `pp_ppp_p60_std` | 87.8% | ppp per 60 minutes of pp-strength ice time over the season to date. |
+| `pp_ppp_p60_l5` | 88.1% | ppp per 60 minutes of pp-strength ice time over the previous 5 games played. |
+| `pp_ppp_p60_l10` | 92.5% | ppp per 60 minutes of pp-strength ice time over the previous 10 games played. |
+| `pp_ppp_p60_l20` | 93.5% | ppp per 60 minutes of pp-strength ice time over the previous 20 games played. |
+| `pp_ppp_p60_std` | 93.7% | ppp per 60 minutes of pp-strength ice time over the season to date. |
 | `ev_shots_p60_l5` | 97.4% | shots per 60 minutes of ev-strength ice time over the previous 5 games played. |
 | `ev_points_p60_l5` | 97.4% | points per 60 minutes of ev-strength ice time over the previous 5 games played. |
 | `ev_shots_p60_l10` | 97.4% | shots per 60 minutes of ev-strength ice time over the previous 10 games played. |
@@ -463,8 +463,8 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `target_assists` | 75.4% | Target: his actual assists in this game. |
 | `target_points` | 75.4% | Target: his actual points in this game. |
 | `target_pim` | 75.4% | Target: his actual pim in this game. |
-| `target_ppp` | 26.3% | Target: his actual ppp in this game. |
-| `target_shp` | 26.3% | Target: his actual shp in this game. |
+| `target_ppp` | 75.4% | Target: his actual ppp in this game. |
+| `target_shp` | 75.4% | Target: his actual shp in this game. |
 | `target_ixg` | 75.4% | Target: his actual ixg in this game. |
 | `target_played` | 100.0% | Target: did he take a shift in this game. |
 | `mate1_points_p60_l20` | 49.4% | That line-mate's own points p60 l20. |

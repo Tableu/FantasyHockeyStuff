@@ -65,8 +65,10 @@ def player_games(cursor, season_ids: list) -> pd.DataFrame:
                pgs.FaceoffWins AS faceoff_wins, pgs.FaceoffLosses AS faceoff_losses,
                pgs.TimeOnIceSeconds AS toi,
                pgs.PowerPlayTOISeconds AS pp_toi, pgs.ShortHandedTOISeconds AS sh_toi,
-               pgs.PowerPlayGoals + pgs.PowerPlayAssists AS ppp,
-               pgs.ShortHandedGoals + pgs.ShortHandedAssists AS shp,
+               -- NULL, not 0, for a player with no points at all: COALESCE or 65% of
+               -- played rows arrive as NULL and only scorers reach the PP/SH models.
+               COALESCE(pgs.PowerPlayGoals, 0) + COALESCE(pgs.PowerPlayAssists, 0) AS ppp,
+               COALESCE(pgs.ShortHandedGoals, 0) + COALESCE(pgs.ShortHandedAssists, 0) AS shp,
                l.Period1EVSeconds AS p1_ev_seconds,
                l.ForwardLine AS actual_line, l.DefensePair AS actual_pair,
                l.PowerPlayUnit AS actual_pp, l.PenaltyKillUnit AS actual_pk,
