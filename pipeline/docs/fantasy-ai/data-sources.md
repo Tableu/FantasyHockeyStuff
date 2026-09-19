@@ -101,6 +101,41 @@ Related fix: the JSON `data[]` also contains `typeCode: 505` goal markers with
 `startTime == endTime`, which `ingest/shifts.py` had been storing as zero-second shifts
 (~6 per game). They are now skipped.
 
+### Shift-chart hygiene: what the feed gets wrong — FIXED (2026-09-18)
+Summing `Game.Shifts.DurationSeconds` disagreed with the official boxscore TOI for 279 of
+104,951 player-games (0.27%). Three separate causes, found by comparing the stored payloads
+against `Stats.PlayerGameStats`:
+
+1. **129 — duplicate and nested shift rows in the feed.** Either the same interval twice
+   under different `shiftNumber`s, or a period-long row plus a second row inside it
+   (Binnington, 2024020677: `P1 0-1200` *and* `P1 122-1200`). Merging each player's
+   intervals within a period reconciled these *exactly* with the boxscore.
+2. **27 — our own unique key destroyed ice time.** `UQ_Shifts (GameID, PlayerID,
+   PeriodNumber, ShiftStartSeconds)` is not unique in the feed: a goalie's real
+   `P3 0-1200 dur=1200` shares that key with a glitch row like `P3 0-517 dur=63`
+   (Shesterkin, 2024020750), and the upsert let the second overwrite the first — up to 19
+   minutes lost per game, 16 of the 27 goalies.
+3. **123 — genuine feed-vs-official disagreement.** Even merged, the shift chart exceeds
+   the boxscore (median 21s, max 324s). Not fixable; the boxscore is the authority, and
+   `Stats.PlayerGameStats.TimeOnIceSeconds` already comes from it.
+
+`ingest/shifts.py` now merges each (player, period)'s intervals into a non-overlapping set
+before writing, with `DurationSeconds = end - start` (the payload's own duration field is
+wrong on the glitch rows), deleting the game's rows first so a shrunken set leaves no
+orphans. Merging before the write also makes the unique key safe. `backfill_shift_merge.py`
+applied it to the 122 already-ingested games that changed, rebuilding their on-ice players,
+strength TOI, lineups and analytics from the stored payloads — no API calls.
+
+After the pass: 0 overlapping intervals league-wide, 0 rows whose duration disagrees with
+their interval, and shift-summed TOI within 5s of the boxscore for 99,857 of 99,986
+player-games (99.87%). Of the 129 that remain, 4 are a fourth feed artifact — an overtime
+that ended on a goal leaves a phantom shift running to the 5:00 limit (Zegras, 2024021158:
+`P4 59-300` when the last OT play was at 0:59) — and the other 125 are cause 3 above.
+
+Bearing on the feature table: prefer `Stats.PlayerGameStats` for total TOI, and treat
+shift-derived seconds (period-1 EV time, strength TOI) as accurate to within a few seconds
+per game rather than exact.
+
 ## Chosen approach for historical lineups: derive opening lines from Game.Shifts
 
 **In the DB (2026-09-17):** `Lineups.GameLineups` (one row per game/team/player: dressed,
