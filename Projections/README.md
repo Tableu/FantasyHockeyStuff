@@ -1,0 +1,202 @@
+# Projections
+
+Per-category projection models for skaters — section 3 of the Fantasy Hockey AI build plan.
+They read the shared feature table built by the sibling `ModelFeatures/` folder and emit, for
+each player-game, the lambda table the Monte Carlo layer (section 5) turns into distributions.
+
+**These models project stats, not fantasy points.** Nothing here knows what a goal is worth.
+A scoring system is data you supply — `weights.py` loads a JSON file and applies it — so one
+fitted stack serves any number of leagues, and two formats can be compared against one fixed
+set of models. `scoresets/` holds examples; none of them is a default and nothing loads one
+automatically.
+
+This folder **never opens a database connection**. `ModelFeatures/` reads NHLStats through the
+read-only `FantasyAssistant` login and writes parquet; everything here starts from that
+parquet. There is no `pyodbc` in `requirements.txt`, and that is the point.
+
+```
+pip install -r requirements.txt
+python train.py --all                 # fit the stack on variant B (the default)
+python calibrate.py                   # fit the dispersion section 5 needs
+python evaluate.py --cross-features A # score the holdout, and bound the live-feed risk
+python evaluate.py --recalibrate      # ... with drift.py's rolling level correction
+python evaluate.py --list-scoresets   # the example scoring files
+python evaluate.py --weights scoresets/points-league.json                    --weights scoresets/banger-league.json   # composite metrics per format
+python modelcards.py                  # render docs/model-cards-B.md from the artefacts
+python predict.py --season 2025-26 --variant A
+```
+
+## The stack
+
+Everything is one LightGBM model per target, run in this order because each offsets on the
+one before:
+
+```
+plays ─▶ toi ─▶ ev_toi, pp_toi
+                 └─▶ shots ─▶ goals
+                      └─▶ hits, blocks, assists, pim
+                                  └─▶ pp_point_share
+```
+
+| model | objective | offset | what it is |
+| --- | --- | --- | --- |
+| `plays` | binary + isotonic | — | P(he is in tonight's lineup), over every lockout-knowable candidate |
+| `toi`, `ev_toi` | L2 | — | seconds, conditional on playing |
+| `pp_toi` | poisson | — | power-play seconds; a large zero mass |
+| `shots`, `hits`, `blocks`, `assists`, `pim` | poisson | `log(TOI/3600)` | counts, conditional on playing |
+
+Tweedie looked like the right shape for the two zero-heavy targets (`pp_toi`, `pim`) and was
+measurably worse on both — it over-shrinks the tail. Poisson on each.
+| `goals` | poisson | `log(E[shots])` | shots times a heavily shrunk shooting percentage |
+| `pp_point_share` | cross-entropy | — | P(a given point is a power-play point) |
+| `sh_point_share` | cross-entropy | — | the short-handed twin |
+
+Three design decisions carry most of the weight:
+
+**The offset is the opportunity.** `init_score = log(TOI/3600)` under a log link means the
+trees can only learn a per-60 rate; the ice time is supplied, not fitted. On top of it goes a
+mean-matching intercept, `log(Σwy / Σw·e^offset)`, because a bare offset starts the model at a
+rate of exactly 1.0 per 60 — shots run at 5.6, so without the intercept the trees have to
+climb log(5.6) in link space and stop short. That showed up as a flat 12–28% under-prediction
+on every offset model *except* assists, whose true rate of 1.05 per 60 happens to sit exactly
+where the bare offset starts. Adding it cut shots' PIT deviation from 0.052 to 0.008.
+
+**Offsets come from out-of-fold predictions.** Live, the shots model sees a *predicted* TOI
+with error in it. Training it against the actual TOI would teach it a precision it will never
+have at the lock, so `train.py` fits K-fold models (grouped by game) for `toi` and `shots` and
+offsets the downstream models on those.
+
+**Counts are conditional on playing, and `p_plays` stays separate.** The count models are fit
+on rows where the player played but predict on every candidate. `predict.py` keeps `p_plays`
+as its own column rather than folding it in, because a 40% chance of a 12-point night is not
+the same distribution as a certain 4.8-point night — and in a head-to-head format that
+difference is the whole variance question.
+
+## Scoring systems
+
+`weights.py` is mechanism only — it loads a JSON file and applies it to a stat line:
+
+```json
+{"name": "points-league",
+ "skaters": {"goals": 4.0, "assists": 2.5, "ppp": 1.0, "shp": 1.25,
+             "hits": 0.4, "blocks": 0.4, "shots": 0.25, "pim": 0.2}}
+```
+
+Without `--weights`, `evaluate.py` reports per-category metrics only. Pass one or more and it
+adds composite metrics per format. Running the three examples against one fixed set of models
+shows how much the format matters:
+
+```
+format           MAE   mean pts/game   top-100 capture   best baseline MAE
+banger-league   2.541      5.28             0.755              2.632
+points-league   1.857      2.77             0.697              1.897
+scoring-only    2.698      2.40             0.644              2.694
+```
+
+**The models' value is a function of the scoring system, not a property of the models.** In a
+peripheral-heavy format they capture 75.5% of the available points and clearly beat every
+baseline, because hits, blocks and shots are the categories they project well. In a
+goals-and-assists-only format they capture 64.4% and are level with a naive season-rate
+baseline (2.698 against 2.694) — those categories sit at the irreducible noise floor, so
+there is nothing to add. Anyone choosing a league, or weighting a decision agent's objective,
+should read that table first.
+
+
+## Splits
+
+Fit on 2023-24 + 2024-25, early-stop on the last 25% of 2024-25 by date, hold 2025-26 out
+whole. Nothing is shuffled across time. Variant B holds three perturbed copies of every
+candidate; they share a game date, so date-based splitting keeps them on the same side, which
+`data.chronological_split` asserts, and each row carries `weight = 1/copies`.
+
+`train.py --walk-forward` refits monthly on an expanding window across the holdout season
+instead, which is how the season simulator will actually consume these models.
+
+Measured, it buys less than expected: fantasy-points MAE 1.847 against the single fit's
+1.845, top-100 capture 0.699 against 0.698. What it does help is *level* — the monthly refit
+tracks the season's own rates, cutting PIM's bias from −13.0% to −9.9% and blocks' from +5.9%
+to +4.7%, with Spearman up a point or two everywhere. So the single fit is the right default
+and walk-forward is the honesty check, not a free accuracy gain. Seven monthly refits take
+about an hour.
+
+## Variants, and the live-feed bound
+
+Variant B trains on the actual lineup with calibrated noise; variant A uses the previous
+game's lineup and is the shape a live Daily Faceoff chart is closer to. `evaluate.py
+--cross-features A` scores the B-trained boosters on A's features, which bounds how much of
+the accuracy is borrowed from knowing the lineup better than the feed will.
+
+Measured on 2025-26: fantasy-points MAE moves from 1.845 to 1.841 and top-100 capture from
+0.698 to 0.697, while `plays` AUC falls from 0.991 to 0.970. That is the expected shape —
+knowing tonight's lineup settles *whether* a player dresses, not how many shots he takes once
+he does. The category projections do not lean on the lineup feed; P(plays) does.
+
+## League drift, and `drift.py`
+
+The models learn a league; the next season is a different one. Between 2024-25 and 2025-26,
+league shooting percentage rose 4.2% (continuing 10.18% → 10.64% → 11.09%) and **elite**
+power-play time rose 10.7%. A model fit on the old level projects the new one low, and the
+shortfall lands on exactly the players whose level matters most:
+
+```
+tier        FP bias   goals bias   PP TOI bias        ... after drift.py
+1-50         -5.3%       -7.7%        -9.2%     →   -2.7%  -3.5%  -4.1%
+51-100       -5.3%       -8.9%        -7.8%     →   -3.1%  -4.8%  -2.7%
+101-200      -4.3%       -8.7%        -5.6%     →   -2.2%  -4.5%  -0.3%
+201-350      -1.0%       +0.1%        -3.3%     →   +0.8%  +4.7%  +2.1%
+351+         +1.1%       -1.1%        +1.4%     →   +2.5%  +3.4%  +7.0%
+
+mean |per-tier FP bias|:  3.39%  →  2.26%
+```
+
+`drift.py` re-estimates each category's level from the trailing 30 days of *completed* games
+and scales lambda by it — the same mean-matching intercept the models already carry, refreshed
+against the current season instead of the training ones. Leakage-safe by construction: a game
+on date D only ever uses games that finished before D.
+
+Two honest caveats. The correction is league-wide and uniform, so it **over-corrects the
+bottom** — fringe players were already unbiased and now run 2–3% high. And league-wide versus
+stratified-by-predicted-value was chosen by comparing holdout bias, so the improvement above is
+mildly optimistic; it wants re-checking on a season the models have never seen.
+
+It is off by default (`--recalibrate` to enable) because it trades MAE for calibration:
+fantasy-point MAE goes 1.845 → 1.854 while per-tier bias nearly halves. Take it when *level*
+matters — draft boards, trade valuation, head-to-head win probabilities — and leave it off when
+ranking is all you need.
+
+### What this replaced
+
+The elite shortfall was first diagnosed as over-shrinkage in the goals model and Tweedie
+over-shrinkage in `pp_toi`. Both were wrong. Loosening the goals model on the early-stop slice
+does not reduce elite bias (+0.6% tight, +1.7% and +1.2% loosened, at equal deviance and AUC),
+and the drift figures above match the observed bias almost exactly. `pp_toi` did move to
+Poisson — worth it on its own (MAE 46.9s → 46.1s, ρ 0.764 → 0.776) — but it was never the cause.
+The goals model's parameters were left alone deliberately.
+
+
+## What section 5 consumes
+
+`predict.py` writes one row per player-game: `p_plays`, `toi`/`ev_toi`/`pp_toi`,
+`lambda_{shots,hits,blocks,assists,goals,pim}`, `pp_point_share` and `sh_point_share`. No
+points columns — a consumer applies its own scoring. `calibrate.py` writes `reports/dispersion.json` beside it: the maximum-likelihood NB
+dispersion per category under `Var = mu + theta*mu²`, plus the shared game-quality variance
+estimated from how much the categories' residuals move together. Section 5's Gamma multiplier
+takes the shared part; the remainder is per-category noise, so the two do not double-count.
+
+Sampling PPP and SHP as *shares of each sampled point* — rather than as independent counts —
+is what keeps `PPP + SHP <= points` in the simulator. Both strengths are modelled: an earlier
+version skipped short-handed points because they are under 1% of *one particular* scoring
+system, which was exactly the kind of league assumption that does not belong in the models.
+`predict.py` clamps the pair in the rare case the two independent fits sum above 1.
+
+## Known limits
+
+- **Three seasons.** 2023-24 has no `prev_*` columns, since 2022-23 is not ingested; LightGBM
+  splits on the NaN natively. Backfilling further seasons is a re-run of
+  `ModelFeatures/build_feature_table.py` and a retrain, nothing more.
+- **Season-level drift is the dominant residual bias; `drift.py` halves it.** See below.
+- **PIM is the weakest model** (Spearman 0.14). It is 3% of scoring, and the NB shape fits it
+  poorly — a lumpy 0/2/5 target is not really a count. Good enough for its weight.
+- **Goalies are not modelled here.** They need their own feature table (starts, shots-against,
+  save percentage), which is a section 2 job; `ModelFeatures/data/features/goalies_rolling_*`
+  only carries opposing-goalie form for the skater table.

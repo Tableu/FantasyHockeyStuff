@@ -1,0 +1,9 @@
+{
+  "name": "banger-league",
+  "description": "Peripheral-heavy: hits, blocks and PIM carry most of the value.",
+  "skaters": {
+    "goals": 3.0, "assists": 2.0, "ppp": 0.5, "shp": 0.5,
+    "hits": 1.5, "blocks": 1.5, "shots": 0.5, "pim": 1.0
+  },
+  "goalies": {"wins": 3.0, "shutouts": 2.0, "saves": 0.2, "goals_against": -1.0}
+}

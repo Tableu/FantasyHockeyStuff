@@ -1,0 +1,6 @@
+{
+  "name": "scoring-only",
+  "description": "Goals and assists only -- no peripherals. The hardest format to project.",
+  "skaters": {"goals": 6.0, "assists": 4.0, "ppp": 2.0, "shp": 2.0},
+  "goalies": {"wins": 5.0, "shutouts": 3.0, "goals_against": -2.0}
+}

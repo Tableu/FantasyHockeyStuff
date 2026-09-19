@@ -1,0 +1,12 @@
+{
+  "name": "points-league",
+  "description": "Head-to-head weekly points league: balanced, with PP/SH point bonuses.",
+  "skaters": {
+    "goals": 4.0, "assists": 2.5, "ppp": 1.0, "shp": 1.25,
+    "hits": 0.4, "blocks": 0.4, "shots": 0.25, "pim": 0.2
+  },
+  "goalies": {
+    "wins": 3.0, "shutouts": 2.5, "ot_losses": 1.0,
+    "saves": 0.25, "goals_against": -1.0, "losses": -1.5
+  }
+}

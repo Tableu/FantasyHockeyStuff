@@ -1,0 +1,7 @@
+# Model training for the skater projection stack. No database driver on purpose: this folder
+# reads the feature parquets built by ../ModelFeatures and never connects to NHLStats.
+lightgbm>=4.5
+scikit-learn>=1.5
+scipy>=1.14
+pandas>=2.2
+pyarrow>=17
