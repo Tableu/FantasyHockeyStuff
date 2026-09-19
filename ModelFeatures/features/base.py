@@ -220,13 +220,21 @@ def build_base(cursor, season_ids: list, candidates: pd.DataFrame) -> tuple:
 
 
 def add_targets(skaters: pd.DataFrame, facts: pd.DataFrame) -> pd.DataFrame:
-    """What actually happened in the row's own game -- the modelling targets."""
+    """What actually happened in the row's own game -- the modelling targets.
+
+    The join carries `team_id`, and must. A player traded mid-season stays in his old team's
+    candidate pool for a while, correctly marked as not dressing for them; joining on
+    (game, player) alone handed that phantom row the stat line he produced for his *new*
+    team the same night, so 16 player-games a season showed a skater playing for both clubs
+    at once. With the team in the key the phantom gets no row, and `target_played` is False
+    as it should be.
+    """
     target_columns = ["toi", "ev_toi", "pp_toi", "shots", "hits", "blocks", "goals", "assists",
                       "points", "pim", "ppp", "shp", "ixg_all"]
-    actual = facts[["game_id", "player_id"] + target_columns].rename(
+    actual = facts[["game_id", "player_id", "team_id"] + target_columns].rename(
         columns={c: f"target_{'ixg' if c == 'ixg_all' else c}" for c in target_columns}
     )
-    merged = skaters.merge(actual, on=["game_id", "player_id"], how="left")
+    merged = skaters.merge(actual, on=["game_id", "player_id", "team_id"], how="left")
     played = (merged["target_toi"].notna() & (merged["target_toi"] > 0)).rename("target_played")
     return pd.concat([merged, played], axis=1).copy()
 

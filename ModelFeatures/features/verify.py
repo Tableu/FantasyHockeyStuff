@@ -195,6 +195,35 @@ def copy_consistency(table: pd.DataFrame) -> bool:
                    f"lineup columns that differ between copies: {changed or 'none'}")
 
 
+def one_team_per_player_game(table: pd.DataFrame) -> bool:
+    """Nobody plays for two teams in one game.
+
+    A candidate may legitimately appear for two clubs on the same night -- a player traded
+    that week is still in his old team's pool -- but at most one of those rows can have him
+    actually playing. This used to fail: the target join omitted `team_id`, so the phantom
+    row inherited the stat line from the team he was really on.
+    """
+    played = table.loc[table["target_played"].astype(bool), ["game_id", "player_id", "team_id"]]
+    teams = played.drop_duplicates().groupby(["game_id", "player_id"])["team_id"].nunique()
+    offenders = int((teams > 1).sum())
+    candidates = table[["game_id", "player_id", "team_id"]].drop_duplicates()
+    dual = int((candidates.groupby(["game_id", "player_id"])["team_id"].nunique() > 1).sum())
+    return _report("one team per game", offenders == 0,
+                   f"{dual} candidate(s) listed for two teams (legitimate after a trade); "
+                   f"{offenders} of them played for both")
+
+
+def dressed_agrees_with_played(table: pd.DataFrame) -> bool:
+    """A player the lineup says did not dress cannot have taken a shift."""
+    if "label_dressed" not in table.columns:
+        return _report("dressed vs played", True, "no label_dressed column -- skipped")
+    contradictions = int((~table["label_dressed"].fillna(False).astype(bool)
+                          & table["target_played"].astype(bool)).sum())
+    share = contradictions / max(len(table), 1)
+    return _report("dressed vs played", share < 0.001,
+                   f"{contradictions} row(s) not dressed yet played ({share:.3%})")
+
+
 def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFrame, season_id: int) -> bool:
     from features import extract
     has_prior = extract.prior_season_ids(cursor, [season_id])[season_id] is not None
@@ -211,6 +240,8 @@ def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFram
         lineup_agreement(table),
         prior_season(table, has_prior),
         copy_consistency(table),
+        one_team_per_player_game(table),
+        dressed_agrees_with_played(table),
     ]
     passed = sum(1 for r in results if r)
     log.info("%d / %d checks passed", passed, len(results))
