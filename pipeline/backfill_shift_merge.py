@@ -44,11 +44,35 @@ def parse_args():
 
 
 def id_maps(cursor) -> tuple:
+    """({NHLTeamID: TeamID} for every team, {NHLPlayerID: PlayerID} for every player). The
+    team map is narrowed per game by game_team_map() before any row is stored -- see there."""
     cursor.execute("SELECT NHLTeamID, TeamID FROM Reference.Teams WHERE NHLTeamID IS NOT NULL")
     teams = {row[0]: row[1] for row in cursor.fetchall()}
     cursor.execute("SELECT NHLPlayerID, PlayerID FROM Reference.Players WHERE NHLPlayerID IS NOT NULL")
     players = {row[0]: row[1] for row in cursor.fetchall()}
     return teams, players
+
+
+def game_team_map(cursor, game_id: int, teams: dict) -> dict:
+    """{NHLTeamID: TeamID} for just the two teams in this game.
+
+    This is the filter that keeps a mixed payload out of Game.Shifts, and it is not
+    optional: the shiftcharts endpoint sometimes answers a cayenneExp query with another
+    game's shifts folded in under the requested game id. Game 2025020565 (NJD-BUF) came back
+    with 2,179 rows -- 753 BUF, 750 NJD, and 340 VGK plus 336 SJS from an unrelated game.
+    pipeline's own ingest is safe because it passes the two teams straight from the schedule;
+    a league-wide team map here would resolve the strangers and store them.
+    """
+    cursor.execute(
+        """SELECT ht.NHLTeamID, at_.NHLTeamID
+           FROM Game.Games g
+           JOIN Reference.Teams ht ON ht.TeamID = g.HomeTeamID
+           JOIN Reference.Teams at_ ON at_.TeamID = g.AwayTeamID
+           WHERE g.GameID = ?""",
+        game_id,
+    )
+    home_nhl, away_nhl = cursor.fetchone()
+    return {nhl: teams[nhl] for nhl in (home_nhl, away_nhl) if nhl in teams}
 
 
 def stored_rows(cursor, game_id: int) -> set:
@@ -109,7 +133,8 @@ def main():
     changed = failures = seconds_before = seconds_after = 0
     for i, game in enumerate(games, start=1):
         try:
-            wanted = merged_rows(json.loads(game.RawJSON), teams, players)
+            game_teams = game_team_map(cursor, game.GameID, teams)
+            wanted = merged_rows(json.loads(game.RawJSON), game_teams, players)
             current = stored_rows(cursor, game.GameID)
             if wanted == current or not wanted:
                 continue
@@ -124,7 +149,7 @@ def main():
             if args.dry_run:
                 continue
 
-            ingest_shifts.sync_shifts(cursor, game.GameID, json.loads(game.RawJSON)["data"], teams, players)
+            ingest_shifts.sync_shifts(cursor, game.GameID, json.loads(game.RawJSON)["data"], game_teams, players)
             recompute_dependents(cursor, game.GameID, code_map, corsi_version_id, xg_version_id)
             conn.commit()
         except Exception:

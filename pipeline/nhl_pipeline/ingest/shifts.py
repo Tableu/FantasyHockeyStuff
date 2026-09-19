@@ -38,7 +38,14 @@ _SHIFT_TYPE_CODE = 517
 
 def merge_shift_rows(shift_rows: list, team_id_by_nhl: dict, player_id_by_nhl: dict) -> list:
     """Payload rows -> one dict per merged interval, keyed for Game.Shifts. Rows for
-    unknown players/teams, non-shift type codes and zero-length intervals are dropped."""
+    unknown players/teams, non-shift type codes and zero-length intervals are dropped.
+
+    `team_id_by_nhl` must contain *only the two teams in this game*: it is what keeps a mixed
+    payload out of the table. The endpoint occasionally folds another game's shifts into a
+    response under the requested game id -- game 2025020565 (NJD-BUF) returned 2,179 rows
+    including 340 VGK and 336 SJS -- and those rows are only rejected because their team is
+    not in the map. A caller that passes a league-wide map will store them.
+    """
     intervals = collections.defaultdict(list)
     for row in shift_rows:
         if row.get("typeCode") is not None and row["typeCode"] != _SHIFT_TYPE_CODE:
