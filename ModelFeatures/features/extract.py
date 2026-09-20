@@ -246,6 +246,41 @@ def goalie_games(cursor, season_ids: list) -> pd.DataFrame:
     """, season_ids)
 
 
+def goalie_game_facts(cursor, season_ids: list) -> pd.DataFrame:
+    """One row per (game, team, goalie who appeared), for the goalie feature table.
+
+    The official boxscore line (Stats.PlayerGameStats, populated by the goalie half of
+    ingest/official_stats.py) joined to the derived all-situations analytics. Decision and
+    IsStarter exist nowhere else -- the NHL assigns them and nothing in this database can
+    reconstruct them -- which is why the pipeline now stores them.
+
+    Rows are restricted to goalies who actually took the net (TimeOnIceSeconds > 0); a
+    dressed backup who never played has no performance to roll forward.
+
+    GoalieGameAdvancedStats also declares HighDanger/Rebound/Rush columns, but no calc stage
+    populates them -- 0 of 8,322 rows -- so they are left out rather than carried as columns
+    that are always NULL. Worth revisiting if that stage is ever written.
+    """
+    return _frame(cursor, f"""
+        SELECT g.SeasonID AS season_id, pgs.GameID AS game_id, g.GameDate AS game_date,
+               pgs.TeamID AS team_id, pgs.PlayerID AS player_id,
+               pgs.TimeOnIceSeconds AS toi,
+               pgs.ShotsAgainst AS shots_against, pgs.Saves AS saves,
+               pgs.GoalsAgainst AS goals_against,
+               pgs.Decision AS decision, pgs.IsStarter AS is_starter,
+               g.LastPeriodType AS last_period_type,
+               a.ExpectedGoalsAgainst AS xga, a.GoalsSavedAboveExpected AS gsax
+        FROM Stats.PlayerGameStats pgs
+        JOIN Game.Games g ON g.GameID = pgs.GameID
+        LEFT JOIN Analytics.GoalieGameAdvancedStats a
+               ON a.GameID = pgs.GameID AND a.GoaliePlayerID = pgs.PlayerID
+              AND a.TeamID = pgs.TeamID AND a.SituationID = {SITUATION_ALL}
+        WHERE g.SeasonID IN ({{seasons}}) AND pgs.PositionCode = 'G'
+          AND pgs.TimeOnIceSeconds > 0
+        ORDER BY pgs.PlayerID, g.GameDate, pgs.GameID
+    """, season_ids)
+
+
 def season_ids_for(cursor, display_names: list) -> dict:
     """{DisplayName: SeasonID} -- the CLI takes '2025-26', everything else keys on SeasonID."""
     placeholders = ",".join("?" * len(display_names))

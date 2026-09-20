@@ -115,8 +115,36 @@ PATTERNS = [
     (r"^injured_top4_defence$", "Injured defencemen whose last known pair was 1 or 2."),
     (r"^injured_pp1$", "Injured players whose last known power-play unit was 1."),
 
+    # goalie family (features/goalies.py). Ordered before the generic patterns below so
+    # sv_pct_l5 is not swallowed by the catch-all "{stat} over the {w}" rule.
+    (r"^sv_pct_(\w+)$", "Save percentage over the {w}."),
+    (r"^gsax_per_shot_(\w+)$", "Goals saved above expected per shot over the {w}."),
+    (r"^xg_against_per_shot_(\w+)$", "Expected goals against per shot faced over the {w}: "
+                                     "the quality of the shots he saw."),
+    (r"^shots_against_p60_(\w+)$", "Shots faced per 60 minutes over the {w} -- his workload."),
+    (r"^goals_against_p60_(\w+)$", "Goals allowed per 60 minutes over the {w}."),
+    (r"^start_share_(\w+)$", "Share of his appearances over the {w} that were starts, as "
+                             "opposed to relief."),
+    (r"^win_pct_(\w+)$", "Share of his appearances over the {w} that he won."),
+    (r"^sv_pct_trend$", "Save percentage over the last 5 appearances minus the last 20: is "
+                        "he heating up."),
+    (r"^workload_trend$", "Shots faced per 60 over the last 5 appearances minus the last 20."),
+    (r"^(saves|xga|gsax)_(\w+)$", "{1} summed over the {w}."),
+    (r"^(started|won|lost|ot_lost|shutout)_(\w+)$", "Times he {1} over the {w}."),
+    (r"^starter_known$", "The source lineup named a starting goalie for this team."),
+    (r"^partner_(.+)$", "His tandem partner's own {1}: who else the team can start."),
+    (r"^partner_id$", "The other goalie listed for this team in this game."),
+    (r"^prev_sv_pct$", "Save percentage in the previous season."),
+    (r"^prev_gsax_per_shot$", "Goals saved above expected per shot in the previous season."),
+    (r"^prev_shots_against_p60$", "Shots faced per 60 minutes in the previous season."),
+    (r"^prev_(appearances|starts|shots_against|saves|goals_against|gsax|wins|shutouts|toi)$",
+     "{1} in the previous season."),
+
     # targets
     (r"^target_played$", "Target: did he take a shift in this game."),
+    (r"^target_started$", "Target: did he actually start."),
+    (r"^target_(won|lost|ot_lost|shutout)$", "Target: did he actually record a {1}."),
+    (r"^target_sv_pct$", "Target: his actual save percentage in this game."),
     (r"^target_(\w+)$", "Target: his actual {1} in this game."),
 ]
 

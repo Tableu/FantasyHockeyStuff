@@ -224,6 +224,103 @@ def dressed_agrees_with_played(table: pd.DataFrame) -> bool:
                    f"{contradictions} row(s) not dressed yet played ({share:.3%})")
 
 
+# ---------------------------------------------------------------------------
+# Goalie arm
+# ---------------------------------------------------------------------------
+
+def decisions_per_game(table: pd.DataFrame) -> bool:
+    """No game hands out two wins or two losses.
+
+    "Exactly one of each" is the wrong assertion here, and the difference matters. The
+    candidate universe is what was knowable at the lock, so a goalie who played without
+    being a plausible candidate -- an opening-week starter nobody had a previous lineup for,
+    an emergency recall -- has no row, and his game legitimately shows no decision. Over
+    2025-26 that is 33 appearances, all clustered in the season's first days.
+
+    A *duplicate* decision would be a real fault: it would mean the join fanned out, or that
+    a traded goalie was credited on both clubs. So the invariant is an upper bound, and the
+    coverage figure is reported alongside rather than enforced.
+    """
+    played = table[table["target_played"].astype(bool)]
+    per_game = played.groupby("game_id")[["target_won", "target_lost", "target_ot_lost"]].sum()
+    losses = per_game["target_lost"] + per_game["target_ot_lost"]
+    duplicate_wins = int((per_game["target_won"] > 1).sum())
+    duplicate_losses = int((losses > 1).sum())
+    complete = int(((per_game["target_won"] == 1) & (losses == 1)).sum())
+    return _report("decisions per game",
+                   duplicate_wins == 0 and duplicate_losses == 0,
+                   f"{len(per_game)} game(s); {duplicate_wins} with two wins, "
+                   f"{duplicate_losses} with two losses; "
+                   f"{complete / max(len(per_game), 1):.1%} have both decisions in the "
+                   f"candidate universe")
+
+
+def one_starter_per_team(table: pd.DataFrame) -> bool:
+    starts = table[table["target_started"].astype(bool)]
+    per_team = starts.groupby(["game_id", "team_id"]).size()
+    wrong = int((per_team != 1).sum())
+    return _report("one starter per team", wrong == 0,
+                   f"{len(per_team)} team-game(s), {wrong} without exactly one starter")
+
+
+def shutouts_are_wins(table: pd.DataFrame) -> bool:
+    """A shutout is the goalie of record with nothing past him -- never a relief appearance."""
+    shutouts = table[table["target_shutout"].astype(bool)]
+    not_a_win = int((~shutouts["target_won"].astype(bool)).sum())
+    conceded = int((shutouts["target_goals_against"].fillna(0) > 0).sum())
+    return _report("shutouts", not_a_win == 0 and conceded == 0,
+                   f"{len(shutouts)} shutout(s); {not_a_win} not a win, {conceded} conceded")
+
+
+def saves_reconcile(table: pd.DataFrame) -> bool:
+    """Saves + goals against should equal shots against.
+
+    It does not always, and the remainder is real rather than an ingest fault: a goal can be
+    credited against a goalie without a shot on goal being credited to anyone, most often a
+    deflection in off a defender. Always off by exactly one, in all three seasons, at around
+    1% of appearances. Both numbers are official, so neither is 'corrected'; the check exists
+    to notice if that rate ever moves.
+    """
+    played = table[table["target_played"].astype(bool)]
+    total = played["target_saves"] + played["target_goals_against"]
+    mismatched = int((total != played["target_shots_against"]).sum())
+    share = mismatched / max(len(played), 1)
+    return _report("saves reconcile", share < 0.02,
+                   f"{mismatched} of {len(played)} appearance(s) where saves + GA != shots "
+                   f"against ({share:.2%}); around 1% is the established rate")
+
+
+def goalie_history_coverage(base: pd.DataFrame) -> bool:
+    known = base["source_game_date"].notna().mean()
+    return _report("history coverage", known > 0.5,
+                   f"{known:.1%} of rows have a prior appearance to roll forward")
+
+
+def run_goalies(cursor, table: pd.DataFrame, base: pd.DataFrame,
+                candidates: pd.DataFrame, season_id: int) -> bool:
+    """The goalie table's own suite. Shares the leakage and duplicate checks with the skater
+    arm, and adds the ones that only make sense for a goalie."""
+    log.info("--- goalie verification ---")
+    keys = ["game_id", "team_id", "player_id"]
+    copies = table["copy_index"].nunique() if "copy_index" in table else 1
+    results = [
+        _report("shape", len(base) == len(candidates) and int(base.duplicated(keys).sum()) == 0,
+                f"base {len(base):,} vs candidates {len(candidates):,}, "
+                f"duplicate keys {int(base.duplicated(keys).sum())}, "
+                f"table {len(table):,} = {copies} copy/ies"),
+        goalie_history_coverage(base),
+        leakage_assertion(base),
+        decisions_per_game(table),
+        one_starter_per_team(table),
+        shutouts_are_wins(table),
+        saves_reconcile(table),
+        one_team_per_player_game(table),
+    ]
+    passed = sum(1 for r in results if r)
+    log.info("%d / %d checks passed", passed, len(results))
+    return all(results)
+
+
 def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFrame, season_id: int) -> bool:
     from features import extract
     has_prior = extract.prior_season_ids(cursor, [season_id])[season_id] is not None
