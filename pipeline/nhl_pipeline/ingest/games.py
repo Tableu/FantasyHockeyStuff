@@ -6,6 +6,7 @@ from nhl_pipeline import db
 def ensure_game(
     cursor, *, nhl_game_id, season_id, game_type, game_date,
     home_team_id, away_team_id, home_score, away_score, game_state,
+    last_period_type=None, overtime_periods=None,
 ) -> int:
     if isinstance(game_date, str):
         game_date = datetime.strptime(game_date, "%Y-%m-%d").date()
@@ -22,5 +23,7 @@ def ensure_game(
             "HomeScore": home_score,
             "AwayScore": away_score,
             "GameStatus": game_state,
+            "LastPeriodType": last_period_type,
+            "OvertimePeriods": overtime_periods,
         },
     )

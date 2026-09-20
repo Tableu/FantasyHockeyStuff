@@ -49,6 +49,7 @@ def sync_player_game_stats(
 ) -> None:
     stats_block = boxscore["playerByGameStats"]
     sides = (("homeTeam", boxscore["homeTeam"]["id"]), ("awayTeam", boxscore["awayTeam"]["id"]))
+    last_period_type = field_map.game_outcome_fields(boxscore)["last_period_type"]
 
     for side_key, team_nhl_id in sides:
         side = stats_block[side_key]
@@ -90,6 +91,12 @@ def sync_player_game_stats(
                     "PositionCode": f["position_code"],
                     "PenaltyMinutes": f["penalty_minutes"],
                     "TimeOnIceSeconds": f["time_on_ice_seconds"],
+                    "ShotsAgainst": f["shots_against"],
+                    "Saves": f["saves"],
+                    "GoalsAgainst": f["goals_against"],
+                    # Only the two goalies of record carry a decision; the rest stay NULL.
+                    "Decision": field_map.normalize_decision(f["decision"], last_period_type),
+                    "IsStarter": f["is_starter"],
                 },
             )
 

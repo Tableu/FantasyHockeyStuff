@@ -14,6 +14,7 @@ import logging
 
 from nhl_pipeline import db
 from nhl_pipeline.api import boxscore as api_boxscore
+from nhl_pipeline.api import field_map
 from nhl_pipeline.api import html_shift_report as api_html_shift_report
 from nhl_pipeline.api import play_by_play as api_play_by_play
 from nhl_pipeline.api import shift_charts as api_shift_charts
@@ -73,6 +74,7 @@ def run_game(conn, schedule_game: dict, game_date: str, season_id: int) -> None:
             game_date=game_date, home_team_id=home_team_id, away_team_id=away_team_id,
             home_score=schedule_game["homeTeam"].get("score"), away_score=schedule_game["awayTeam"].get("score"),
             game_state=schedule_game["gameState"],
+            **field_map.game_outcome_fields(box),
         )
         conn.commit()
 

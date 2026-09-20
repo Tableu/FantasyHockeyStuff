@@ -201,14 +201,47 @@ def skater_boxscore_fields(row: dict) -> dict:
 
 
 def goalie_boxscore_fields(row: dict) -> dict:
+    """`decision` is present only on the two goalies of record, which is exactly the
+    semantics we want: the NHL assigns it, so there is nothing to derive or approximate."""
     return {
         "nhl_player_id": row["playerId"],
         "position_code": row.get("position") or "G",
         "shots_against": row.get("shotsAgainst"),
         "saves": row.get("saves"),
         "goals_against": row.get("goalsAgainst"),
+        "decision": row.get("decision"),
+        "is_starter": row.get("starter"),
         "penalty_minutes": row.get("pim"),
         "time_on_ice_seconds": parse_clock(row.get("toi")),
+    }
+
+
+def normalize_decision(decision, last_period_type):
+    """A loss in a game that reached overtime is an overtime loss, always.
+
+    The feed disagrees with itself about this once in a while. Game 2023021166
+    (2024-03-30) reports gameOutcome.lastPeriodType = 'OT', both goalies logged 63 minutes,
+    and the losing goalie's decision came back as 'L' rather than 'O'. One game in 3,936 --
+    but the rule is exceptionless (if a game reaches overtime both teams have already banked
+    a standings point), and under a typical fantasy scoring system the difference between a
+    loss and an overtime loss is worth more than a goal, so it is worth reconciling rather
+    than storing faithfully-wrong.
+
+    Only ever promotes 'L' to 'O'. A win stays a win, and a decision the feed left absent
+    stays absent.
+    """
+    if decision == "L" and last_period_type and last_period_type != "REG":
+        return "O"
+    return decision
+
+
+def game_outcome_fields(box: dict) -> dict:
+    """gameOutcome tells us whether a result was settled in regulation, overtime or a
+    shootout -- the difference between a goalie's loss and his overtime loss."""
+    outcome = box.get("gameOutcome") or {}
+    return {
+        "last_period_type": outcome.get("lastPeriodType"),
+        "overtime_periods": outcome.get("otPeriods"),
     }
 
 

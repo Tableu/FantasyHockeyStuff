@@ -222,6 +222,11 @@ CREATE TABLE Game.Games
     AwayScore       SMALLINT NULL,
     Venue           VARCHAR(200) NULL,
     GameStatus      VARCHAR(30) NULL,
+    -- From the boxscore's gameOutcome. LastPeriodType distinguishes a regulation result
+    -- from one settled in overtime or a shootout, which is what makes a goalie's 'O'
+    -- decision interpretable and what separates a 2-point win from a 1-point loss.
+    LastPeriodType  VARCHAR(3) NULL,           -- 'REG', 'OT' or 'SO'
+    OvertimePeriods SMALLINT NULL,
     CONSTRAINT PK_Games PRIMARY KEY (GameID),
     CONSTRAINT UQ_Games_NHLGameID UNIQUE (NHLGameID),
     CONSTRAINT FK_Games_Season FOREIGN KEY (SeasonID)
@@ -415,6 +420,16 @@ CREATE TABLE Stats.PlayerGameStats
     PowerPlayAssists        SMALLINT NULL,
     ShortHandedGoals        SMALLINT NULL,
     ShortHandedAssists      SMALLINT NULL,
+    -- Goalies only; NULL for every skater row. Taken straight from the boxscore, which is
+    -- the only source for Decision and IsStarter -- nothing else in the database records
+    -- who got the win or who officially started. ShotsAgainst/Saves/GoalsAgainst are also
+    -- derived in Analytics.GoalieGameAdvancedStats, but as with skater TimeOnIceSeconds the
+    -- boxscore is the source of truth and the derived table is the situational companion.
+    ShotsAgainst            SMALLINT NULL,
+    Saves                   SMALLINT NULL,
+    GoalsAgainst            SMALLINT NULL,
+    Decision                VARCHAR(1) NULL,   -- 'W', 'L' or 'O' (overtime/shootout loss)
+    IsStarter               BIT NULL,
     CreatedAt               DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_PlayerGameStats PRIMARY KEY (PlayerGameStatsID),
     CONSTRAINT UQ_PlayerGameStats UNIQUE (GameID, PlayerID, TeamID),
