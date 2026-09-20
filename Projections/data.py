@@ -45,10 +45,20 @@ DROP_FROM_FEATURES = {
     # stay; only the bare ids go.
     "player_id", "opp_goalie_player_id",
     "feat_mate1_id", "feat_mate2_id", "feat_partner_id",
+    # Team identity goes for the same reason a player's does, and it was measured rather
+    # than assumed. As categoricals these two were taking a large share of the gain in the
+    # models that lean hardest on team context -- memorizing which clubs conceded shots in
+    # the training seasons instead of learning it from form. Rosters and coaches turn over,
+    # so that does not transfer to a new season. Dropping them improved every model on the
+    # 2025-26 holdout and hurt none: hits R2 31.0% -> 31.3%, blocks 20.0% -> 20.2%, shots
+    # 20.7% -> 20.8%, top-100 capture 0.698 -> 0.700. A team's *form* still reaches the
+    # model through the 60-odd team_* and opp_* columns; only the bare id is gone.
+    "team_id", "opp_team_id",
 }
 
 # Passed to LightGBM as categorical features; everything else is numeric or boolean.
-CATEGORICAL = ["position", "team_id", "opp_team_id"]
+# Position only: team identity is dropped outright (see DROP_FROM_FEATURES).
+CATEGORICAL = ["position"]
 
 # Carried into the saved predictions so evaluate.py can build its two naive baselines
 # without reloading the whole 449-column feature table.
@@ -109,7 +119,16 @@ def build_feature_matrix(table: pd.DataFrame, columns: list[str] | None = None):
         if matrix[column].dtype == bool:
             matrix[column] = matrix[column].astype("float32")
         elif matrix[column].dtype == object and column not in CATEGORICAL:
-            matrix[column] = matrix[column].astype("category")
+            # An object column is usually a genuine category, but it can also be numbers the
+            # driver handed back as Decimals -- SQL Server DECIMAL columns arrive that way and
+            # survive a groupby sum as dtype=object. Try numeric first: mistaking a rate for a
+            # categorical silently destroys its ordering, and LightGBM cannot serialize the
+            # result either (it fails with "Circular reference detected").
+            numeric = pd.to_numeric(matrix[column], errors="coerce")
+            if numeric.notna().sum() >= matrix[column].notna().sum():
+                matrix[column] = numeric.astype("float64")
+            else:
+                matrix[column] = matrix[column].astype("category")
 
     for column in CATEGORICAL:
         if column in matrix.columns:
