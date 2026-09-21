@@ -36,7 +36,7 @@ import logging
 
 import numpy as np
 import pandas as pd
-from scipy import optimize
+from scipy import optimize, special
 
 import copula as copula_module
 import marginals
@@ -90,6 +90,34 @@ def load_holdout(variant):
 def load_dispersion():
     payload = json.loads(paths.DISPERSION_PATH.read_text(encoding="utf-8"))
     return {name: entry["theta"] for name, entry in payload["categories"].items()}
+
+
+def fit_dispersion(frame, categories=None):
+    """Maximum-likelihood NB theta per category, under `Var = mu + theta*mu^2`.
+
+    This is `Projections/calibrate.py`'s estimator, and normally its answer is simply read
+    from `dispersion.json` rather than recomputed. It exists here for one purpose: a
+    split-half check is only out-of-sample if *every* fitted number is re-fit on the
+    training half, and the dispersion is fitted on the same holdout as everything else.
+    Using the shipped theta there would quietly leave the test half inside the fit.
+    """
+    out = {}
+    for category in (categories or CATEGORIES):
+        actual = frame[f"target_{category}"].to_numpy("float64")
+        mu = np.maximum(frame[f"pred_{category}"].to_numpy("float64"), 1e-6)
+
+        def negative_log_likelihood(log_theta):
+            size = 1.0 / np.exp(log_theta)
+            return -float(np.sum(special.gammaln(actual + size) - special.gammaln(size)
+                                 - special.gammaln(actual + 1.0)
+                                 + size * np.log(size / (size + mu))
+                                 + actual * np.log(mu / (size + mu))))
+
+        result = optimize.minimize_scalar(negative_log_likelihood,
+                                          bounds=(np.log(1e-4), np.log(20.0)),
+                                          method="bounded")
+        out[category] = float(np.exp(result.x))
+    return out
 
 
 def standardized(frame, dispersion):
@@ -293,9 +321,12 @@ def make_feasible(within, teammate, opponent, team_size=REFERENCE_TEAM_SIZE):
     return new_teammate, new_opponent, True
 
 
-def run(args):
-    dispersion = load_dispersion()
-    holdout = load_holdout(args.variant)
+def fit(holdout, dispersion, sims=100, batch_sims=20, iterations=6, seed=17, source=""):
+    """Measure the structure on these rows, then correct it for attenuation by simulation.
+
+    Takes the rows rather than loading them, so the same routine fits the shipped structure
+    and fits one half of a season for `validate.py --split-half`.
+    """
     log.info("measuring on %d played player-games", len(holdout))
 
     residuals = standardized(holdout, dispersion)
@@ -321,10 +352,9 @@ def run(args):
     targets = [target_within, target_teammate, target_opponent]
 
     history = []
-    for iteration in range(args.iterations):
+    for iteration in range(iterations):
         realized, means = simulated_structure(table, dispersion, weights, latent_variance,
-                                              matrices, args.sims, args.batch_sims,
-                                              args.seed + iteration)
+                                              matrices, sims, batch_sims, seed + iteration)
         errors = [float(np.abs(r - t).max()) for r, t in zip(realized, targets)]
         log.info("iteration %d: max |realized - target|  within %.4f teammate %.4f "
                  "opponent %.4f", iteration, *errors)
@@ -333,7 +363,7 @@ def run(args):
                                           "teammate": round(errors[1], 5),
                                           "opponent": round(errors[2], 5)},
                         "teammate_realized": copula_module._round(realized[1], 5)})
-        if iteration == args.iterations - 1:
+        if iteration == iterations - 1:
             final_realized = realized
             final_means = means
             break
@@ -354,9 +384,9 @@ def run(args):
 
     fitted = copula_module.GameCopula(*matrices, CATEGORIES)
     payload = {
-        "source": paths.holdout_predictions(args.variant).name,
+        "source": source,
         "rows": len(holdout),
-        "sims_per_iteration": args.sims,
+        "sims_per_iteration": sims,
         "categories": CATEGORIES,
         "measured": {
             "within": copula_module._round(target_within, 5),
@@ -389,6 +419,21 @@ def run(args):
         },
         "iterations": history,
     }
+    return payload
+
+
+def structure(payload):
+    """The copula a fitted payload describes."""
+    fitted = payload["normal_scale"]
+    return copula_module.GameCopula(fitted["within"], fitted["teammate"], fitted["opponent"],
+                                    payload.get("categories") or CATEGORIES)
+
+
+def run(args):
+    dispersion = load_dispersion()
+    holdout = load_holdout(args.variant)
+    payload = fit(holdout, dispersion, args.sims, args.batch_sims, args.iterations,
+                  args.seed, paths.holdout_predictions(args.variant).name)
     destination = paths.ensure(paths.REPORTS_DIR) / (args.out or "correlations.json")
     destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log.info("wrote %s", destination)

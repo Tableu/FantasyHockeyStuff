@@ -70,6 +70,12 @@ def parse_args():
     parser.add_argument("--out", default="validation.json")
     parser.add_argument("--docs", action="store_true",
                         help="Also write docs/calibration.md from this run")
+    parser.add_argument("--split-half", action="store_true",
+                        help="Fit the structure on one half of the season and test it on "
+                             "the other, both ways round -- the out-of-sample check")
+    parser.add_argument("--fit-sims", type=int, default=80,
+                        help="Draws per fitting iteration inside --split-half")
+    parser.add_argument("--fit-iterations", type=int, default=5)
     return parser.parse_args()
 
 
@@ -105,6 +111,21 @@ def fidelity(simulator, season, sims, days=6):
     log.info("fidelity on %d days of the live-shaped table: worst category off by %.2f%%",
              len(set(table["game_date"])), worst)
     return out
+
+
+def evaluate(table, holdout, simulator, scoresets, sims, seed):
+    """Draw the given rows day by day and score them against what happened."""
+    rng = np.random.default_rng(seed + 1)
+    marginals_stats = MarginalStats()
+    roster_stats = {s.name: RosterStats(s) for s in scoresets}
+    for _, rows in table.groupby("game_date"):
+        actual = holdout.loc[rows.index]
+        draws = simulator.draw(rows, sims)
+        marginals_stats.add(draws, actual, rng, rows)
+        for stats in roster_stats.values():
+            stats.add(draws, actual, rng)
+    return {"marginals": marginals_stats.report(),
+            "rosters": {name: s.report() for name, s in roster_stats.items()}}
 
 
 class MarginalStats:
@@ -233,13 +254,18 @@ class RosterStats:
         return out
 
 
-def run(args):
-    dispersion = correlations_module.load_dispersion()
-    holdout = correlations_module.load_holdout(args.variant)
+def holdout_frames(variant):
+    """The scored holdout and the lambda table it implies, sharing an index and a date."""
+    holdout = correlations_module.load_holdout(variant).copy()
     table = correlations_module.lambda_frame(holdout)
     table["game_date"] = pd.to_datetime(holdout["game_date"].to_numpy())
-    holdout = holdout.copy()
     holdout["game_date"] = table["game_date"]
+    return table, holdout
+
+
+def run(args):
+    dispersion = correlations_module.load_dispersion()
+    table, holdout = holdout_frames(args.variant)
 
     payload = json.loads(paths.CORRELATIONS_PATH.read_text(encoding="utf-8"))
     weights = payload["penalty_incidents"]["weights"]
@@ -253,20 +279,8 @@ def run(args):
     for label, structure in structures.items():
         simulator = sampler.Simulator(dispersion, structure, weights, latent_variance,
                                       seed=args.seed)
-        rng = np.random.default_rng(args.seed + 1)
-        marginals_stats = MarginalStats()
-        roster_stats = {s.name: RosterStats(s) for s in scoresets}
-
-        for day, rows in table.groupby("game_date"):
-            actual = holdout.loc[rows.index]
-            draws = simulator.draw(rows, args.sims)
-            marginals_stats.add(draws, actual, rng, rows)
-            for stats in roster_stats.values():
-                stats.add(draws, actual, rng)
-
-        results[label] = {"marginals": marginals_stats.report(),
-                          "rosters": {name: s.report() for name, s in roster_stats.items()}}
-        log.info("%s: %d player-games x %d sims", label, marginals_stats.rows, args.sims)
+        results[label] = evaluate(table, holdout, simulator, scoresets, args.sims, args.seed)
+        log.info("%s: %d player-games x %d sims", label, len(table), args.sims)
 
     report = {"variant": args.variant, "sims": args.sims,
               "rows": int(len(table)), "results": results}
@@ -281,6 +295,121 @@ def run(args):
     if args.docs:
         write_docs(report, paths.ensure(paths.DOCS_DIR) / "calibration.md")
     return report
+
+
+def split_half(args):
+    """Fit on one half of the season, test on the other. Both ways round.
+
+    Everything else in this file is scored where it was fitted. The dispersion comes from
+    `Projections/calibrate.py` on this holdout, and the correlation structure and penalty
+    parameters come from `correlations.py` on the same rows -- so a good agreement there is
+    consistent with the structure being real, and equally consistent with it having been
+    fitted to this season's noise. There are about 46,000 rows behind roughly forty
+    parameters, which says overfitting is unlikely, but says it by argument rather than by
+    measurement.
+
+    So: split the season at its median date, re-fit **every fitted number** on the training
+    half -- dispersion included, or the test half stays inside the fit -- and score the test
+    half three ways:
+
+        out-of-sample   the structure fitted on the *other* half: the honest number
+        in-sample       the structure fitted on the test half itself: the ceiling, what
+                        perfect knowledge of this half's correlations would have bought
+        independent     no cross-player structure at all: the floor
+
+    If out-of-sample sits near the ceiling and far from the floor, the structure transfers.
+    If it sits near the floor, it was noise.
+    """
+    dispersion_full = correlations_module.load_dispersion()
+    table, holdout = holdout_frames(args.variant)
+    dates = sorted(pd.unique(holdout["game_date"]))
+    cutoff = dates[len(dates) // 2]
+    is_first = holdout["game_date"] < cutoff
+    masks = {"first": is_first, "second": ~is_first}
+    log.info("split at %s: %d rows before, %d after", pd.Timestamp(cutoff).date(),
+             int(is_first.sum()), int((~is_first).sum()))
+
+    scoresets = [scoring_module.load(w) for w in (args.weights or [])]
+    fitted = {}
+    for name, mask in masks.items():
+        rows = holdout[mask]
+        dispersion = correlations_module.fit_dispersion(rows)
+        log.info("fitting on the %s half (%d rows)", name, len(rows))
+        payload = correlations_module.fit(rows, dispersion, args.fit_sims, 20,
+                                          args.fit_iterations, args.seed, f"{name} half")
+        fitted[name] = {"dispersion": dispersion, "payload": payload}
+
+    out = []
+    for train, test in (("first", "second"), ("second", "first")):
+        test_table = table[masks[test]]
+        test_holdout = holdout[masks[test]]
+        candidates = {
+            "out-of-sample": (fitted[train], correlations_module.structure(fitted[train]["payload"])),
+            "in-sample": (fitted[test], correlations_module.structure(fitted[test]["payload"])),
+            "independent": (fitted[train], copula_module.independent()),
+        }
+        for label, (source, structure) in candidates.items():
+            penalties = source["payload"]["penalty_incidents"]
+            simulator = sampler.Simulator(source["dispersion"], structure,
+                                          penalties["weights"],
+                                          penalties.get("latent_variance", 0.0),
+                                          seed=args.seed)
+            result = evaluate(test_table, test_holdout, simulator, scoresets, args.sims,
+                              args.seed)
+            out.append({"trained_on": train, "tested_on": test, "structure": label,
+                        **result})
+            log.info("%s half -> %s half, %s: done", train, test, label)
+
+    report = {"variant": args.variant, "sims": args.sims, "fit_sims": args.fit_sims,
+              "cutoff": str(pd.Timestamp(cutoff).date()),
+              "rows": {name: int(mask.sum()) for name, mask in masks.items()},
+              "dispersion": {"full_season": dispersion_full,
+                             **{name: {k: round(v, 5)
+                                       for k, v in fitted[name]["dispersion"].items()}
+                                for name in masks}},
+              "teammate_measured": {
+                  name: fitted[name]["payload"]["measured"]["teammate"] for name in masks},
+              "splits": out}
+    destination = paths.ensure(paths.REPORTS_DIR) / "split_half.json"
+    destination.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print_split_half(report)
+    log.info("wrote %s", destination)
+    return report
+
+
+def print_split_half(report):
+    print("\n=== split-half: dispersion re-fit per half ===")
+    rows = []
+    for category in CATEGORIES:
+        rows.append([category,
+                     round(report["dispersion"]["full_season"].get(category) or 0.0, 4),
+                     report["dispersion"]["first"][category],
+                     report["dispersion"]["second"][category]])
+    print(table(rows, ["category", "full season", "first half", "second half"]))
+
+    print("\n=== split-half: teammate correlation, measured on each half ===")
+    first = np.array(report["teammate_measured"]["first"])
+    second = np.array(report["teammate_measured"]["second"])
+    rows = [[CATEGORIES[i], round(first[i, i], 4), round(second[i, i], 4)]
+            for i in range(len(CATEGORIES))]
+    rows.append(["assists x goals", round(first[3, 4], 4), round(second[3, 4], 4)])
+    print(table(rows, ["entry", "first half", "second half"]))
+
+    print("\n=== split-half: tested on the held-out half ===")
+    rows = []
+    for entry in report["splits"]:
+        worst = max(abs(v["variance_ratio"] - 1) for c, v in entry["marginals"].items()
+                    if c != "pim")
+        for name, roster in entry["rosters"].items():
+            rows.append([f'{entry["trained_on"]} -> {entry["tested_on"]}',
+                         entry["structure"], name,
+                         f'{roster["random"]["simulated_variance_ratio"]:.3f} / '
+                         f'{roster["random"]["actual_variance_ratio"]:.3f}',
+                         f'{roster["stack"]["simulated_variance_ratio"]:.3f} / '
+                         f'{roster["stack"]["actual_variance_ratio"]:.3f}',
+                         f"{worst:.3f}"])
+    print(table(rows, ["direction", "structure", "scoring", "random sim/actual",
+                       "stack sim/actual", "worst var dev"]))
 
 
 def table(rows, headers):
@@ -385,7 +514,8 @@ def print_report(report):
 
 
 def main():
-    run(parse_args())
+    args = parse_args()
+    split_half(args) if args.split_half else run(args)
 
 
 if __name__ == "__main__":
