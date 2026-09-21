@@ -10,6 +10,86 @@ fitted stack serves any number of leagues, and two formats can be compared again
 set of models. `scoresets/` holds examples; none of them is a default and nothing loads one
 automatically.
 
+## Rest-of-season (section 4)
+
+A different question from the per-game stack, with a different bias: not "what will he do
+tonight" but "what will he produce over the games that remain". Tonight's model leans on
+recent form because recent form predicts tonight; over a horizon a hot streak should regress
+instead of extrapolate.
+
+```
+ros.py            forward-looking targets over a date window   -> reports/ros_<season>_<n>d.parquet
+ros_baselines.py  the shrinkage ladder, fitted and scored      -> reports/ros_baselines.json
+```
+
+The quantity is decomposed the same way the per-game chain is, because the factors stabilize
+at very different speeds and lumping them into "points per game" throws that away:
+
+    production  =  team games in the window  x  availability  x  ice time  x  rate per 60
+
+Windows are measured in **days, not games** — a game-count window has to decide whose games
+to count, which breaks when a player is traded, while a date window leaves the opportunity
+term as something a manager can look up in advance. Windows running past the end of a season
+are dropped rather than truncated, since a partial window looks like a player who stopped
+producing.
+
+### The ladder comes before any model
+
+Scored on 2025-26 after fitting on 2023-24 and 2024-25, one row per player per week, window
+fantasy points under points-league scoring:
+
+| rung | MAE | RMSE | Spearman |
+|---|---|---|---|
+| last-10 games (recency) | 17.91 | 24.06 | 0.532 |
+| season-to-date, unshrunk | 15.05 | 21.14 | 0.680 |
+| **empirical-Bayes shrunk** | **13.89** | **18.79** | **0.704** |
+| shrunk + a recency term | 13.84 | 18.73 | 0.707 |
+
+Two results worth keeping. **Recency is actively harmful over a horizon** — the last ten
+games are 19% worse than season-to-date on MAE and lose 0.15 of Spearman, which is the
+clearest confirmation available that a rest-of-season projection is not a per-game projection
+with a longer window. And **shrinkage earns its place**: 7.7% better than naive season-to-date
+at six weeks, 11.6% better at twelve, with the advantage growing as the horizon lengthens,
+which is the signature of true talent mattering more the further out you look.
+
+No gradient-boosted model exists here yet, deliberately. The goalie branch already paid the
+tuition on this exact question — save percentage looked like a modelling problem and was a
+shrinkage problem, with LightGBM scoring negative R-squared at every capacity — so the rule
+is that nothing gets a model until it beats the ladder above.
+
+### How long until a player's own numbers count
+
+The fitted shrinkage constants are the interesting output in their own right. Evidence is
+counted in hours of ice time for rates, so `k` is how much ice time it takes before a
+player's own rate outweighs his position's prior:
+
+| category | k (hours of ice time) | roughly |
+|---|---|---|
+| hits | 0.30 | about 1 game |
+| power-play points | 0.46 | about 2 games |
+| shots | 2.60 | about 10 games |
+| penalty minutes | 3.11 | about 12 games |
+| blocks | 4.09 | about 15 games |
+| assists | 6.50 | about 24 games |
+| goals | 9.39 | about 35 games |
+
+Ice time itself barely shrinks at all (k = 0.47 games) and availability not at all — a
+player's own attendance record is its own best estimate. The recency weights land the same
+way round: 0.29 for ice time and 0.09 for power-play points, but 0.00–0.03 for every scoring
+rate. **Discount recent form for rates; keep some of it for role**, because a player whose
+ice time just moved really is in a new role, while one whose shooting percentage just moved
+is not a new shooter.
+
+### Known gaps
+
+- **No aging curve.** Section 4 asks for one and the feature table carries no birthdate, so
+  adding it is a `ModelFeatures/` change rather than something to fake here.
+- **Rookies get the positional prior and nothing else.** Draft pedigree and AHL production
+  are the priors Section 4 wants for small samples; neither is in the database today.
+- Windows are fitted and scored on overlapping rows thinned to one per player per week, so
+  the effective sample is smaller than the row count suggests.
+
+
 This folder **never opens a database connection**. `ModelFeatures/` reads NHLStats through the
 read-only `FantasyAssistant` login and writes parquet; everything here starts from that
 parquet. There is no `pyodbc` in `requirements.txt`, and that is the point.
