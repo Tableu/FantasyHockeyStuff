@@ -72,11 +72,21 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train the ROS model rung")
     parser.add_argument("--train", nargs="+", default=["2023-24", "2024-25"])
     parser.add_argument("--test", default="2025-26")
-    parser.add_argument("--horizon", type=int, default=ros.DEFAULT_HORIZON_DAYS)
+    parser.add_argument("--horizon", default=str(ros.DEFAULT_HORIZON_DAYS),
+                        help="Days, or 'season' for windows running to the season's end")
+    parser.add_argument("--save", action="store_true",
+                        help="Write the boosters and the fitted shrinkage to models/, so "
+                             "ros_predict.py can use them")
     parser.add_argument("--weights", action="append", default=None, metavar="FILE")
     parser.add_argument("--train-thin-days", type=int, default=3)
     parser.add_argument("--thin-days", type=int, default=7)
-    parser.add_argument("--loss", choices=("mae", "mse"), default="mae")
+    parser.add_argument("--loss", choices=("mae", "mse"), default="mae",
+                        help="Loss the shrinkage constants are fitted to")
+    parser.add_argument("--objective", choices=("l1", "l2"), default="l1",
+                        help="LightGBM objective. l1 fits the conditional MEDIAN, which "
+                             "ranks well but over-projects a left-skewed factor like "
+                             "availability and compounds into every total; l2 fits the "
+                             "mean, which is what a total wants")
     parser.add_argument("--rounds", type=int, default=2000)
     parser.add_argument("--early-stopping", type=int, default=100)
     parser.add_argument("--out", default="ros_model.json")
@@ -132,13 +142,14 @@ def train_factor(train, valid, factor, columns, rounds, early_stopping):
     x_train, y_train, w_train = prepare(train)
     x_valid, y_valid, w_valid = prepare(valid)
     booster = lgb.train(
-        PARAMS, lgb.Dataset(x_train, y_train, weight=w_train),
+        dict(PARAMS), lgb.Dataset(x_train, y_train, weight=w_train),
         num_boost_round=rounds,
         valid_sets=[lgb.Dataset(x_valid, y_valid, weight=w_valid)],
         callbacks=[lgb.early_stopping(early_stopping, verbose=False)])
-    log.info("%-16s %6d fit rows, %5d valid, best iteration %4d, valid L1 %.4f",
-             factor, len(y_train), len(y_valid), booster.best_iteration,
-             booster.best_score["valid_0"]["l1"])
+    scores = booster.best_score["valid_0"]
+    metric, value = next(iter(scores.items()))
+    log.info("%-16s %6d fit rows, %5d valid, best iteration %4d, valid %s %.4f",
+             factor, len(y_train), len(y_valid), booster.best_iteration, metric, value)
     return booster
 
 
@@ -176,9 +187,12 @@ def run(args):
              len(fit_rows), cutoff.date(), len(valid_rows), len(test_rows))
 
     columns = feature_columns(train_rows)
-    log.info("%d features", len(columns))
+    log.info("%d features, %s objective", len(columns), args.objective)
+    if args.objective == "l2":
+        PARAMS["objective"], PARAMS["metric"] = "regression", ["l2"]
 
     predictions, importances = pd.DataFrame(index=test_rows.index), {}
+    models = paths.ensure(paths.MODELS_DIR) if args.save else None
     for factor in baselines.FACTORS:
         booster = train_factor(fit_rows, valid_rows, factor, columns, args.rounds,
                                args.early_stopping)
@@ -186,7 +200,25 @@ def run(args):
             booster.predict(matrix(test_rows, columns),
                             num_iteration=booster.best_iteration), 0, None)
         importances[factor] = top_features(booster, columns)
+        if models is not None:
+            booster.save_model(str(models / f"ros_{factor}.txt"),
+                               num_iteration=booster.best_iteration)
     predictions["availability"] = predictions["availability"].clip(0, 1)
+    if models is not None:
+        # The shrinkage fit travels with the boosters: the models were trained with the
+        # shrunk estimate as a feature, so a consumer that cannot rebuild it cannot use them.
+        sidecar = {
+            "horizon": args.horizon,
+            "trained_on": args.train,
+            "feature_columns": columns,
+            "loss": args.loss,
+            "shrinkage": {factor: {"k": entry["k"], "recency": entry["recency"],
+                                   "prior": entry["prior"]}
+                          for factor, entry in fitted.items()},
+        }
+        (models / "ros_fit.json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
+        log.info("saved %d boosters and the shrinkage fit to %s",
+                 len(baselines.FACTORS), models)
 
     scoresets = [weights_module.load(w) for w in (args.weights or [])]
     truth = baselines.actual_totals(test_rows)
@@ -205,7 +237,13 @@ def run(args):
             target = test_rows[spec["target"]].to_numpy("float64")
             good = np.isfinite(target)
             error = factors[factor].to_numpy("float64")[good] - target[good]
-            entry["factors"][factor] = round(float(np.mean(np.abs(error))), 4)
+            # Bias as well as MAE, because an L1 objective fits the median and a median
+            # estimate of a skewed factor is biased as a mean -- which is invisible in MAE
+            # and compounds into every total built by multiplying the factors together.
+            entry["factors"][factor] = {
+                "mae": round(float(np.mean(np.abs(error))), 4),
+                "bias_pct": round(float(100 * error.mean()
+                                        / max(abs(target[good].mean()), 1e-9)), 2)}
         for scoreset in scoresets:
             predicted_points = scoreset.score(totals)
             actual_points = scoreset.score(truth)
@@ -236,9 +274,10 @@ def print_report(report, scoresets):
         print(pd.DataFrame(rows, columns=["rung", "MAE", "RMSE", "bias",
                                           "Spearman"]).to_string(index=False))
 
-    print("\n=== per-factor MAE ===")
+    print("\n=== per-factor MAE (bias %) ===")
     factors = list(report["rungs"]["shrunk"]["factors"])
-    rows = [[rung] + [entry["factors"][f] for f in factors]
+    rows = [[rung] + ["%.4f (%+.1f)" % (entry["factors"][f]["mae"],
+                                        entry["factors"][f]["bias_pct"]) for f in factors]
             for rung, entry in report["rungs"].items()]
     print(pd.DataFrame(rows, columns=["rung"] + factors).to_string(index=False))
 

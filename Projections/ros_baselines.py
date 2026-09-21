@@ -66,7 +66,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Fit and score the ROS baseline ladder")
     parser.add_argument("--train", nargs="+", default=["2023-24", "2024-25"])
     parser.add_argument("--test", default="2025-26")
-    parser.add_argument("--horizon", type=int, default=ros.DEFAULT_HORIZON_DAYS)
+    parser.add_argument("--horizon", default=str(ros.DEFAULT_HORIZON_DAYS),
+                        help="Days, or 'season' for windows running to the season's end")
     parser.add_argument("--weights", action="append", default=None, metavar="FILE",
                         help="Scoring file for the composite metric; repeat for several")
     parser.add_argument("--thin-days", type=int, default=7,
@@ -79,7 +80,7 @@ def parse_args():
 
 
 def load(season, horizon):
-    path = paths.REPORTS_DIR / f"ros_{season}_{horizon}d.parquet"
+    path = paths.REPORTS_DIR / f"ros_{season}_{ros.suffix(horizon)}.parquet"
     if not path.exists():
         raise FileNotFoundError(f"{path} is missing -- run ros.py --season {season} "
                                 f"--horizon {horizon}")

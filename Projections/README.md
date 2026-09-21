@@ -113,6 +113,62 @@ rate. **Discount recent form for rates; keep some of it for role**, because a pl
 ice time just moved really is in a new role, while one whose shooting percentage just moved
 is not a new shooter.
 
+### Two horizons, and a CLI that emits projections
+
+`--horizon season` runs each window to the end of the season, which is what a draft or a
+keep-or-cut decision actually asks about; a fixed `--horizon 42` keeps every row comparable
+and suits a trade or a streaming call. The variable mode costs almost nothing because of the
+decomposition: availability, ice time and rate per 60 do not depend on how long the window
+is, so only the games-remaining multiplier changes with the date.
+
+Season-mode ladder, 2025-26, window fantasy points under points-league:
+
+| rung | MAE | RMSE | bias | Spearman |
+|---|---|---|---|---|
+| season-to-date | 35.22 | 57.08 | +9.1% | 0.791 |
+| shrunk | 30.53 | 45.27 | +4.4% | 0.815 |
+| **model** | **27.09** | **38.87** | **+0.6%** | **0.845** |
+
+```bash
+python ros_train.py --horizon season --save          # boosters + the shrinkage fit
+python ros_predict.py --season 2025-26 --as-of 2026-01-15 --weights points-league
+```
+
+`ros_predict.py` emits one row per player as of a date — not as of a game, since not every
+team plays every night, so each player's most recent state is taken and its `state_age_days`
+reported rather than hidden. Games remaining come off the schedule, so the same models serve
+a projection made in October and one made in March. Scoring is applied only if asked for.
+
+Checked end to end against what actually happened after 2026-01-15: Spearman 0.813 and
+Pearson 0.819 on rest-of-season points across 846 players, with goals within 0.3% and assists
+within 2.2% in aggregate.
+
+### Availability is over-projected, and it is not the loss function
+
+Projected totals run high, and increasingly so as a season runs out:
+
+| as of | Nov 1 | Dec 15 | Jan 15 | Feb 15 | Mar 15 |
+|---|---|---|---|---|---|
+| games | +3.9% | +6.2% | +8.1% | +10.1% | +11.0% |
+| blocks | +10.2% | +12.6% | +16.7% | +18.0% | +19.6% |
+| mean availability, projected | 0.768 | 0.722 | 0.712 | 0.709 | 0.704 |
+| mean availability, realized | 0.739 | 0.681 | 0.659 | 0.644 | 0.634 |
+
+The obvious suspect was the L1 objective, which fits a conditional *median* — and a median
+estimate of a left-skewed factor is biased as a mean, which would compound through every
+total. **That was tested and it is wrong.** An L2 build moved the composite bias the wrong
+way (+1.4% against L1's +0.6%) and cost accuracy (MAE 27.82 against 27.09, Spearman 0.839
+against 0.845), so L1 is what ships.
+
+What the per-factor table shows instead is that *every* rung over-projects availability —
+naive season-to-date by +7.7%, shrinkage by +6.3%, the model by +5.5%. The likely mechanism
+is attrition: the players visible at a given date are the ones currently healthy and in the
+league, and from there some get hurt, demoted or waived while nothing pulls the other way.
+That is a property of the target rather than of the fit, and it is stated here rather than
+corrected, because the correction belongs where `drift.py` sits for the per-game stack —
+applied by a consumer that knows whether it wants a ranking or an unbiased total. **Rankings
+are unaffected**, which is what draft and trade logic mostly consume.
+
 ### Known gaps
 
 - **No aging curve.** Section 4 asks for one and the feature table carries no birthdate, so
