@@ -61,25 +61,12 @@ FEASIBILITY_MARGIN = 0.999
 CLIP_TOLERANCE = 1e-6
 
 
-def psd_project(matrix):
-    """Nearest positive-semidefinite matrix, by clipping negative eigenvalues to zero."""
-    values, vectors = np.linalg.eigh(np.asarray(matrix, dtype="float64"))
-    return vectors @ np.diag(np.clip(values, 0.0, None)) @ vectors.T
-
-
 def _sqrtm(matrix, label=""):
     """Matrix square root, clipping any negative eigenvalue and saying so if it mattered."""
     values, vectors = np.linalg.eigh(np.asarray(matrix, dtype="float64"))
     if label and values.min() < -CLIP_TOLERANCE:
         log.warning("%s is not PSD (min eigenvalue %.5f); clipping", label, values.min())
     return vectors @ np.diag(np.sqrt(np.clip(values, 0.0, None))) @ vectors.T
-
-
-def _batch_sqrtm(matrices):
-    """Square roots of a stack of symmetric matrices, negative eigenvalues clipped."""
-    values, vectors = np.linalg.eigh(matrices)
-    values = np.sqrt(np.clip(values, 0.0, None))
-    return vectors @ (values[..., None] * np.swapaxes(vectors, -1, -2))
 
 
 class GameCopula:

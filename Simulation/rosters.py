@@ -81,10 +81,16 @@ def matchup(mine, theirs):
 def start_sit(draws, scoreset, locked_rows, candidate_rows, opponent_totals):
     """P(win) with each candidate added to a locked roster.
 
-    This is the lineup decision itself, and it is *not* a ranking by expected points. A
-    manager who is behind should want variance and a manager who is ahead should want a
-    floor, which only shows up when the candidate is scored against the opponent's own
+    This is the lineup decision itself, and it is not necessarily a ranking by expected
+    points: a manager who is behind should want variance and one who is ahead should want a
+    floor, which only shows up when a candidate is scored against the opponent's own
     distribution rather than on its own.
+
+    Every candidate is evaluated on the **same draws** -- common random numbers -- so what
+    separates two of them is the candidate's own contribution and not sampling noise in the
+    locked roster or the opponent. Without that pairing, telling two similar candidates apart
+    would need far more draws than the gap between them deserves. The gaps are often small;
+    treat a difference of a few tenths of a percent as a tie rather than a finding.
     """
     base = roster_points(draws, scoreset, locked_rows)
     ranked = []

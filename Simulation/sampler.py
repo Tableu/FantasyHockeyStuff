@@ -131,10 +131,3 @@ class Simulator:
         keys = frame[[c for c in ("season_id", "game_id", "game_date", "team_id",
                                   "player_id", "position") if c in frame.columns]]
         return Draws(keys, counts, plays)
-
-
-def played_mean(draws: Draws, category):
-    """Mean of a category over draws where the player dressed -- for calibration checks."""
-    values = draws[category].astype("float64")
-    played = draws.played
-    return float(values[played].mean()) if played.any() else float("nan")
