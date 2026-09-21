@@ -52,10 +52,43 @@ with a longer window. And **shrinkage earns its place**: 7.7% better than naive 
 at six weeks, 11.6% better at twelve, with the advantage growing as the horizon lengthens,
 which is the signature of true talent mattering more the further out you look.
 
-No gradient-boosted model exists here yet, deliberately. The goalie branch already paid the
-tuition on this exact question — save percentage looked like a modelling problem and was a
-shrinkage problem, with LightGBM scoring negative R-squared at every capacity — so the rule
-is that nothing gets a model until it beats the ladder above.
+### The model rung clears it
+
+`ros_train.py` adds a gradient-boosted rung, one model per factor, built so the answer could
+have been *no* without the work being wasted: the shrunk estimate is handed to each model as
+a feature, so the trees start from the baseline and only learn a correction. Rows are
+weighted by how much window stood behind the label — a rate measured over eighteen games is
+a better label than one over two — and the objectives are L1, matching the reported metric,
+which is the lesson the shrinkage constants taught the hard way.
+
+| rung | MAE | RMSE | bias | Spearman |
+|---|---|---|---|---|
+| season-to-date | 15.05 | 21.14 | +7.0% | 0.680 |
+| shrunk | 13.89 | 18.79 | +4.8% | 0.704 |
+| **model** | **12.47** | **16.94** | **−0.2%** | **0.754** |
+
+10.2% better than shrinkage on MAE, 0.05 of Spearman, and the level bias effectively
+disappears. It holds at twelve weeks too (22.83 against 25.46, Spearman 0.768 against 0.719)
+and under banger-league scoring (21.96 against 24.54). **It beats shrinkage on every one of
+the ten factors** — including availability, which shrinkage could not improve on at all
+(0.183 against 0.200): a player's own attendance rate is his best single predictor, but team
+context and role carry more.
+
+### Expected goals did not earn their billing
+
+Section 2 says individual xG is "materially more predictive of future goals than past goals
+are." Over a rest-of-season horizon, measured three ways, it is not:
+
+- Total gain in the goals model, across all 452 features: past goals 0.131, ixG 0.042.
+- Dropping every ixG column **improves** goals MAE slightly, 0.3420 → 0.3400.
+- Dropping every past-goals column makes it slightly worse, 0.3420 → 0.3428.
+
+Those differences are small enough to be a single fit's noise, which is the point: given a
+shrunk goal rate and power-play deployment already in the features, ixG adds nothing
+measurable at this horizon. It may still earn its place in the per-game models, where the
+question is a different one. What *does* carry the goals model is position (0.25 of gain, the
+prior in disguise), the shrunk goal rate (0.11) and power-play ice time (0.07) — and for
+assists, power-play deployment is 0.30 of the top-eight gain on its own.
 
 ### How long until a player's own numbers count
 
