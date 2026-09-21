@@ -143,6 +143,42 @@ Checked end to end against what actually happened after 2026-01-15: Spearman 0.8
 Pearson 0.819 on rest-of-season points across 846 players, with goals within 0.3% and assists
 within 2.2% in aggregate.
 
+### The deployment build, and why the round budget is the regularizer
+
+```bash
+python ros_train.py --train 2023-24 2024-25 2025-26 --horizon season --no-holdout --save
+```
+
+`--no-holdout` trains on every season given and scores nothing, which is what to ship before
+a season starts. It carries no metrics of its own: the figures above come from the build
+trained on 2023-24 and 2024-25 and scored against a 2025-26 it never saw. The sidecar records
+`deployment_build`, `trained_on` and `scored_on`, and `ros_predict.py` prints that provenance
+on every run — plus a warning if the season being projected is one the models trained on.
+
+Saved models are namespaced by horizon (`ros_season_*`, `ros_42d_*`), because a season-length
+window and a six-week window are different labels with different noise and loading one where
+the other was meant produces plausible-looking numbers.
+
+**Early stopping does not work on this target, and the reason generalizes.** A rest-of-season
+label looks forward, so a fit row from November carries a window covering the same games the
+validation rows' windows cover. They share outcomes, so validation loss keeps improving well
+past the point of generalizing — it never fired once, at any cap. The per-game stack has no
+such problem, since its labels are single games.
+
+Swept against a genuinely unseen season instead, the cap turns out to matter:
+
+| rounds | MAE | RMSE | bias | Spearman |
+|---|---|---|---|---|
+| 100 | **26.41** | **38.02** | +1.8% | **0.854** |
+| 250 *(default)* | 26.48 | 38.21 | +1.1% | 0.851 |
+| 500 | 26.71 | 38.49 | +0.8% | 0.849 |
+| 2000 | 27.09 | 38.87 | **+0.6%** | 0.845 |
+
+Monotone, and in the direction that a trusted early-stopping run would have hidden: more
+boosting is steadily *worse* on accuracy and ranking while slowly improving level bias. The
+first shipped build ran at 2000 and was the worst row in that table. 250 is the default now —
+within 0.3% of the best MAE with meaningfully lower bias.
+
 ### Availability is over-projected, and it is not the loss function
 
 Projected totals run high, and increasingly so as a season runs out:

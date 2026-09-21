@@ -62,11 +62,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_fit():
-    """The boosters and the shrinkage they were trained alongside."""
-    sidecar = paths.MODELS_DIR / "ros_fit.json"
+def load_fit(horizon):
+    """The boosters and the shrinkage they were trained alongside, for this horizon."""
+    prefix = ros_train.model_prefix(horizon)
+    sidecar = paths.MODELS_DIR / f"{prefix}_fit.json"
     if not sidecar.exists():
-        raise FileNotFoundError(f"{sidecar} is missing -- run ros_train.py --save")
+        raise FileNotFoundError(
+            f"{sidecar} is missing -- run ros_train.py --horizon {horizon} --save")
     payload = json.loads(sidecar.read_text(encoding="utf-8"))
     fitted = {factor: {"k": entry["k"], "recency": entry["recency"],
                        "prior": entry["prior"]}
@@ -74,15 +76,29 @@ def load_fit():
     return payload, fitted
 
 
-def load_boosters():
+def load_boosters(horizon):
     import lightgbm as lgb
+    prefix = ros_train.model_prefix(horizon)
     boosters = {}
     for factor in baselines.FACTORS:
-        path = paths.MODELS_DIR / f"ros_{factor}.txt"
+        path = paths.MODELS_DIR / f"{prefix}_{factor}.txt"
         if not path.exists():
-            raise FileNotFoundError(f"{path} is missing -- run ros_train.py --save")
+            raise FileNotFoundError(
+                f"{path} is missing -- run ros_train.py --horizon {horizon} --save")
         boosters[factor] = lgb.Booster(model_file=str(path))
     return boosters
+
+
+def describe_provenance(payload):
+    """Say where these models came from, every run, without being asked."""
+    trained = ", ".join(payload.get("trained_on") or ["?"])
+    if payload.get("deployment_build"):
+        log.info("models: deployment build trained on %s, horizon %s -- scored against "
+                 "nothing, so any accuracy figure for it comes from the last scored build",
+                 trained, payload.get("horizon"))
+    else:
+        log.info("models: trained on %s and scored on %s, horizon %s",
+                 trained, payload.get("scored_on"), payload.get("horizon"))
 
 
 def state_as_of(table, as_of):
@@ -113,12 +129,11 @@ def run(args):
              else table["game_date"].max())
     horizon_days = ros.parse_horizon(args.horizon)
 
-    payload, fitted = load_fit()
-    if payload.get("horizon") and str(payload["horizon"]) != str(args.horizon):
-        log.warning("the saved models were trained on a %s horizon and this is a %s one; "
-                    "the factors are horizon-independent so this is usually fine, but the "
-                    "label noise they were fitted against was not the same",
-                    payload["horizon"], args.horizon)
+    payload, fitted = load_fit(args.horizon)
+    describe_provenance(payload)
+    if args.season in (payload.get("trained_on") or []):
+        log.warning("%s is one of the seasons these models trained on, so anything measured "
+                    "against it here is in-sample and will flatter them", args.season)
 
     # The as-of derivations have to be computed over the whole season and only then sliced:
     # `team_games_to_date` counts a team's games before tonight, and counting it on a frame
@@ -139,7 +154,7 @@ def run(args):
     if args.baseline:
         factors = baselines.predict(state, fitted, "shrunk")
     else:
-        boosters = load_boosters()
+        boosters = load_boosters(args.horizon)
         columns = payload["feature_columns"]
         missing = [c for c in columns if c not in state.columns]
         for column in missing:

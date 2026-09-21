@@ -21,8 +21,33 @@ games in its window, the rest by the player's games in it.
 `team games x availability x ice time x rate per 60` -- so the comparison is like for like,
 and so the output stays scoring-agnostic.
 
+**Early stopping cannot be trusted here, so the round budget does the work.** A rest-of-season
+label looks *forward*, so a fit row from November carries a window covering the same games the
+validation rows' windows cover: the two share outcomes, and a validation loss computed on them
+keeps improving long past the point where the model has stopped generalizing. It never fired
+in practice -- every factor ran to whatever cap it was given. The per-game stack in `train.py`
+has no such problem, because its labels are single games.
+
+So the cap was swept against a genuinely unseen season instead, and it matters more than it
+looks. Window fantasy points on 2025-26, points-league: 100 rounds gives MAE 26.41 and
+Spearman 0.854, 250 gives 26.48 and 0.851, 500 gives 26.71 and 0.849, and 2000 gives 27.09
+and 0.845 -- monotone, with more boosting steadily *worse* on accuracy and ranking while
+slowly improving level bias (+1.8% at 100 against +0.6% at 2000). The default is 250, which
+sits within 0.3% of the best MAE while keeping the bias meaningfully lower.
+
+**Deployment builds carry no metrics, and say so.** `--no-holdout` trains on every season
+given and skips scoring entirely, which is what to ship before a season starts; the numbers
+quoted anywhere come from the last build that *was* scored, against a season it never saw.
+The sidecar records which, and `ros_predict.py` prints it on every run, because a projection
+whose provenance is unclear is worse than no projection.
+
+Saved models are namespaced by horizon. A season-length window and a six-week window are
+different labels with different noise, and loading one where the other is meant is the sort
+of mistake that produces plausible numbers.
+
 Usage:
     python ros_train.py --train 2023-24 2024-25 --test 2025-26 --weights points-league
+    python ros_train.py --train 2023-24 2024-25 2025-26 --horizon season --no-holdout --save
 """
 
 import argparse
@@ -77,6 +102,10 @@ def parse_args():
     parser.add_argument("--save", action="store_true",
                         help="Write the boosters and the fitted shrinkage to models/, so "
                              "ros_predict.py can use them")
+    parser.add_argument("--no-holdout", action="store_true",
+                        help="Train on every season given and score nothing -- the build to "
+                             "ship. Implies --save; the last scored build supplies the "
+                             "metrics, and the sidecar records that it did")
     parser.add_argument("--weights", action="append", default=None, metavar="FILE")
     parser.add_argument("--train-thin-days", type=int, default=3)
     parser.add_argument("--thin-days", type=int, default=7)
@@ -87,10 +116,17 @@ def parse_args():
                              "ranks well but over-projects a left-skewed factor like "
                              "availability and compounds into every total; l2 fits the "
                              "mean, which is what a total wants")
-    parser.add_argument("--rounds", type=int, default=2000)
+    parser.add_argument("--rounds", type=int, default=250,
+                        help="Boosting rounds, and the real regularizer here -- see the "
+                             "note on early stopping in the module docstring")
     parser.add_argument("--early-stopping", type=int, default=100)
     parser.add_argument("--out", default="ros_model.json")
     return parser.parse_args()
+
+
+def model_prefix(horizon):
+    """Saved models are namespaced by horizon: the labels are not interchangeable."""
+    return f"ros_{ros.suffix(horizon)}"
 
 
 def feature_columns(frame):
@@ -164,7 +200,14 @@ def top_features(booster, columns, count=8):
 def run(args):
     frames = [baselines.load(s, args.horizon) for s in args.train]
     train_all = baselines.add_asof(pd.concat(frames, ignore_index=True))
-    test = baselines.add_asof(baselines.load(args.test, args.horizon))
+    deployment = args.no_holdout
+    if deployment:
+        if args.test in args.train:
+            log.info("deployment build: training on %s, scoring nothing",
+                     ", ".join(args.train))
+        test = None
+    else:
+        test = baselines.add_asof(baselines.load(args.test, args.horizon))
 
     # Fit the shrinkage on the *training* rows only, thinned the same way the ladder was.
     fitted = {}
@@ -176,49 +219,74 @@ def run(args):
         fitted[factor]["recency"] = baselines.fit_recency(ladder_train, fitted, factor,
                                                           args.loss)
     train_all = add_shrunk(train_all, fitted)
-    test = add_shrunk(test, fitted)
+    if test is not None:
+        test = add_shrunk(test, fitted)
 
     train_rows = baselines.thin(train_all, args.train_thin_days)
     cutoff = train_rows["game_date"].quantile(0.75)
     fit_rows = train_rows[train_rows["game_date"] <= cutoff]
     valid_rows = train_rows[train_rows["game_date"] > cutoff]
-    test_rows = baselines.thin(test, args.thin_days)
-    log.info("fit %d rows to %s, early-stop on %d after it, test %d rows",
-             len(fit_rows), cutoff.date(), len(valid_rows), len(test_rows))
+    test_rows = baselines.thin(test, args.thin_days) if test is not None else None
+    log.info("fit %d rows to %s, early-stop on %d after it, test %s",
+             len(fit_rows), cutoff.date(), len(valid_rows),
+             f"{len(test_rows)} rows" if test_rows is not None else "none (deployment build)")
 
     columns = feature_columns(train_rows)
     log.info("%d features, %s objective", len(columns), args.objective)
     if args.objective == "l2":
         PARAMS["objective"], PARAMS["metric"] = "regression", ["l2"]
 
-    predictions, importances = pd.DataFrame(index=test_rows.index), {}
-    models = paths.ensure(paths.MODELS_DIR) if args.save else None
+    predictions = (pd.DataFrame(index=test_rows.index) if test_rows is not None else None)
+    importances = {}
+    models = paths.ensure(paths.MODELS_DIR) if (args.save or deployment) else None
+    prefix = model_prefix(args.horizon)
     for factor in baselines.FACTORS:
         booster = train_factor(fit_rows, valid_rows, factor, columns, args.rounds,
                                args.early_stopping)
-        predictions[factor] = np.clip(
-            booster.predict(matrix(test_rows, columns),
-                            num_iteration=booster.best_iteration), 0, None)
+        if predictions is not None:
+            predictions[factor] = np.clip(
+                booster.predict(matrix(test_rows, columns),
+                                num_iteration=booster.best_iteration), 0, None)
         importances[factor] = top_features(booster, columns)
         if models is not None:
-            booster.save_model(str(models / f"ros_{factor}.txt"),
+            booster.save_model(str(models / f"{prefix}_{factor}.txt"),
                                num_iteration=booster.best_iteration)
-    predictions["availability"] = predictions["availability"].clip(0, 1)
+    if predictions is not None:
+        predictions["availability"] = predictions["availability"].clip(0, 1)
     if models is not None:
         # The shrinkage fit travels with the boosters: the models were trained with the
         # shrunk estimate as a feature, so a consumer that cannot rebuild it cannot use them.
         sidecar = {
             "horizon": args.horizon,
             "trained_on": args.train,
+            "deployment_build": deployment,
+            # A deployment build has no metrics of its own. Whatever is quoted for it comes
+            # from the last build that was scored against a season it never trained on, and
+            # naming that here is what stops the two being confused later.
+            "scored_on": None if deployment else args.test,
+            "metrics_from": (None if deployment else args.out),
+            "early_stop_cutoff": str(cutoff.date()),
+            "fit_rows": len(fit_rows),
+            "early_stop_rows": len(valid_rows),
+            "objective": args.objective,
             "feature_columns": columns,
             "loss": args.loss,
             "shrinkage": {factor: {"k": entry["k"], "recency": entry["recency"],
                                    "prior": entry["prior"]}
                           for factor, entry in fitted.items()},
         }
-        (models / "ros_fit.json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
-        log.info("saved %d boosters and the shrinkage fit to %s",
-                 len(baselines.FACTORS), models)
+        (models / f"{prefix}_fit.json").write_text(json.dumps(sidecar, indent=2),
+                                                   encoding="utf-8")
+        log.info("saved %d boosters and the shrinkage fit to %s as %s_*",
+                 len(baselines.FACTORS), models, prefix)
+        if deployment:
+            log.warning("this is a deployment build: it was scored against nothing. The "
+                        "numbers to quote come from the last scored build.")
+
+    if test_rows is None:
+        return {"deployment_build": True, "trained_on": args.train,
+                "horizon": args.horizon, "features": len(columns),
+                "importances": importances}
 
     scoresets = [weights_module.load(w) for w in (args.weights or [])]
     truth = baselines.actual_totals(test_rows)
