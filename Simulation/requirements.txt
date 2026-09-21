@@ -1,0 +1,7 @@
+# The Monte Carlo layer. No database driver and no model library on purpose: this folder
+# starts from the lambda table ../Projections/predict.py writes and the dispersion
+# ../Projections/calibrate.py fits, both read by path.
+numpy>=1.26
+pandas>=2.2
+scipy>=1.14
+pyarrow>=17

@@ -1,0 +1,4 @@
+# Fitted structure and simulated output: derived, rebuildable, and large.
+reports/
+__pycache__/
+*.pyc
