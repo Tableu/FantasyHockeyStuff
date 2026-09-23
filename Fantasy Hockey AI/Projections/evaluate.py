@@ -68,9 +68,8 @@ def parse_args():
     return parser.parse_args()
 
 
-def load(variant, walk_forward=False):
-    name = ("predictions_walkforward_" if walk_forward else "predictions_") + f"{variant}.parquet"
-    path = paths.REPORTS_DIR / name
+def load(variant, season, walk_forward=False):
+    path = paths.predictions(variant, season, walk_forward)
     if not path.exists():
         raise FileNotFoundError(
             f"{path} is missing -- run train.py --all --variant {variant}"
@@ -204,8 +203,8 @@ def start_sit_accuracy(frame, actual_points, predicted_points, top_n=100):
     return float(captured / available) if available else float("nan")
 
 
-def evaluate(variant, walk_forward=False, recalibrate=False, scoresets=()):
-    frame = load(variant, walk_forward)
+def evaluate(variant, season, walk_forward=False, recalibrate=False, scoresets=()):
+    frame = load(variant, season, walk_forward)
     if recalibrate:
         import drift
         frame = drift.recalibrate(frame)
@@ -419,7 +418,8 @@ def main():
     scoresets = [weights_module.load(w) for w in (args.weights or [])]
     if scoresets:
         log.info("scoring under: %s", ", ".join(x.name for x in scoresets))
-    report = evaluate(args.variant, args.walk_forward, args.recalibrate, scoresets)
+    report = evaluate(args.variant, args.holdout_season, args.walk_forward, args.recalibrate,
+                      scoresets)
 
     if args.cross_features and not args.walk_forward:
         report["cross_features"] = cross_features(

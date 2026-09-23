@@ -268,7 +268,7 @@ def run(args):
                             "feature_columns": columns}, indent=2), encoding="utf-8")
 
     if len(split.holdout):
-        save_predictions(table, split, chain, args.variant)
+        save_predictions(table, split, chain, args.variant, holdout_season)
 
     summary_path = paths.REPORTS_DIR / f"training_{args.variant}.json"
     summary_path.write_text(json.dumps({
@@ -298,7 +298,7 @@ def required_targets(wanted):
     return needed
 
 
-def save_predictions(table, split, chain, variant):
+def save_predictions(table, split, chain, variant, season):
     """Holdout-season predictions beside the actuals, for evaluate.py and calibrate.py."""
     keep = [c for c in data.KEY_COLUMNS if c in table.columns] + ["season"]
     frame = table.loc[split.holdout, keep].copy()
@@ -310,7 +310,7 @@ def save_predictions(table, split, chain, variant):
     for column in data.BASELINE_COLUMNS:
         if column in table.columns:
             frame[column] = table.loc[split.holdout, column].to_numpy()
-    path = paths.REPORTS_DIR / f"predictions_{variant}.parquet"
+    path = paths.predictions(variant, season)
     frame.to_parquet(path, index=False)
     log.info("wrote %s: %d rows", path.name, len(frame))
 

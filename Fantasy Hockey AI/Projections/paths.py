@@ -25,5 +25,16 @@ def ensure(directory: Path) -> Path:
     return directory
 
 
+def predictions(variant: str, season: str, walk_forward: bool = False) -> Path:
+    """A scored holdout's per-row predictions, keyed by the season it held out.
+
+    Keyed so that a build holding out 2024-25 cannot overwrite the 2025-26 one, and so that a
+    reader asking for one season can never be handed the other. The unkeyed name used to be the
+    only name, and `Season/inputs.load_projections("2024-25")` quietly returned 2025-26.
+    """
+    kind = "predictions_walkforward_" if walk_forward else "predictions_"
+    return REPORTS_DIR / f"{kind}{variant}_{season}.parquet"
+
+
 def feature_table(season: str, variant: str, features_dir: Path | None = None) -> Path:
     return (features_dir or FEATURES_DIR) / f"skaters_{variant}_{season}.parquet"

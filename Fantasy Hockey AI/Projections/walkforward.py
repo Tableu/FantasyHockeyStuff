@@ -91,7 +91,7 @@ def run(args):
 
     out = pd.concat(collected, ignore_index=True)
     paths.ensure(paths.REPORTS_DIR)
-    path = paths.REPORTS_DIR / f"predictions_walkforward_{args.variant}.parquet"
+    path = paths.predictions(args.variant, args.holdout_season, walk_forward=True)
     out.to_parquet(path, index=False)
     log.info("wrote %s: %d rows over %d month(s)", path.name, len(out), out["month"].nunique())
 

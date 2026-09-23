@@ -42,6 +42,8 @@ DISPERSION_PATH_NAME = "dispersion.json"
 def parse_args():
     parser = argparse.ArgumentParser(description="Fit the per-category NB dispersion")
     parser.add_argument("--variant", choices=("A", "B"), default="B")
+    parser.add_argument("--season", default="2025-26",
+                        help="The holdout season whose predictions to fit on")
     return parser.parse_args()
 
 
@@ -113,10 +115,11 @@ def load_dispersion() -> dict:
             if v.get("theta") is not None}
 
 
-def run(variant):
-    path = paths.REPORTS_DIR / f"predictions_{variant}.parquet"
+def run(variant, season="2025-26"):
+    path = paths.predictions(variant, season)
     if not path.exists():
-        raise FileNotFoundError(f"{path} is missing -- run train.py --all --variant {variant}")
+        raise FileNotFoundError(f"{path} is missing -- run train.py --all --variant {variant} "
+                                f"--holdout-season {season}")
     frame = pd.read_parquet(path)
     frame = frame[frame["target_played"].astype(bool)]
 
@@ -164,7 +167,8 @@ def run(variant):
 
 
 def main():
-    run(parse_args().variant)
+    args = parse_args()
+    run(args.variant, args.season)
 
 
 if __name__ == "__main__":

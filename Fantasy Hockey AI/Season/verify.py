@@ -5,6 +5,7 @@ Run as a script. Each check is one failure mode that would otherwise show up as 
 season-level result rather than as an error:
 
     provenance      rung 4 handed projections that saw the season it is being scored on
+    season guard    one season's projections handed over as another's
     leakage         a manager handed an outcome column
     draws           rung 4 not actually using the distributions it is credited with using
     invariants      an illegal roster, an over-budget week, or an ineligible IR stash
@@ -60,6 +61,29 @@ def check_provenance() -> str:
     table = inputs.load_projections(SEASON)
     assert len(table), "the holdout table loaded empty"
     return f"in-sample table refused, holdout accepted ({len(table)} rows)"
+
+
+def check_season_guard() -> str:
+    """A file for one season is refused when another is asked for.
+
+    With one unkeyed predictions file, `load_projections("2024-25")` returned the 2025-26 holdout,
+    and the span check passed it -- it was a clean single season, just the wrong one. Asserted on
+    the in-memory table so the check does not depend on which files happen to be on disk.
+    """
+    table = pd.read_parquet(paths.holdout_predictions(SEASON))
+    inputs._assert_out_of_sample(table, SEASON, "holdout")          # the right season passes
+    other = f"{int(SEASON[:4]) - 1}-{SEASON[2:4]}"
+    for label, check in (
+            ("predictions", lambda: inputs._assert_out_of_sample(table, other, "holdout")),
+            ("p_start dates", lambda: inputs._assert_in_season(table["game_date"], other, "x"))):
+        try:
+            check()
+            raise AssertionError(f"{SEASON} {label} were accepted as {other}")
+        except inputs.ProvenanceError:
+            pass
+    missing = paths.holdout_predictions(other)
+    return (f"{SEASON} rows refused as {other}; {other}'s own predictions "
+            f"{'exist' if missing.exists() else 'are not built'} ({missing.name})")
 
 
 def check_leakage() -> str:
@@ -390,7 +414,8 @@ def check_modules() -> str:
     return f"no collisions; Decisions/ provides {', '.join(sorted(decisionlayer.__all__))}"
 
 
-CHECKS = [("provenance", check_provenance), ("leakage", check_leakage),
+CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard),
+          ("leakage", check_leakage),
           ("draws", check_draws), ("invariants", check_invariants),
           ("assignment", check_assignment), ("calendar", check_calendar),
           ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),

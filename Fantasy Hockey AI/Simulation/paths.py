@@ -31,6 +31,7 @@ def lambda_table(season: str, variant: str = "A") -> Path:
     return PROJECTIONS_REPORTS / f"lambdas_{season}_{variant}.parquet"
 
 
-def holdout_predictions(variant: str = "B") -> Path:
-    """The scored holdout the correlation structure is measured from."""
-    return PROJECTIONS_REPORTS / f"predictions_{variant}.parquet"
+def holdout_predictions(season: str, variant: str = "B") -> Path:
+    """The scored holdout the correlation structure is measured from, for the season it held out.
+    Same name as `Projections/paths.predictions` -- keyed so one season's fit never reads another's."""
+    return PROJECTIONS_REPORTS / f"predictions_{variant}_{season}.parquet"

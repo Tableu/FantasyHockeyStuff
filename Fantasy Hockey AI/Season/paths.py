@@ -83,16 +83,17 @@ def fantasy_adp(platform: str, season: str) -> Path:
     return FEATURES_DIR / f"fantasy_adp_{platform.lower()}_{season}.parquet"
 
 
-def holdout_predictions(variant: str = "A") -> Path:
+def holdout_predictions(season: str, variant: str = "A") -> Path:
     """The projections the backtest runs on.
 
     Deliberately NOT `lambdas_<season>_<variant>.parquet`. That table is whatever is in
     `Projections/models/` at the time, which is currently the deployment build trained on all
     three seasons -- in-sample on the season being simulated. This file is the holdout build's
     scored season, which is the only honest input for a strategy comparison. `inputs.py`
-    asserts it.
+    asserts it. Keyed by the season held out: the unkeyed name made `load_projections("2024-25")`
+    return 2025-26 without a word.
     """
-    return PROJECTIONS_REPORTS / f"predictions_{variant}.parquet"
+    return PROJECTIONS_REPORTS / f"predictions_{variant}_{season}.parquet"
 
 
 def ros_predictions(season: str, horizon: str = "season") -> Path:

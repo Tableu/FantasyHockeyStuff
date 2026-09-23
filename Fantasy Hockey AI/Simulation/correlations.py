@@ -62,6 +62,8 @@ REFERENCE_TEAM_SIZE = 18
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Fit the between-player correlation structure")
+    parser.add_argument("--season", default="2025-26",
+                        help="The holdout season whose scored predictions to fit on")
     parser.add_argument("--variant", choices=("A", "B"), default="B",
                         help="Which scored holdout to measure (default B, the trained one)")
     parser.add_argument("--sims", type=int, default=100,
@@ -75,9 +77,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_holdout(variant):
+def load_holdout(variant, season="2025-26"):
     """The scored holdout, one copy per player-game, restricted to players who dressed."""
-    path = paths.holdout_predictions(variant)
+    path = paths.holdout_predictions(season, variant)
     if not path.exists():
         raise FileNotFoundError(f"{path} is missing -- run Projections/train.py --all")
     frame = pd.read_parquet(path)
@@ -431,9 +433,9 @@ def structure(payload):
 
 def run(args):
     dispersion = load_dispersion()
-    holdout = load_holdout(args.variant)
+    holdout = load_holdout(args.variant, args.season)
     payload = fit(holdout, dispersion, args.sims, args.batch_sims, args.iterations,
-                  args.seed, paths.holdout_predictions(args.variant).name)
+                  args.seed, paths.holdout_predictions(args.season, args.variant).name)
     destination = paths.ensure(paths.REPORTS_DIR) / (args.out or "correlations.json")
     destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log.info("wrote %s", destination)

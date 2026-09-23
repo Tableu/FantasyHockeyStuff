@@ -68,7 +68,7 @@ def load_projections(season: str, variant: str = "A") -> pd.DataFrame:
 
     Returns exactly the columns `Simulation/sampler.py:REQUIRED_COLUMNS` asks for, plus keys.
     """
-    path = paths.holdout_predictions(variant)
+    path = paths.holdout_predictions(season, variant)
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found. It is written by `Projections/train.py --all` followed by "
@@ -131,6 +131,31 @@ def _assert_out_of_sample(table: pd.DataFrame, season: str, path) -> None:
             f"{path} spans {span} days ({days.min().date()}..{days.max().date()}), i.e. more "
             f"than one season. A scored holdout covers the held-out season only; this looks "
             f"like a deployment build, which would be in-sample on {season}.")
+    _assert_in_season(days, season, path)
+
+
+def season_window(season: str):
+    """July 1 of a season's first year through June 30 of the next: every game of "2024-25"
+    falls inside it, and no game of any other season does."""
+    first = int(season.split("-")[0])
+    return pd.Timestamp(f"{first}-07-01"), pd.Timestamp(f"{first + 1}-06-30")
+
+
+def _assert_in_season(days, season: str, path) -> None:
+    """Every row is dated inside the season asked for.
+
+    The span check above cannot see this: a clean one-season file for the WRONG season passes it.
+    That is not hypothetical -- with one unkeyed predictions file, `load_projections("2024-25")`
+    returned the 2025-26 holdout, which would have tuned section 11 on the final holdout.
+    """
+    start, end = season_window(season)
+    days = pd.to_datetime(days)
+    outside = (days < start) | (days > end)
+    if outside.any():
+        raise ProvenanceError(
+            f"{path} has {int(outside.sum())} of {len(days)} rows dated outside {season} "
+            f"({start.date()}..{end.date()}): {days.min().date()}..{days.max().date()}. It "
+            f"belongs to another season.")
 
 
 def load_ros(season: str):
@@ -257,6 +282,7 @@ def load_p_start(season: str):
         return None
     table = pd.read_parquet(path)
     table["game_date"] = pd.to_datetime(table["game_date"])
+    _assert_in_season(table["game_date"], season, path)
     log.info("p_start: %d goalie rows, mean %.4f (%s)", len(table), table["p_start"].mean(),
              path.name)
     return table
