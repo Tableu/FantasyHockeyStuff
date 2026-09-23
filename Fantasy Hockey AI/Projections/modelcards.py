@@ -19,6 +19,7 @@ import targets as targets_module
 def parse_args():
     parser = argparse.ArgumentParser(description="Render the model cards")
     parser.add_argument("--variant", choices=("A", "B"), default="B")
+    parser.add_argument("--season", default="2025-26", help="The scored holdout season to describe")
     return parser.parse_args()
 
 
@@ -34,9 +35,11 @@ def table(rows, headers):
     return "\n".join(lines)
 
 
-def render(variant):
-    training = read(f"training_{variant}.json")
-    metrics = read(f"metrics_{variant}.json")
+def render(variant, season="2025-26"):
+    # training_<variant>.json is the deployment build in models/. With none (variant A has no
+    # deployment build), the scored build's own summary describes the only boosters there are.
+    training = read(f"training_{variant}.json") or read(f"training_{variant}_{season}.json")
+    metrics = read(f"metrics_{variant}_{season}.json")
     dispersion = read("dispersion.json")
     if not training or not metrics:
         raise SystemExit(f"run train.py / evaluate.py --variant {variant} first")
@@ -149,7 +152,7 @@ def render(variant):
         if baseline_rows:
             out += [table(baseline_rows, ["baseline", "MAE"]), ""]
 
-    walk = read(f"metrics_walkforward_{variant}.json")
+    walk = read(f"metrics_walkforward_{variant}_{season}.json")
     if walk:
         wf = (walk.get("composite") or {})
         out += ["## Walk-forward -- the honesty check", "", measured, "",

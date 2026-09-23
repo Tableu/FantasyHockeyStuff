@@ -19,12 +19,14 @@ season-level result rather than as an error:
                     activation's forced drop spending a move
     streaming       rung 7 at zero spots differing from rung 5, or a rental breaking the reserve,
                     its drop-cost floor, the spot rule or the weekly budget
+    no clobber      a scored projection build overwriting the deployment boosters in models/
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
     python verify.py
 """
 
 import logging
+from pathlib import Path
 import random
 import sys
 
@@ -408,6 +410,38 @@ def check_streaming() -> str:
             f"drops and the weekly budget all held")
 
 
+def check_no_clobber() -> str:
+    """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
+
+    Every train.py run used to save its boosters into models/ whatever its holdout, so building a
+    2024-25 holdout would have replaced the deployment build predict.py ships. Run as a real,
+    small scored build in a subprocess -- Projections' own `paths` would shadow this folder's.
+    """
+    import hashlib
+    import subprocess
+    import tempfile
+
+    models = paths.PROJECTIONS_DIR / "models"
+
+    def manifest():
+        return {str(p.relative_to(models)): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(models.rglob("*")) if p.is_file()}
+
+    before = manifest()
+    with tempfile.TemporaryDirectory() as scratch:
+        result = subprocess.run(
+            [sys.executable, "goalie_starts.py", "--train", "--save", "--rounds", "20",
+             "--season", SEASON, "--models-dir", scratch],
+            cwd=paths.PROJECTIONS_DIR, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr[-400:]
+        wrote = sorted(p.name for p in Path(scratch).iterdir())
+    after = manifest()
+    changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+    assert not changed, f"a scored build changed models/: {changed[:5]}"
+    assert "goalie_start.txt" in wrote, f"the build wrote nothing to its own directory: {wrote}"
+    return f"scored build wrote {len(wrote)} files to its own directory; {len(before)} files in models/ unchanged"
+
+
 def check_modules() -> str:
     import decisionlayer
 
@@ -421,6 +455,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
+          ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 
 

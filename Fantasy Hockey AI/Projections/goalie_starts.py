@@ -34,6 +34,7 @@ model's output, so an in-sample P(start) would flatter rung 4 for nothing.
 import argparse
 import json
 import logging
+from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
@@ -76,7 +77,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Fit or apply the P(start) model")
     parser.add_argument("--train", action="store_true")
     parser.add_argument("--predict", action="store_true")
-    parser.add_argument("--season", default=HOLDOUT_SEASON)
+    parser.add_argument("--season", default=HOLDOUT_SEASON,
+                        help="The held-out season: scored by --train, predicted by --predict")
+    parser.add_argument("--train-seasons", default=",".join(TRAIN_SEASONS))
+    parser.add_argument("--models-dir", type=Path, default=None,
+                        help="Default models/holdout_<season>/ -- never models/ itself, which "
+                             "holds the deployment boosters")
     parser.add_argument("--save", action="store_true", help="Write the booster and sidecar")
     parser.add_argument("--rounds", type=int, default=400)
     return parser.parse_args()
@@ -254,9 +260,21 @@ def normalize(table: pd.DataFrame, column="p_start_raw", out="p_start") -> pd.Da
     return table
 
 
-def train(rounds=400, save=False) -> dict:
-    fit = build(TRAIN_SEASONS)
-    holdout = build([HOLDOUT_SEASON])
+def models_dir_for(season, override=None) -> Path:
+    """Where a P(start) booster held out of `season` lives. It used to be models/ whatever the
+    seasons, so a second build silently replaced the first."""
+    return override or (paths.MODELS_DIR / f"holdout_{season}")
+
+
+def train(rounds=400, save=False, train_seasons=None, season=HOLDOUT_SEASON,
+          models_dir=None) -> dict:
+    train_seasons = list(train_seasons or TRAIN_SEASONS)
+    if season in train_seasons:
+        raise SystemExit(f"{season} is both trained on and held out")
+    custom_dir = models_dir is not None
+    models_dir = models_dir_for(season, models_dir)
+    fit = build(train_seasons)
+    holdout = build([season])
 
     booster = lgb.train(PARAMS, lgb.Dataset(_matrix(fit), label=fit["is_starter"].astype(int)),
                         num_boost_round=rounds)
@@ -295,8 +313,8 @@ def train(rounds=400, save=False) -> dict:
 
     sidecar = {
         "target": "is_starter",
-        "trained_on": TRAIN_SEASONS,
-        "scored_on": HOLDOUT_SEASON,
+        "trained_on": train_seasons,
+        "scored_on": season,
         "rows": int(len(fit)),
         "rounds": rounds,
         "auc": metrics,
@@ -310,20 +328,24 @@ def train(rounds=400, save=False) -> dict:
         "feature_columns": FEATURES,
     }
     if save:
-        paths.ensure(paths.MODELS_DIR)
-        booster.save_model(str(paths.MODELS_DIR / "goalie_start.txt"))
-        (paths.MODELS_DIR / "goalie_start.json").write_text(
+        paths.ensure(models_dir)
+        booster.save_model(str(models_dir / "goalie_start.txt"))
+        (models_dir / "goalie_start.json").write_text(
             json.dumps(sidecar, indent=2, default=str), encoding="utf-8")
-        log.info("saved -> %s", paths.MODELS_DIR / "goalie_start.txt")
-    paths.ensure(paths.REPORTS_DIR)
-    (paths.REPORTS_DIR / "goalie_start_metrics.json").write_text(
+        log.info("saved -> %s", models_dir / "goalie_start.txt")
+    # A build aimed at its own directory (an experiment, verify.py's no-clobber check) keeps its
+    # metrics there too, so it cannot overwrite the reported ones either.
+    metrics_dir = models_dir if custom_dir else paths.REPORTS_DIR
+    paths.ensure(metrics_dir)
+    (metrics_dir / f"goalie_start_metrics_{season}.json").write_text(
         json.dumps(sidecar, indent=2, default=str), encoding="utf-8")
     return sidecar
 
 
-def predict(season: str) -> pd.DataFrame:
-    booster = lgb.Booster(model_file=str(paths.MODELS_DIR / "goalie_start.txt"))
-    sidecar = json.loads((paths.MODELS_DIR / "goalie_start.json").read_text(encoding="utf-8"))
+def predict(season: str, models_dir=None) -> pd.DataFrame:
+    models_dir = models_dir_for(season, models_dir)
+    booster = lgb.Booster(model_file=str(models_dir / "goalie_start.txt"))
+    sidecar = json.loads((models_dir / "goalie_start.json").read_text(encoding="utf-8"))
     if season in sidecar.get("trained_on", []):
         log.warning("%s is in this model's training seasons %s -- an in-sample P(start) would "
                     "flatter anything that consumes it", season, sidecar["trained_on"])
@@ -340,10 +362,12 @@ def predict(season: str) -> pd.DataFrame:
 
 def main():
     args = parse_args()
+    train_seasons = [s.strip() for s in args.train_seasons.split(",") if s.strip()]
     if args.train:
-        train(rounds=args.rounds, save=args.save)
+        train(rounds=args.rounds, save=args.save, train_seasons=train_seasons,
+              season=args.season, models_dir=args.models_dir)
     if args.predict:
-        predict(args.season)
+        predict(args.season, args.models_dir)
     if not args.train and not args.predict:
         raise SystemExit("nothing to do: pass --train and/or --predict")
 

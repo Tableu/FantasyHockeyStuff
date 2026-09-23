@@ -425,9 +425,8 @@ def main():
         report["cross_features"] = cross_features(
             args.cross_features, args.holdout_season, report, scoresets)
 
-    path = paths.REPORTS_DIR / (
-        f"metrics_walkforward_{args.variant}.json" if args.walk_forward
-        else f"metrics_{args.variant}.json")
+    kind = "metrics_walkforward_" if args.walk_forward else "metrics_"
+    path = paths.REPORTS_DIR / f"{kind}{args.variant}_{args.holdout_season}.json"
     path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(summarise(report))
     log.info("wrote %s", path.name)

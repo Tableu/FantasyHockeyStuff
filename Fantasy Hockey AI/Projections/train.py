@@ -60,6 +60,9 @@ def parse_args():
                              "The deployment build: no metrics come out of it, so docs/ keeps "
                              "describing the last model that was actually scored.")
     parser.add_argument("--features-dir", type=Path, default=None)
+    parser.add_argument("--models-dir", type=Path, default=None,
+                        help="Where the boosters go. Default: models/ for a deployment build "
+                             "(--no-holdout), models/holdout_<season>_<variant>/ for a scored one")
     parser.add_argument("--walk-forward", action="store_true",
                         help="Refit monthly across the holdout season instead of once")
     parser.add_argument("--folds", type=int, default=OOF_FOLDS,
@@ -249,8 +252,16 @@ def run(args):
     chain = pd.DataFrame(index=table.index)
     records, boosters = [], {}
 
-    paths.ensure(paths.MODELS_DIR)
+    # A scored build never writes models/. Every run used to save the same eleven files there,
+    # whatever its variant or holdout, so a variant-A build, a variant-B build and the deployment
+    # build silently replaced one another -- and a section 11 build holding out 2024-25 would
+    # have replaced the boosters predict.py ships.
+    models_dir = args.models_dir or models_dir_for(holdout_season, args.variant)
+    paths.ensure(models_dir)
     paths.ensure(paths.REPORTS_DIR)
+    log.info("boosters -> %s", models_dir)
+    provenance = {"variant": args.variant, "train_seasons": train_seasons,
+                  "holdout_season": holdout_season}
 
     for target in targets_module.PIPELINE:
         if target.name not in needed:
@@ -261,17 +272,20 @@ def run(args):
         boosters[target.name] = booster
         if target.name in wanted:
             records.append(record)
-            booster.save_model(str(paths.MODELS_DIR / f"{target.name}.txt"),
+            booster.save_model(str(models_dir / f"{target.name}.txt"),
                                num_iteration=booster.best_iteration)
-            (paths.MODELS_DIR / f"{target.name}.json").write_text(
-                json.dumps({**record, "params": target.lgb_params(),
+            (models_dir / f"{target.name}.json").write_text(
+                json.dumps({**record, **provenance, "params": target.lgb_params(),
                             "feature_columns": columns}, indent=2), encoding="utf-8")
 
     if len(split.holdout):
         save_predictions(table, split, chain, args.variant, holdout_season)
 
-    summary_path = paths.REPORTS_DIR / f"training_{args.variant}.json"
+    # training_<variant>.json describes what is in models/, so only a deployment build writes it.
+    summary_path = paths.REPORTS_DIR / (f"training_{args.variant}.json" if holdout_season is None
+                                        else f"training_{args.variant}_{holdout_season}.json")
     summary_path.write_text(json.dumps({
+        "models_dir": str(models_dir),
         "variant": args.variant,
         "train_seasons": train_seasons,
         "holdout_season": holdout_season,
@@ -281,6 +295,13 @@ def run(args):
     }, indent=2), encoding="utf-8")
     log.info("wrote %s", summary_path.name)
     return chain, table, split
+
+
+def models_dir_for(holdout_season, variant):
+    """models/ for the deployment build; models/holdout_<season>_<variant>/ for a scored one."""
+    if holdout_season is None:
+        return paths.MODELS_DIR
+    return paths.MODELS_DIR / f"holdout_{holdout_season}_{variant}"
 
 
 def required_targets(wanted):
