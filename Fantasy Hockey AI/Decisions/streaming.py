@@ -54,11 +54,12 @@ class StreamParams:
     lam: float = 2.0            # points: the shadow price of a move at the start of the week
     margin: float = 0.0         # sds of the week's gain a stream must also clear
     gate: bool = False          # scale the gain by phi(z)/phi(0) of the matchup z
+    flat: bool = False          # hold the bar at lam/2 all week (the falling bar's average)
     shortlist: int = 12         # free agents priced on the roster per pass
 
     def describe(self) -> str:
         return (f"k={self.spots} r={self.reserve} lam={self.lam:g} ms={self.margin:g}"
-                f"{' gate' if self.gate else ''}")
+                f"{' gate' if self.gate else ''}{' flat' if self.flat else ''}")
 
 
 def _week_share_left(view) -> float:
@@ -142,7 +143,8 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
         return []
     state = view._state
     eligibility = state.eligibility
-    share_left = _week_share_left(view)
+    # The flat arm tests whether letting the bar fall as moves expire is doing anything.
+    share_left = 0.5 if params.flat else _week_share_left(view)
     scale = math.exp(-0.5 * z * z) if params.gate else 1.0
     done, reserved = [], set()
 

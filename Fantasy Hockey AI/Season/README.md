@@ -226,8 +226,22 @@ the roster's k cheapest -- scored the same within noise but rented away regulars
 night), and the spot test was first measured over three weeks, where two fewer team games alone made
 an equal-rate player "below replacement". Both are fixed. **Known artifact:** the harness ends at
 week 26 with no playoffs, so in the final week nothing has post-week value and rentals drop stars;
-the league's playoff format is not recorded yet. Sensitivity only -- none of k, reserve or lam has
-been swept, and 2025-26 is the only clean holdout.
+the league's playoff format is not recorded yet.
+
+**Sensitivity, not tuning** (`docs/ladder-league_abl-*.md`, 14-team, 4 rotations, each setting's
+rung 7 − rung 5 against the defaults', paired by replication):
+
+| setting | points | banger | reading |
+|---|---|---|---|
+| k = 1 / k = 3 | −1.5 ± 3.8 / +2.7 ± 2.8 | −2.9 ± 4.1 / +2.0 ± 2.8 | noise |
+| lam = 0 / lam = 4 | +1.2 ± 1.1 / +1.8 ± 2.7 | −4.1 ± 3.4 / −1.6 ± 2.6 | noise |
+| reserve 0 | **+1.9 ± 0.5** | −0.6 ± 4.5 | clear under points only |
+| rental margin 0.5 | **−2.6 ± 1.1** | **−8.5 ± 2.8** | worse: halves the rentals, and the ones cut were net positive |
+| flat bar (lam/2 all week) | −1.0 ± 2.8 | **−8.6 ± 3.6** | the falling bar earns its place |
+| matchup gate | −1.4 ± 1.9 | −7.4 ± 5.1 | noise, and win rate did not rise either |
+
+Defaults unchanged; reserve and lam go to section 11's search, on 2024-25. One reading is not yet
+explained: lam = 0 made *fewer* rentals than the default under banger scoring (76 against 98).
 
 ## Formats
 

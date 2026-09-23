@@ -70,6 +70,8 @@ def parse_args():
                         help="Rung 7: sds of the week's gain a stream must also clear")
     parser.add_argument("--stream-gate", action="store_true",
                         help="Rung 7: scale a stream's gain by phi(z)/phi(0) of the matchup")
+    parser.add_argument("--stream-flat", action="store_true",
+                        help="Rung 7: hold the rental bar at lam/2 all week instead of letting it fall")
     parser.add_argument("--tag", default=None,
                         help="Suffix for the report and doc names, so an experiment does not "
                              "overwrite the committed ladder")
@@ -108,6 +110,8 @@ def stream_params(args):
             changes[field] = getattr(args, flag)
     if args.stream_gate:
         changes["gate"] = True
+    if args.stream_flat:
+        changes["flat"] = True
     return replace(streaming.StreamParams(), **changes)
 
 
