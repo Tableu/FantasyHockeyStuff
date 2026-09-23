@@ -35,6 +35,15 @@ import paths
 # `share` entries are a fraction of the player's points, not a count.
 SKATER_QUANTITIES = ["goals", "assists", "shots", "hits", "blocks", "pim", "ppp", "shp"]
 
+# Per-start goalie quantities. Nothing in this folder projects them -- the measured finding is
+# that per-start goalie quality is not projectable (R2 -0.8%), so the standing treatment is
+# P(start) x league average and lives in `Simulation/goalies.py`. They are listed here only so
+# that a misspelled goalie weight fails on load in both folders rather than being silently
+# dropped in one of them.
+GOALIE_QUANTITIES = ["wins", "losses", "ot_losses", "shutouts", "saves", "goals_against"]
+
+SIDES = {"skaters": SKATER_QUANTITIES, "goalies": GOALIE_QUANTITIES}
+
 
 class ScoreSet:
     """One league's scoring, loaded from JSON."""
@@ -45,10 +54,12 @@ class ScoreSet:
         self.skaters = {k: float(v) for k, v in (payload.get("skaters") or {}).items()}
         self.goalies = {k: float(v) for k, v in (payload.get("goalies") or {}).items()}
         self.source = source
-        unknown = [k for k in self.skaters if k not in SKATER_QUANTITIES]
-        if unknown:
-            raise ValueError(f"{self.name}: unknown skater quantities {unknown}; "
-                             f"known: {SKATER_QUANTITIES}")
+        for side, known in SIDES.items():
+            priced = self.skaters if side == "skaters" else self.goalies
+            unknown = [k for k in priced if k not in known]
+            if unknown:
+                raise ValueError(f"{self.name}: unknown {side[:-1]} quantities {unknown}; "
+                                 f"known: {known}")
 
     def __repr__(self):
         return f"ScoreSet({self.name!r}, {len(self.skaters)} skater weights)"
@@ -56,14 +67,22 @@ class ScoreSet:
     def describe(self) -> str:
         return ", ".join(f"{k} {v:g}" for k, v in self.skaters.items())
 
-    def score(self, stats: pd.DataFrame, prefix: str = "") -> pd.Series:
+    def scored(self, side: str = "skaters") -> list[str]:
+        """The quantities this file prices, in the canonical order."""
+        priced = self.skaters if side == "skaters" else self.goalies
+        return [q for q in SIDES[side] if q in priced]
+
+    def score(self, stats: pd.DataFrame, prefix: str = "",
+              side: str = "skaters") -> pd.Series:
         """Points per row for a stat line under this scoring.
 
         `prefix` picks the column family, so the same call scores actuals (`target_`) and
         projections (`lambda_`).
         """
+        if side not in SIDES:
+            raise ValueError(f"side must be one of {sorted(SIDES)}, not {side!r}")
         total = pd.Series(0.0, index=stats.index)
-        for quantity, weight in self.skaters.items():
+        for quantity, weight in (self.skaters if side == "skaters" else self.goalies).items():
             column = f"{prefix}{quantity}"
             if column in stats.columns:
                 total += stats[column].fillna(0.0) * weight
