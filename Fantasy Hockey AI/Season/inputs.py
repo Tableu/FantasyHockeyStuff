@@ -39,20 +39,12 @@ PREDICTION_RENAMES = {
     "pred_ev_toi": "ev_toi",
     "pred_pp_toi": "pp_toi",
     "pred_pp_point_share": "pp_point_share",
+    # Required since the variant-A holdout was rebuilt (2026-09-23). The old predictions_A
+    # predated the short-handed-point model, so this column used to be optional and zero-filled
+    # -- 0.38% of skater points, understated for every manager alike.
+    "pred_sh_point_share": "sh_point_share",
     **{f"pred_{c}": f"lambda_{c}" for c in COUNT_CATEGORIES},
 }
-
-# `predictions_A.parquet` was written before the sh_point_share model joined the chain, so the
-# holdout build's scored season does not carry it (predictions_B does). Rather than clobber the
-# deployment build in Projections/models/ to regenerate it, the column is optional and defaults
-# to zero, because the cost is bounded and measured: short-handed points are 496 of 2025-26's
-# 129,177 skater fantasy points -- 0.38% -- earned on 396 of 46,654 played rows. Zeroing it
-# understates every manager in the field by the same 0.38% and cannot reorder a lineup decision
-# it is not involved in. To remove the approximation entirely, rebuild the holdout scored
-# season and the deployment build in turn:
-#     cd Projections && python train.py --all --variant A && python evaluate.py --weights points-league
-#     python train.py --all --no-holdout        # restores models/ to the deployment build
-OPTIONAL_RENAMES = {"pred_sh_point_share": "sh_point_share"}
 
 KEY_COLUMNS = ["season_id", "game_id", "game_date", "team_id", "player_id", "position"]
 TARGET_CATEGORIES = ["shots", "hits", "blocks", "assists", "goals", "pim", "points",
@@ -85,16 +77,6 @@ def load_projections(season: str, variant: str = "A") -> pd.DataFrame:
     keep = [c for c in KEY_COLUMNS if c in table.columns]
     out = table[keep].join(table[list(PREDICTION_RENAMES)].rename(columns=PREDICTION_RENAMES))
     out["game_date"] = pd.to_datetime(out["game_date"])
-
-    for source, target in OPTIONAL_RENAMES.items():
-        if source in table.columns:
-            out[target] = table[source].to_numpy()
-        else:
-            out[target] = 0.0
-            log.warning("%s carries no %s; setting %s to zero. Short-handed points are 0.38%% "
-                        "of skater scoring and this understates every manager equally -- see "
-                        "OPTIONAL_RENAMES for the rebuild that removes the approximation.",
-                        path.name, source, target)
 
     # The two clamps predict.py applies after the boosters (predict.py:120-128). Without them
     # a negative lambda or a pp+sh share above 1 reaches the sampler, which will draw an
