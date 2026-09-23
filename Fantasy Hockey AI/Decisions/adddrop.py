@@ -53,8 +53,9 @@ class AddDropParams:
 def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
     """Make this team's moves for today. Returns what was done, for the manager's log.
 
-    `fieldable(roster, eligibility)` is the manager's own legality check -- a swap that leaves an
-    active slot unfillable is not an improvement at any value.
+    `fieldable(after, eligibility, before)` is the manager's own legality check -- a swap that
+    leaves the roster able to fill fewer slots than it could before is not an improvement at any
+    value. Relative, so a goalie on IR does not freeze every move (see `Manager._fieldable`).
     """
     if math.isinf(params.margin) or view.moves_left <= 0:
         return []
@@ -93,7 +94,8 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
             for outgoing in drops:
                 if tried >= params.drop_shortlist:
                     break
-                if not fieldable([p for p in roster if p != outgoing] + [incoming], eligibility):
+                if not fieldable([p for p in roster if p != outgoing] + [incoming], eligibility,
+                                 roster):
                     continue
                 tried += 1
                 gain = nights.swap_gain(incoming, outgoing)

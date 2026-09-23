@@ -23,6 +23,7 @@ has to offer, so a live runner can hand the same managers a view built from real
 """
 
 import logging
+import math
 
 import adddrop
 import orchestrator
@@ -99,12 +100,22 @@ class Manager:
         last season (`view.history`), which any manager can read off the platform -- so rungs 2
         and 3 stay model-free. The cheapest player whose release leaves the roster fieldable.
         """
-        roster = list(view.roster)
+        return self._cheapest_safe_drop(view, returning, lambda p: view.history.get(p))
+
+    def _cheapest_safe_drop(self, view, returning, cost):
+        """The forced drop that leaves the roster able to fill as many slots as it can, and among
+        those the cheapest by `cost` -- the returning player himself included.
+
+        Safety comes first because the alternative strands the roster. With the returning player
+        an unconditional candidate, a team whose second goalie came back from IR dropped HIM, was
+        left with one goalie for two G slots, and -- the fieldability check then failing for every
+        swap -- froze for the rest of the season (rung 7, seat 7: weeks 2-26 with no upgrade).
+        """
         eligibility = view._state.eligibility
-        options = [returning] + [d for d in roster
-                                 if self._fieldable([p for p in roster if p != d] + [returning],
-                                                    eligibility)]
-        return min(options, key=lambda p: (view.history.get(p), p))
+        full = list(view.roster) + [returning]
+        fill = {d: self._fillable([p for p in full if p != d], eligibility) for d in full}
+        best = max(fill.values())
+        return min((d for d in full if fill[d] == best), key=lambda d: (cost(d), d))
 
     # A slot filled by a body is never worth less than an empty slot, so every startable player
     # is floored above zero. Without this the solver treats a player it values at 0.0 -- a rookie
@@ -119,17 +130,65 @@ class Manager:
         return slots_module.assign(self.slot_order, startable, view._state.eligibility,
                                    self.accepts)
 
-    def _fieldable(self, roster, eligibility) -> bool:
-        """Could this roster fill every active slot, on a night when everyone plays?
+    def _fillable(self, roster, eligibility) -> int:
+        """How many active slots this roster could fill on a night when everyone plays."""
+        return slots_module.matching_size(roster, self.slot_order, eligibility, self.accepts)
 
-        The check a transaction has to pass. Without it a streamer chasing games remaining will
-        happily drop its second goalie for a fourth centre and then leave a G slot empty for the
-        rest of the season -- which reads as "streaming does not work" when it is really
-        "this streamer broke its own roster".
+    def _fieldable(self, roster, eligibility, before=None) -> bool:
+        """The check a transaction has to pass: it may not leave the roster less able to fill
+        its slots than `before` was. With no `before`, whether it can fill every slot.
+
+        Without a check a streamer chasing games remaining will happily drop its second goalie
+        for a fourth centre and leave a G slot empty for the rest of the season. But the check
+        has to be RELATIVE. As an absolute test ("could every slot be filled?") it failed for
+        every swap whenever a goalie was on IR -- one goalie for two G slots -- so the team could
+        make no move at all, including the one that would have fixed it (see `repair_roster`).
         """
-        lineup = slots_module.assign(self.slot_order, {p: 1.0 for p in roster}, eligibility,
-                                     self.accepts)
-        return not lineup.unfilled
+        size = self._fillable(roster, eligibility)
+        if before is None:
+            return size >= len(self.slot_order)
+        return size >= min(self._fillable(before, eligibility), len(self.slot_order))
+
+    def repair_roster(self, view, value) -> list:
+        """If the roster cannot fill every slot, spend moves restoring it before anything else.
+
+        A goalie on IR, or a forced drop that left one position short, leaves an active slot
+        empty every night. No upgrade rule fixes that on its own: its shortlist is ranked by
+        forward value, and a replacement goalie rarely makes it. So this adds the best free
+        agent (by `value`) who raises the number of fillable slots, dropping the cheapest player
+        whose release keeps that gain -- or nobody, if a stash left a spot open. Costs a move
+        each, like any add.
+        """
+        state = view._state
+        eligibility = state.eligibility
+        need = len(self.slot_order)
+        done = []
+        while view.moves_left > 0:
+            roster = list(view.roster)
+            have = self._fillable(roster, eligibility)
+            if have >= need:
+                break
+            pool = sorted((p for p in view.free_agents() if not view.on_waivers(p)),
+                          key=lambda p: (-value(p), p))
+            move = None
+            for incoming in pool:
+                if self._fillable(roster + [incoming], eligibility) <= have:
+                    continue
+                if view.roster_room() > 0:
+                    move = (incoming, None)
+                    break
+                drops = [d for d in roster
+                         if self._fillable([x for x in roster if x != d] + [incoming],
+                                           eligibility) > have]
+                if drops:
+                    move = (incoming, min(drops, key=lambda d: (value(d), d)))
+                    break
+            if move is None:
+                break
+            state.add(self.team_index, move[0], view.day, drop=move[1], reason="repair")
+            done.append({"day": view.day, "kind": "repair", "incoming": move[0],
+                         "outgoing": move[1]})
+        return done
 
 
 class AutodraftForget(Manager):
@@ -221,6 +280,7 @@ class ScheduleStreamer(Manager):
         if view.moves_left <= 0:
             return
         rates = view.history
+        self.repair_roster(view, rates.get)
 
         # Two horizons, because the two sides of a swap are not symmetric. An acquisition is a
         # rental: it pays out over the games left before the reset and can be re-evaluated next
@@ -272,7 +332,8 @@ class ScheduleStreamer(Manager):
                 drops = sorted(roster, key=forward_value)
                 outgoing = next(
                     (d for d in drops
-                     if self._fieldable([p for p in roster if p != d] + [incoming], eligibility)),
+                     if self._fieldable([p for p in roster if p != d] + [incoming], eligibility,
+                                        before=roster)),
                     None)
                 if outgoing is None:
                     continue
@@ -389,6 +450,7 @@ class FullSystem(Manager):
         state = view._state
         if view.moves_left <= 0:
             return
+        self.repair_roster(view, view.projected_rate)
         eligibility = state.eligibility
         roster = [p for p in view.roster if p not in view.ir]
         if not roster:
@@ -425,7 +487,8 @@ class FullSystem(Manager):
                 drops = sorted(roster, key=forward)
                 outgoing = next(
                     (d for d in drops
-                     if self._fieldable([x for x in roster if x != d] + [incoming], eligibility)),
+                     if self._fieldable([x for x in roster if x != d] + [incoming], eligibility,
+                                        before=roster)),
                     None)
                 if outgoing is None:
                     continue
@@ -453,12 +516,14 @@ class FullSystem(Manager):
         rates = {p: valuation.rate(view, p, source) for p in full}
         nights = valuation.RosterNights(view, full, rates, horizon, self.slot_order,
                                         eligibility, self.accepts)
-        options = [returning] + [
-            d for d in view.roster
-            # Unknown is not worthless: a player nobody has projected is never the forced drop.
-            if valuation.known(view, d, source)
-            and self._fieldable([p for p in full if p != d], eligibility)]
-        return min(options, key=lambda d: (nights.removal_cost(d), d))
+        def cost(d):
+            # Unknown is not worthless: a player nobody has projected is never the forced drop
+            # while anyone else would do.
+            if d != returning and not valuation.known(view, d, source):
+                return float("inf")
+            return nights.removal_cost(d)
+
+        return self._cheapest_safe_drop(view, returning, cost)
 
 
 class FullSystemAddDrop(FullSystem):
@@ -485,6 +550,9 @@ class FullSystemAddDrop(FullSystem):
 
     def transactions(self, view) -> None:
         view.p_start_column = self.p_start_column
+        if math.isinf(self.params.margin):
+            return                                  # the hold arm: no moves at all, as rung 6
+        self.move_log += self.repair_roster(view, view.projected_rate)
         self.move_log += adddrop.run(view, self.params, self.slot_order, self.accepts,
                                      self._fieldable)
 

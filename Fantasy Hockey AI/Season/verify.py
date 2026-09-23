@@ -19,6 +19,7 @@ season-level result rather than as an error:
                     activation's forced drop spending a move
     streaming       rung 7 at zero spots differing from rung 5, or a rental breaking the reserve,
                     its drop-cost floor, the spot rule or the weekly budget
+    frozen rosters  a transacting team left short of its slots with a fix available (a goalie on IR)
     no clobber      a scored projection build overwriting the deployment boosters in models/
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
@@ -128,8 +129,13 @@ def check_draws(day_limit=6) -> str:
     day = calendar.days[40]
     draws = season.decision_draws(day)
     assert draws, "no decision draws were produced"
-    spreads = np.array([s.std() for s in draws.values()])
-    assert (spreads > 0).mean() > 0.9, "decision draws are degenerate (no spread)"
+    # Spread is only owed by candidates who might play. Since the variant-A holdout was rebuilt,
+    # P(plays) is ~0 for the ~12% flagged injured at the lockout (who by construction did not
+    # play), and a certain scratch rightly draws all zeros.
+    frame = season.proj_by_day[day]
+    live = set(frame.loc[frame["p_plays"] >= 0.01, "player_id"].astype(int))
+    spreads = np.array([s.std() for p, s in draws.items() if p in live])
+    assert len(spreads) and (spreads > 0).mean() > 0.9, "decision draws are degenerate (no spread)"
 
     # Same slate, a different seed: the sampled means must move, or nothing is being sampled.
     other = engine_module.Season(config, calendar, data, eligibility, scoreset,
@@ -410,6 +416,48 @@ def check_streaming() -> str:
             f"drops and the weekly budget all held")
 
 
+def check_frozen_rosters() -> str:
+    """No transacting team is left unable to fill its slots while it has moves and a free agent
+    who could fix it.
+
+    The bug: the fieldability test was absolute, so a goalie on IR made every swap illegal, and a
+    forced activation drop could release the returning goalie -- after which the team made no move
+    for the rest of the season with a G slot empty every night (banger, rung 7, seat 7: weeks
+    2-26). Replayed under banger scoring, where it surfaced.
+    """
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("banger-league")
+    data = inputs.load_season(SEASON)
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    calendar = schedule_module.from_candidates(
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+    field = managers_module.build_field(config, scoreset, rungs=(2, 5, 7))
+    stuck, checked = [], [0]
+    for manager in field:
+        if manager.rung < 3:
+            continue
+
+        def watched(view, _orig=manager.transactions, _m=manager):
+            _orig(view)
+            checked[0] += 1
+            roster, elig = list(view.roster), view._state.eligibility
+            have = _m._fillable(roster, elig)
+            if have < len(_m.slot_order) and view.moves_left > 0:
+                fixable = any(_m._fillable(roster + [p], elig) > have
+                              for p in view.free_agents() if not view.on_waivers(p))
+                if fixable:
+                    stuck.append((_m.team_index, view.day.date(), have))
+        manager.transactions = watched
+    season = engine_module.Season(config, calendar, data, eligibility, scoreset, field)
+    rate = {int(k): 1.0 for k in season.player_pool()}
+    season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
+    assert not stuck, f"{len(stuck)} team-days left unfillable with a fix available: {stuck[:3]}"
+    return f"{checked[0]:,} transaction steps, none left a fixable roster short of its slots"
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -455,7 +503,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
-          ("no clobber", check_no_clobber),
+          ("frozen rosters", check_frozen_rosters), ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 
 

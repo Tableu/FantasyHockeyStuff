@@ -179,7 +179,7 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
         for incoming in candidates:
             for outgoing in outgoing_options:
                 if outgoing is not None and not fieldable(
-                        [p for p in roster if p != outgoing] + [incoming], eligibility):
+                        [p for p in roster if p != outgoing] + [incoming], eligibility, roster):
                     continue
                 gain = scale * nights.swap_gain(incoming, outgoing)
                 floor = cost[outgoing]

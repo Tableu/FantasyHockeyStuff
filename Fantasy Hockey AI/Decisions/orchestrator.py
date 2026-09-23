@@ -9,6 +9,7 @@ order, hands each step what the step before it left, and writes down what it saw
     1. matchup     the week's z: how far ahead or behind          FullSystem._z
     2. ir          activate the recovered (a forced drop on a     Manager.manage_ir
                    full roster), stash the injured
+       repair      restore a roster that cannot fill every slot    Manager.repair_roster
     3. upgrade     section 9's add/drop rule                       adddrop.run
     4. stream      spend what the upgrades leave, this week only   streaming.run
     5. lineup      the z-scored exact solve at the lock            FullSystem.set_lineup
@@ -49,6 +50,10 @@ class DailyPlan:
         forced_before = len(m.ir_log)
         m.manage_ir_step(view)
         entry["ir_forced_drops"] = len(m.ir_log) - forced_before
+
+        repairs = m.repair_roster(view, view.projected_rate)
+        m.move_log += repairs
+        entry["repairs"] = len(repairs)
 
         upgrades = adddrop.run(view, m.params, m.slot_order, m.accepts, m._fieldable)
         m.move_log += upgrades
