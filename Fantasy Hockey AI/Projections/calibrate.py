@@ -36,7 +36,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("calibrate")
 
 CATEGORIES = ["shots", "hits", "blocks", "assists", "goals", "pim"]
-DISPERSION_PATH_NAME = "dispersion.json"
 
 
 def parse_args():
@@ -105,9 +104,14 @@ def shared_game_quality(frame, thetas):
     }
 
 
-def load_dispersion() -> dict:
+def dispersion_path(season):
+    """Keyed by the holdout season whose residuals it was fitted on."""
+    return paths.REPORTS_DIR / f"dispersion_{season}.json"
+
+
+def load_dispersion(season="2025-26") -> dict:
     """What evaluate.py reads; empty before calibrate.py has run."""
-    path = paths.REPORTS_DIR / DISPERSION_PATH_NAME
+    path = dispersion_path(season)
     if not path.exists():
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -159,7 +163,7 @@ def run(variant, season="2025-26"):
         "game_quality": shared_game_quality(frame, thetas),
     }
     paths.ensure(paths.REPORTS_DIR)
-    out = paths.REPORTS_DIR / DISPERSION_PATH_NAME
+    out = dispersion_path(season)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log.info("shared game-quality variance %.4f -> %s",
              payload["game_quality"]["gamma_variance"], out.name)

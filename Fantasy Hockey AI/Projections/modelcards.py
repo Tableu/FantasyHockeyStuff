@@ -40,7 +40,7 @@ def render(variant, season="2025-26"):
     # deployment build), the scored build's own summary describes the only boosters there are.
     training = read(f"training_{variant}.json") or read(f"training_{variant}_{season}.json")
     metrics = read(f"metrics_{variant}_{season}.json")
-    dispersion = read("dispersion.json")
+    dispersion = read(f"dispersion_{season}.json")
     if not training or not metrics:
         raise SystemExit(f"run train.py / evaluate.py --variant {variant} first")
 

@@ -18,8 +18,15 @@ SCORESETS_DIR = PROJECT_ROOT.parent / "LeagueSettings" / "scoring"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
 
-DISPERSION_PATH = PROJECTIONS_REPORTS / "dispersion.json"
-CORRELATIONS_PATH = REPORTS_DIR / "correlations.json"
+# Fitted on one holdout season's residuals, so keyed by it. Replaying another season with these
+# would carry that season's fit into the replay -- for a section 11 run on 2024-25, final-holdout
+# information in the tuning.
+def dispersion_path(season: str = "2025-26") -> Path:
+    return PROJECTIONS_REPORTS / f"dispersion_{season}.json"
+
+
+def correlations_path(season: str = "2025-26") -> Path:
+    return REPORTS_DIR / f"correlations_{season}.json"
 
 
 def ensure(directory: Path) -> Path:

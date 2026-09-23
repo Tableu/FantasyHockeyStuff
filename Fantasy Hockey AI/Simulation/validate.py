@@ -267,10 +267,11 @@ def run(args):
     dispersion = correlations_module.load_dispersion()
     table, holdout = holdout_frames(args.variant)
 
-    payload = json.loads(paths.CORRELATIONS_PATH.read_text(encoding="utf-8"))
+    correlations = paths.correlations_path()
+    payload = json.loads(correlations.read_text(encoding="utf-8"))
     weights = payload["penalty_incidents"]["weights"]
     latent_variance = payload["penalty_incidents"].get("latent_variance", 0.0)
-    structures = {"fitted": copula_module.load(paths.CORRELATIONS_PATH)}
+    structures = {"fitted": copula_module.load(correlations)}
     if args.independent:
         structures["independent"] = copula_module.independent()
 

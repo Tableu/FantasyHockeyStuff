@@ -45,8 +45,16 @@ LEAGUE_CONFIG = ROSTERS_DIR / "league.json"
 
 # The Monte Carlo layer's two fitted files, read by `simlayer.py` so that nothing here has to
 # import Simulation's own `paths` module -- which it cannot, because this one shadows it.
-DISPERSION_PATH = PROJECTIONS_REPORTS / "dispersion.json"
-CORRELATIONS_PATH = SIMULATION_DIR / "reports" / "correlations.json"
+
+# Fitted on one holdout season's residuals, so keyed by it. Replaying another season with these
+# would carry that season's fit into the replay -- for a section 11 run on 2024-25, final-holdout
+# information in the tuning.
+def dispersion_path(season: str) -> Path:
+    return PROJECTIONS_REPORTS / f"dispersion_{season}.json"
+
+
+def correlations_path(season: str) -> Path:
+    return SIMULATION_DIR / "reports" / f"correlations_{season}.json"
 
 
 def ensure(directory: Path) -> Path:

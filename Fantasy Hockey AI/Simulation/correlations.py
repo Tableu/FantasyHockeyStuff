@@ -5,7 +5,7 @@
 fits how players' nights move together, which is the number head-to-head decisions actually
 run on, and it is fit the same way: measured off the scored holdout rather than assumed.
 
-Three things come out of a run, all into `reports/correlations.json`:
+Three things come out of a run, all into `reports/correlations_<season>.json`:
 
 1. **The measured targets** -- within-player, teammate and opponent residual correlation
    matrices, from `Projections/reports/predictions_B.parquet`.
@@ -26,7 +26,7 @@ What the measurement found, on 46,654 played player-games:
                               a fight hands both benches minutes at once
 
 Usage:
-    python correlations.py                      # fit and write reports/correlations.json
+    python correlations.py                      # fit and write reports/correlations_2025-26.json
     python correlations.py --sims 200 --iterations 4
 """
 
@@ -89,8 +89,8 @@ def load_holdout(variant, season="2025-26"):
     return frame.reset_index(drop=True)
 
 
-def load_dispersion():
-    payload = json.loads(paths.DISPERSION_PATH.read_text(encoding="utf-8"))
+def load_dispersion(season="2025-26"):
+    payload = json.loads(paths.dispersion_path(season).read_text(encoding="utf-8"))
     return {name: entry["theta"] for name, entry in payload["categories"].items()}
 
 
@@ -432,11 +432,12 @@ def structure(payload):
 
 
 def run(args):
-    dispersion = load_dispersion()
+    dispersion = load_dispersion(args.season)
     holdout = load_holdout(args.variant, args.season)
     payload = fit(holdout, dispersion, args.sims, args.batch_sims, args.iterations,
                   args.seed, paths.holdout_predictions(args.season, args.variant).name)
-    destination = paths.ensure(paths.REPORTS_DIR) / (args.out or "correlations.json")
+    destination = (paths.ensure(paths.REPORTS_DIR) / args.out if args.out
+                   else paths.correlations_path(args.season))
     destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log.info("wrote %s", destination)
     return payload

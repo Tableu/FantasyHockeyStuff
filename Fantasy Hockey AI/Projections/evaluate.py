@@ -234,7 +234,7 @@ def evaluate(variant, season, walk_forward=False, recalibrate=False, scoresets=(
                     played["target_toi"], played["mean_toi_std"].fillna(0))
             report[name] = entry
 
-    dispersion = calibrate.load_dispersion()
+    dispersion = calibrate.load_dispersion(season)
     for category in CATEGORIES:
         prediction = played.get(f"pred_{category}")
         if prediction is None:

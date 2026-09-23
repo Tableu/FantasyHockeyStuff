@@ -3,7 +3,7 @@
 `Simulation/` uses flat modules -- `import marginals`, `import paths` -- which works because that
 folder is the working directory when it runs. Importing from it puts two sibling folders on
 `sys.path` at once, and then **the module names collide**: `Season/paths.py` shadows
-`Simulation/paths.py`, so `Simulation/correlations.py` asking for `paths.DISPERSION_PATH` gets this
+`Simulation/paths.py`, so `Simulation/correlations.py` asking for `paths.dispersion_path` gets this
 folder's paths module and fails. The same collision already forced `calendar.py` to become
 `schedule.py`.
 
@@ -65,31 +65,32 @@ def load_scoreset(name):
     return scoring_module.load(paths.scoreset(name))
 
 
-def build_simulator(seed=90210, independent=False):
+def build_simulator(season, seed=90210, independent=False):
     """The calibrated sampler, assembled from the two fitted JSONs rather than from `simulate.py`.
 
     This mirrors `Simulation/simulate.py:build_simulator` deliberately -- if that function's
     construction changes, this one has to change with it. The alternative was importing it, which
     the module docstring explains is not available.
     """
-    if not paths.DISPERSION_PATH.exists():
-        raise FileNotFoundError(f"{paths.DISPERSION_PATH} is missing -- it is fitted by "
-                                f"Projections/calibrate.py")
-    if not paths.CORRELATIONS_PATH.exists():
-        raise FileNotFoundError(f"{paths.CORRELATIONS_PATH} is missing -- run "
+    dispersion_path, correlations_path = paths.dispersion_path(season), paths.correlations_path(season)
+    if not dispersion_path.exists():
+        raise FileNotFoundError(f"{dispersion_path} is missing -- it is fitted by "
+                                f"Projections/calibrate.py --season {season}")
+    if not correlations_path.exists():
+        raise FileNotFoundError(f"{correlations_path} is missing -- run "
                                 f"Simulation/correlations.py first. Refit it whenever the "
                                 f"projection models are retrained: these are residual "
                                 f"correlations and they belong to a particular fit.")
 
-    dispersion = json.loads(paths.DISPERSION_PATH.read_text(encoding="utf-8"))
+    dispersion = json.loads(dispersion_path.read_text(encoding="utf-8"))
     thetas = {name: spec["theta"] for name, spec in dispersion["categories"].items()}
-    payload = json.loads(paths.CORRELATIONS_PATH.read_text(encoding="utf-8"))
+    payload = json.loads(correlations_path.read_text(encoding="utf-8"))
     structure = (copula_module.independent() if independent
-                 else copula_module.load(paths.CORRELATIONS_PATH))
+                 else copula_module.load(correlations_path))
     penalties = payload["penalty_incidents"]
 
     log.info("simulator: dispersion from %s, structure from %s (fit on %s)",
-             paths.DISPERSION_PATH.name, paths.CORRELATIONS_PATH.name,
+             dispersion_path.name, correlations_path.name,
              payload.get("source", "unknown"))
     return sampler_module.Simulator(thetas, structure, penalties["weights"],
                                     penalties.get("latent_variance", 0.0), seed=seed)

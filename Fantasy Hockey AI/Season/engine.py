@@ -137,7 +137,7 @@ class Season:
         self.decision_sims = int(decision_sims)
         self.simulator = None
         if self.decision_sims:
-            self.simulator = simlayer.build_simulator(seed=decision_seed)
+            self.simulator = simlayer.build_simulator(data["season"], seed=decision_seed)
             log.info("decision draws: %d sims a slate, seed %d (independent of outcomes)",
                      self.decision_sims, decision_seed)
 

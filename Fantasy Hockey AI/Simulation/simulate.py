@@ -70,12 +70,12 @@ def parse_args():
 def build_simulator(independent=False, seed=17):
     """The calibrated simulator: dispersion from Projections, structure from correlations.py."""
     dispersion = correlations_module.load_dispersion()
-    if not paths.CORRELATIONS_PATH.exists():
-        raise FileNotFoundError(f"{paths.CORRELATIONS_PATH} is missing -- run "
-                                f"correlations.py first")
-    payload = json.loads(paths.CORRELATIONS_PATH.read_text(encoding="utf-8"))
+    correlations = paths.correlations_path()
+    if not correlations.exists():
+        raise FileNotFoundError(f"{correlations} is missing -- run correlations.py first")
+    payload = json.loads(correlations.read_text(encoding="utf-8"))
     structure = (copula_module.independent() if independent
-                 else copula_module.load(paths.CORRELATIONS_PATH))
+                 else copula_module.load(correlations))
     penalties = payload["penalty_incidents"]
     return sampler.Simulator(dispersion, structure, penalties["weights"],
                              penalties.get("latent_variance", 0.0), seed=seed)
