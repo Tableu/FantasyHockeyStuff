@@ -176,6 +176,59 @@ beat the rest-of-season projection** as the rule's valuation -- by about 6 point
 scoring and 18 under banger. That is a result against the rest-of-season model as an input to this
 decision, and it should be checked on a second season before anything is built on it.
 
+**The table above predates the IR fix below**, which raised rung 5 by about 8 points a week; the
+post-fix numbers are in `docs/ladder-league_irfix.md` and `docs/ladder-league-12team-simple_irfix.md`.
+
+## IR: an activation on a full roster forces a drop
+
+IR activations and drops cost no move, but an activation needs a roster spot. The harness had this
+wrong twice over. The injury flag exists only on nights a player's team plays, so on a dark night an
+injured IR player read as healthy: every rung activated him and re-stashed him at his next game, and
+95% of stashes were followed by one of these flaps. And every add rule always paired the add with a
+drop, so the spot a stash opened was never filled -- the "free" IR lever bought nothing.
+
+Now the engine carries each player's latest lockout status forward (`view.injured`), the league
+state refuses a healthy player on IR once a team's transactions are done
+(`state.assert_ir_resolved`), an activation on a full roster goes through
+`state.activate(drop=...)` or a swap with a newly injured player, and an add may fill an open spot
+with no drop. The forced drop is priced (`Manager.activation_drop`). Measured, 8 rotations, paired:
+
+| format | rung 5 − hold, before | after | rung 5 − rung 4, before | after |
+|---|---|---|---|---|
+| 14-team, points | +27.0 ± 1.8 | **+35.6 ± 1.6** | +13.8 ± 1.4 | **+21.1 ± 1.5** |
+| 14-team, banger | +32.6 ± 4.9 | **+36.3 ± 5.5** | +6.2 ± 1.7 | +4.6 ± 3.8 |
+| 12-team, points | +20.0 ± 2.7 | **+27.3 ± 2.4** | +9.0 ± 1.8 | **+18.6 ± 1.6** |
+| 12-team, banger | +38.7 ± 1.8 | **+46.8 ± 2.4** | +9.7 ± 1.5 | **+14.5 ± 2.5** |
+
+Rungs 2 and 6 never add, so they never fill a stash's spot and their numbers did not move.
+
+## Section 10: the orchestrator (rung 7)
+
+`Decisions/orchestrator.py` runs the day as a fixed, logged sequence -- matchup, IR, upgrade, stream,
+lineup -- and `Decisions/streaming.py` adds the one new decision: **rentals**, which spend only the
+moves rung 5's upgrade rule leaves behind. A rental swaps a *streaming spot* -- a rostered skater
+whose rest-of-season value is below the best free agent at his positions -- for a free agent, priced
+on the roster over this week only. It must clear `max(drop cost, lam x share of the week left) + m x
+sd`, where the drop cost is whatever of the dropped player's post-week value the pool cannot replace.
+`reserve` moves, falling to 0 by Sunday, are kept for upgrades. A rental is graded over its own week.
+With zero spots rung 7 is rung 5 seat for seat (`verify.py streaming`). Defaults k = 2, reserve 2,
+lam = 2, m = 0 (`docs/ladder-*_orch2.md`, 8 rotations, paired):
+
+| format | rung 7 − rung 5 | rung 7 − hold | rentals / season | rental hit rate |
+|---|---|---|---|---|
+| 14-team, points | **+14.9 ± 2.9** | +35.6 ± 1.5 | 111 | 0.69 |
+| 14-team, banger | **+12.9 ± 4.5** | +59.8 ± 2.5 | 87 | 0.76 |
+| 12-team, points | **+15.2 ± 5.2** | +28.1 ± 2.5 | 94 | 0.67 |
+| 12-team, banger | **+22.8 ± 2.0** | +49.5 ± 4.3 | 76 | 0.74 |
+
+Upgrades were not crowded out (19-28 a season against rung 5's 17-24). A first spot rule -- simply
+the roster's k cheapest -- scored the same within noise but rented away regulars (Fantilli on opening
+night), and the spot test was first measured over three weeks, where two fewer team games alone made
+an equal-rate player "below replacement". Both are fixed. **Known artifact:** the harness ends at
+week 26 with no playoffs, so in the final week nothing has post-week value and rentals drop stars;
+the league's playoff format is not recorded yet. Sensitivity only -- none of k, reserve or lam has
+been swept, and 2025-26 is the only clean holdout.
+
 ## Formats
 
 Both formats at eight seat rotations, both scoresets, identical everything else:

@@ -33,7 +33,10 @@ import adddrop        # noqa: E402
 import draft          # noqa: E402
 import estimators     # noqa: E402
 import managers       # noqa: E402
+import orchestrator   # noqa: E402
 import slots          # noqa: E402
+import streaming      # noqa: E402
 import valuation      # noqa: E402
 
-__all__ = ["adddrop", "draft", "estimators", "managers", "slots", "valuation"]
+__all__ = ["adddrop", "draft", "estimators", "managers", "orchestrator", "slots",
+           "streaming", "valuation"]

@@ -57,7 +57,7 @@ class SlateView:
     def __init__(self, day, week, config, calendar, projections, goalie_projections,
                  unavailable, playing_tonight, nhl_team, history, state, team_index,
                  opponent_index, my_week_points, opponent_week_points,
-                 decision_points=None, rate_estimate=None, ros_estimate=None):
+                 decision_points=None, rate_estimate=None, ros_estimate=None, injured=None):
         self.day = pd.Timestamp(day)
         self.week = week
         self.config = config
@@ -65,6 +65,10 @@ class SlateView:
         self.projections = assert_clean(projections, "skater projections")
         self.goalie_projections = assert_clean(goalie_projections, "goalie projections")
         self.unavailable = unavailable            # set of player_ids out tonight
+        # Out as of his team's latest lockout report, carried across dark nights. IR reads this,
+        # not `unavailable`: on a night his team is idle an injured player is not "out tonight",
+        # but he is not healthy either (see engine.status_by_day).
+        self.injured = unavailable if injured is None else injured
         self.playing_tonight = playing_tonight    # set of player_ids whose team plays
         # player_id -> his NHL team as of his latest appearance, NOT tonight's slate only: a
         # player whose club is idle tonight still has games this week (see engine.latest_team).
@@ -126,7 +130,15 @@ class SlateView:
     def ir_eligible(self) -> set:
         """On this harness, IR eligibility is an injury spell today. The live snapshot job would
         replace this with the platform's own designation, which is the thing it carries."""
-        return {p for p in self.roster if p in self.unavailable}
+        return {p for p in self.roster if p in self.injured}
+
+    def healthy_on_ir(self) -> list:
+        """IR players whose latest report says healthy. The league makes these come off today."""
+        return [p for p in self.ir if p not in self.injured]
+
+    def roster_room(self) -> int:
+        """Open roster spots (IR excluded): what an activation or a drop-less add can use."""
+        return self.config.roster_size - len(self.roster)
 
     def opponent_roster(self) -> list:
         """The opposing manager's holdings.

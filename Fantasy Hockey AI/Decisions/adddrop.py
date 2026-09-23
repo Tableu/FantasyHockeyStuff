@@ -82,6 +82,10 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
         # A rostered player with no rate yet is unknown, not worthless: never a drop candidate.
         drops = [d for d in sorted(roster, key=lambda p: forward[p])
                  if d not in reserved and valuation.known(view, d, params.rate_source)]
+        if view.roster_room() > 0:
+            # An open spot (a stash made it) is the cheapest "drop" there is: nobody leaves. The
+            # forced drop when the injured player returns is priced then, by manage_ir.
+            drops = [None] + drops
 
         best = None
         for incoming in candidates:
@@ -102,7 +106,7 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
             break
 
         _, gain, incoming, outgoing = best
-        reserved.update({incoming, outgoing})
+        reserved.update({incoming, outgoing} - {None})
         try:
             if view.on_waivers(incoming):
                 state.submit_claim(view.team_index, incoming, drop=outgoing)
@@ -115,7 +119,7 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
             continue
         done.append({"day": view.day, "kind": kind, "incoming": incoming,
                      "outgoing": outgoing, "predicted_gain": gain,
-                     "incoming_rate": rates[incoming], "outgoing_rate": rates[outgoing],
+                     "incoming_rate": rates[incoming], "outgoing_rate": rates.get(outgoing, 0.0),
                      "incoming_games": len(nights.nights(incoming)),
                      "outgoing_games": len(nights.nights(outgoing))})
         if kind == "claim":

@@ -181,16 +181,47 @@ class LeagueState:
         team.ir.append(player_id)
         team.assert_legal()
 
-    def activate(self, team_index: int, player_id) -> None:
-        """Bring a player off IR. Also free, but it needs a roster spot."""
+    def activate(self, team_index: int, player_id, drop=None, stash=None, ir_eligible=None,
+                 today=None) -> None:
+        """Bring a player off IR. Free, but it needs a roster spot -- so on a full roster it forces
+        a drop, or a swap with a newly injured player going the other way.
+
+        `drop` may be the returning player himself (he is released straight off IR). `stash`
+        swaps him with a rostered player who is IR-eligible, atomically, so a full IR does not
+        block it. Neither spends a move, and neither is logged as a transaction: a forced drop is
+        graded by the IR log, not by the move metrics.
+        """
         team = self.teams[team_index]
         if player_id not in team.ir:
             raise IllegalMove(f"team {team_index} does not hold {player_id} on IR")
+        if drop is not None:
+            self.drop(team_index, drop, today)
+            if drop == player_id:
+                return
+        if stash is not None:
+            if stash not in team.roster:
+                raise IllegalMove(f"team {team_index} cannot stash {stash}: not on its roster")
+            if ir_eligible is None or stash not in ir_eligible:
+                raise IllegalMove(f"{stash} is not IR-eligible today")
+            team.ir.remove(player_id)
+            team.roster.remove(stash)
+            team.ir.append(stash)
+            team.roster.append(player_id)
+            team.assert_legal()
+            return
         if len(team.roster) >= self.config.roster_size:
             raise IllegalMove(f"team {team_index} must drop before activating {player_id}")
         team.ir.remove(player_id)
         team.roster.append(player_id)
         team.assert_legal()
+
+    def assert_ir_resolved(self, team_index: int, injured: set) -> None:
+        """No healthy player on IR once a team's transactions are done. The league enforces it
+        (a platform blocks every other move until it is fixed), so a manager that leaves one
+        there is illegal, not merely lazy."""
+        healthy = [p for p in self.teams[team_index].ir if p not in injured]
+        if healthy:
+            raise IllegalMove(f"team {team_index} left healthy {healthy} on IR")
 
     # ---------- waivers ----------
 

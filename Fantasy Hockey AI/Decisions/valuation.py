@@ -75,11 +75,6 @@ class RosterNights:
         self.base = {night: self._value(players, night)
                      for night, players in self.playing.items()}
 
-    def nights(self, player_id) -> list:
-        if player_id not in self._nights:
-            self._nights[player_id] = self.view.nights_through(player_id, self.weeks_ahead)
-        return self._nights[player_id]
-
     def _value(self, players, night) -> float:
         today = night == self.view.day
         startable = {p: self.values[p] for p in players
@@ -89,8 +84,24 @@ class RosterNights:
         lineup = slots_module.assign(self.slot_order, startable, self.eligibility, self.accepts)
         return slots_module.total_value(lineup, startable)
 
+    def removal_cost(self, player_id) -> float:
+        """Lineup points over the window lost by taking `player_id` off this roster."""
+        cost = 0.0
+        for night in self.nights(player_id):
+            players = [p for p in self.playing.get(night, []) if p != player_id]
+            cost += self.base.get(night, 0.0) - self._value(players, night)
+        return cost
+
+    def nights(self, player_id) -> list:
+        if player_id is None:              # no drop: an open roster spot
+            return []
+        if player_id not in self._nights:
+            self._nights[player_id] = self.view.nights_through(player_id, self.weeks_ahead)
+        return self._nights[player_id]
+
     def swap_gain(self, incoming, outgoing) -> float:
-        """Lineup points over the window with `incoming` in place of `outgoing`, minus without."""
+        """Lineup points over the window with `incoming` in place of `outgoing`, minus without.
+        `outgoing=None` is an add into an open spot."""
         gain = 0.0
         for night in set(self.nights(incoming)) | set(self.nights(outgoing)):
             players = [p for p in self.playing.get(night, []) if p != outgoing]
@@ -102,5 +113,5 @@ class RosterNights:
     def swap_sd(self, incoming, outgoing) -> float:
         """A rough sd for that gain: both players' per-game spread over their games."""
         variance = (len(self.nights(incoming)) * self.values[incoming] ** 2
-                    + len(self.nights(outgoing)) * self.values[outgoing] ** 2)
+                    + len(self.nights(outgoing)) * self.values.get(outgoing, 0.0) ** 2)
         return PER_GAME_CV * variance ** 0.5

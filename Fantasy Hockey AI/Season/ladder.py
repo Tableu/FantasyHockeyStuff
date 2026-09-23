@@ -59,6 +59,17 @@ def parse_args():
                         help="Rung 5: rest-of-season (holdout build) or per-game carried rate")
     parser.add_argument("--claim-premium", type=float, default=None,
                         help="Rung 5: extra points a waiver claim must clear ('inf' never claims)")
+    # Section 10's orchestrator, seated as rung 7: rung 5's upgrades plus streaming.
+    parser.add_argument("--streams", type=int, default=None,
+                        help="Rung 7: streaming spots (0 makes it rung 5)")
+    parser.add_argument("--stream-reserve", type=int, default=None,
+                        help="Rung 7: moves held for upgrades on a week's first day, falling to 0")
+    parser.add_argument("--stream-lambda", type=float, default=None,
+                        help="Rung 7: points a stream must clear early in the week, falling to 0")
+    parser.add_argument("--stream-margin", type=float, default=None,
+                        help="Rung 7: sds of the week's gain a stream must also clear")
+    parser.add_argument("--stream-gate", action="store_true",
+                        help="Rung 7: scale a stream's gain by phi(z)/phi(0) of the matchup")
     parser.add_argument("--tag", default=None,
                         help="Suffix for the report and doc names, so an experiment does not "
                              "overwrite the committed ladder")
@@ -84,6 +95,22 @@ def adddrop_params(args):
     return replace(adddrop.AddDropParams(), **changes)
 
 
+def stream_params(args):
+    """Rung 7's streaming parameters from the command line, over StreamParams' defaults."""
+    from dataclasses import replace
+
+    from decisionlayer import streaming
+
+    changes = {}
+    for flag, field in (("streams", "spots"), ("stream_reserve", "reserve"),
+                        ("stream_lambda", "lam"), ("stream_margin", "margin")):
+        if getattr(args, flag) is not None:
+            changes[field] = getattr(args, flag)
+    if args.stream_gate:
+        changes["gate"] = True
+    return replace(streaming.StreamParams(), **changes)
+
+
 def prior_season(prior_season_name, scoreset):
     """Last season's totals (the shared draft board), rates per game played (rung 3's prior), and
     rates per team game (the fallback for anyone the projections have not reached yet)."""
@@ -95,16 +122,17 @@ def prior_season(prior_season_name, scoreset):
 
 
 def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, verbose_weeks,
-            decision_sims=0, params=None):
+            decision_sims=0, params=None, streams=None):
     from decisionlayer import managers as managers_module
 
     field = managers_module.build_field(config, scoreset, rungs=rungs,
-                                        replication=replication, adddrop_params=params)
-    if any(m.rung == 5 for m in field) and params is not None and params.rate_source == "ros"             and data.get("ros") is None:
+                                        replication=replication, adddrop_params=params,
+                                        stream_params=streams)
+    if any(m.rung in (5, 7) for m in field) and params is not None and params.rate_source == "ros"             and data.get("ros") is None:
         raise SystemExit("rung 5 reads rest-of-season projections and none are built -- run "
                          "Projections/ros_train.py --horizon season --predictions-out")
     # Draws are only paid for if a rung on the board actually uses them.
-    sims = decision_sims if any(m.rung in (4, 5, 6) for m in field) else 0
+    sims = decision_sims if any(m.rung in (4, 5, 6, 7) for m in field) else 0
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                  replication=replication, log_every_week=verbose_weeks,
                                  decision_sims=sims)
@@ -128,8 +156,13 @@ def summarize(per_replication, scoreset_name):
                     wasted_slot_nights=("wasted_slot_nights", "mean"),
                     decision_efficiency=("decision_efficiency", "mean"),
                     moves_spent=("moves_spent", "mean"),
+                    forced_drops=("forced_drops", "mean"),
                     move_hit_rate=("move_hit_rate", "mean"),
-                    realized_gain_per_move=("realized_gain_per_move", "mean"))
+                    realized_gain_per_move=("realized_gain_per_move", "mean"),
+                    rentals=("rentals", "mean"),
+                    rental_hit_rate=("rental_hit_rate", "mean"),
+                    rental_gain=("rental_gain", "mean"),
+                    rental_drop_next_week=("rental_drop_next_week", "mean"))
                .reset_index())
     by_rung["win_rate"] = by_rung["matchup_wins"] / by_rung["weeks"]
     by_rung["points_per_week"] = by_rung["points"] / by_rung["weeks"]
@@ -157,11 +190,16 @@ def main():
     log.info("calendar: %s", json.dumps(calendar.verify()))
 
     params = adddrop_params(args)
+    streams = stream_params(args)
     report = {"season": args.season, "league": config.name, "rungs": list(rungs),
               "replications": args.replications, "results": {}}
     if 5 in rungs:
         report["adddrop"] = params.describe()
         log.info("rung 5 add/drop: %s", params.describe())
+    if 7 in rungs:
+        report["adddrop"] = params.describe()
+        report["streaming"] = streams.describe()
+        log.info("rung 7 orchestrator: %s | %s", params.describe(), streams.describe())
 
     data["prior"] = {}
     for name in weights:
@@ -171,13 +209,14 @@ def main():
                  scoreset.name, scoreset.scored("skaters"), scoreset.scored("goalies"),
                  scoreset.missing("goalies") or "none")
         runs = [run_one(config, calendar, data, eligibility, scoreset, rungs, r,
-                        args.verbose_weeks, args.decision_sims, params)
+                        args.verbose_weeks, args.decision_sims, params, streams)
                 for r in range(args.replications)]
         table, teams = summarize(runs, scoreset.name)
         print(f"\n{scoreset.name}")
         print(table[["rung", "strategy", "win_rate", "points_per_week", "games_started_rate",
                      "decision_efficiency", "empty_slot_nights", "wasted_slot_nights",
-                     "moves_spent", "move_hit_rate", "realized_gain_per_move"]]
+                     "moves_spent", "forced_drops", "move_hit_rate", "realized_gain_per_move",
+                     "rentals", "rental_hit_rate", "rental_gain"]]
               .to_string(index=False, float_format=lambda v: f"{v:.3f}"))
         report["results"][scoreset.name] = {
             "by_rung": table.to_dict("records"),

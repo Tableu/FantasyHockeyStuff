@@ -185,6 +185,23 @@ class Season:
         for game_id, day in zip(game_days["game_id"], game_days["game_date"]):
             self.unavailable_by_day[day] |= by_game.get(game_id, set())
 
+        # Every lockout's status, injured or not, for the players it lists. The flag only exists on
+        # nights a player's team plays, so on a dark night an injured player looked healthy: every
+        # rung activated him off IR and re-stashed him at his team's next game -- 95% of stashes
+        # were followed by one of these flaps (rung 5: 346 stashes, 341 flaps a replication). The
+        # engine carries each player's latest status forward instead (`self.injured`), which is
+        # what a manager knows on a dark night: the last report.
+        status = self.data["availability"]
+        day_of_game = dict(zip(game_days["game_id"], game_days["game_date"]))
+        self.status_by_day = defaultdict(dict)
+        for game_id, player_id, hurt in zip(status["game_id"], status["player_id"],
+                                            status["injured_at_lockout"]):
+            day = day_of_game.get(game_id)
+            if day is not None:
+                self.status_by_day[day][int(player_id)] = bool(hurt)
+        self.injured_status = {}
+        self.injured = set()
+
         # Naive goalie start share, which is all rung 3 has: appearances over team games to date.
         self.goalie_starts_to_date = defaultdict(float)
         self.goalie_games_to_date = defaultdict(float)
@@ -331,6 +348,7 @@ class Season:
             projections=projections[keep],
             goalie_projections=goalie_projections,
             unavailable=self.unavailable_by_day.get(day, set()),
+            injured=self.injured,
             playing_tonight=playing,
             nhl_team=self.latest_team,
             history=history, state=self.state, team_index=team_index,
@@ -389,6 +407,9 @@ class Season:
             self.latest_ros.update(self.ros_by_day.get(pd.Timestamp(day), {}))
             self.latest_team.update(self.nhl_team_by_day.get(day, {}))
             goalie_projections = self._goalie_projections(day, history)
+            # Tonight's lockout report updates the players it lists; everyone else keeps his last.
+            self.injured_status.update(self.status_by_day.get(day, {}))
+            self.injured = {p for p, hurt in self.injured_status.items() if hurt}
 
             self.state.process_waivers(day)
             for manager in self.field:
@@ -397,6 +418,9 @@ class Season:
                                    goalie_projections)
                 manager.manage_ir(v)
                 manager.transactions(v)
+                # The league's rule, not a strategy: a healthy player may not sit on IR. An
+                # activation on a full roster forces a drop, and a manager has to make it today.
+                self.state.assert_ir_resolved(manager.team_index, self.injured)
             self.state.assert_legal()
 
             for manager in self.field:
@@ -518,6 +542,8 @@ class Season:
                                         if self.hindsight[manager.team_index] else 0.0),
                 "moves_spent": sum(1 for t in self.state.transactions
                                    if t["team"] == manager.team_index),
+                # Activations on a full roster, each of which forced a (free) drop.
+                "forced_drops": len(manager.ir_log),
                 **self._move_quality(manager.team_index),
             })
         return {"teams": pd.DataFrame(rows), "matchups": pd.DataFrame(self.results),
@@ -535,21 +561,39 @@ class Season:
         is graded against zero. This is the decision-level metric for transactions: a rung can lose
         points by picking badly or by moving too often, and a hit rate separates the two.
         """
-        gains = []
+        gains, rentals, drop_tail = [], [], []
         for move in self.state.transactions:
             if move["team"] != team_index:
                 continue
             week = self.calendar.week_of(move["date"])
             if week is None:
                 continue
-            last = min(week + self.MOVE_ACCOUNTING_WEEKS, len(self.calendar.weeks))
+            # A rental (section 10's stream) is graded over its own week only. Grading it through
+            # next week would charge it for the dropped streamer's post-week games -- games the
+            # manager meant to buy back from the pool, which is the whole premise of a stream.
+            rental = move["kind"] == "rental"
+            last = week if rental else min(week + self.MOVE_ACCOUNTING_WEEKS,
+                                           len(self.calendar.weeks))
             end = self.calendar.weeks[last - 1].end
             days = [d for d in self.calendar.days if move["date"] <= d <= end]
             added = sum(self.outcomes.score(d, move["player_id"]) for d in days)
             dropped = (sum(self.outcomes.score(d, move["dropped"]) for d in days)
                        if move["dropped"] is not None else 0.0)
-            gains.append(added - dropped)
-        if not gains:
-            return {"move_hit_rate": float("nan"), "realized_gain_per_move": float("nan")}
-        return {"move_hit_rate": float(np.mean([g > 0 for g in gains])),
-                "realized_gain_per_move": float(np.mean(gains))}
+            (rentals if rental else gains).append(added - dropped)
+            if rental and move["dropped"] is not None:
+                # What the dropped streamer went on to score next week: should be ~replacement.
+                nxt = self.calendar.weeks[min(week, len(self.calendar.weeks) - 1)]
+                drop_tail.append(sum(self.outcomes.score(d, move["dropped"])
+                                     for d in self.calendar.days
+                                     if nxt.start <= d <= nxt.end and week < len(self.calendar.weeks)))
+
+        def summary(values):
+            if not values:
+                return float("nan"), float("nan")
+            return float(np.mean([g > 0 for g in values])), float(np.mean(values))
+
+        hit, per = summary(gains)
+        rhit, rper = summary(rentals)
+        return {"move_hit_rate": hit, "realized_gain_per_move": per,
+                "rentals": len(rentals), "rental_hit_rate": rhit, "rental_gain": rper,
+                "rental_drop_next_week": float(np.mean(drop_tail)) if drop_tail else float("nan")}

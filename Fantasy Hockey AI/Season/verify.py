@@ -14,6 +14,10 @@ season-level result rather than as an error:
     opening rates   a skater priced at zero on opening night because his club has not played yet
     ros provenance  rest-of-season projections that saw the season they project
     hold            the add/drop rule at an infinite margin making any move at all
+    ir              a healthy player left on IR, an injured one activated on a dark night, or an
+                    activation's forced drop spending a move
+    streaming       rung 7 at zero spots differing from rung 5, or a rental breaking the reserve,
+                    its drop-cost floor, the spot rule or the weekly budget
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
     python verify.py
@@ -287,6 +291,99 @@ def check_hold() -> str:
     return "margin inf: 0 moves over a full season"
 
 
+def check_ir() -> str:
+    """An activation on a full roster forces a drop or a swap and never spends a move; and over a
+    season no one is activated while his latest report still has him injured -- the dark-night
+    flap that followed 95% of stashes before status was carried forward."""
+    config = league_module.load()
+    pool = list(range(1, 200))
+    eligibility = {p: frozenset({"C"}) for p in pool}
+    s = state_module.LeagueState(config, pool, eligibility)
+    for p in pool[:config.roster_size]:
+        s.draft(0, p)
+    day = pd.Timestamp("2026-01-05")
+    hurt, other = pool[0], pool[1]
+    s.stash(0, hurt, {hurt})
+    s.add(0, pool[50], day)                              # fill the spot the stash opened
+    used = s.teams[0].moves_used
+    try:
+        s.activate(0, hurt)
+        raise AssertionError("activation on a full roster was allowed without a drop")
+    except state_module.IllegalMove:
+        pass
+    s.activate(0, hurt, drop=pool[50], today=day)
+    assert hurt in s.teams[0].roster and pool[50] in s.pool, "forced drop did not happen"
+    s.stash(0, hurt, {hurt})
+    s.add(0, pool[51], day)
+    s.stash(0, other, {other})                           # IR now full (2)
+    s.add(0, pool[52], day)
+    s.activate(0, hurt, stash=pool[2], ir_eligible={pool[2]})
+    assert hurt in s.teams[0].roster and pool[2] in s.teams[0].ir, "swap did not happen"
+    assert s.teams[0].moves_used == used + 2, "an activation or its drop spent a move"
+    try:
+        s.assert_ir_resolved(0, injured=set())
+        raise AssertionError("a healthy player on IR passed")
+    except state_module.IllegalMove:
+        pass
+
+    season, _ = _small_season((2, 5))
+    flaps, activations = [], [0]
+    original = managers_module.Manager.manage_ir
+
+    def watched(self, view):
+        before = set(view.ir)
+        original(self, view)
+        back = before - set(view.ir)
+        activations[0] += len(back & set(view.roster))
+        flaps.extend(p for p in back & set(view.roster) if p in view.injured)
+
+    managers_module.Manager.manage_ir = watched
+    try:
+        rate = {int(k): 1.0 for k in season.player_pool()}
+        season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)   # asserts IR daily
+    finally:
+        managers_module.Manager.manage_ir = original
+    assert not flaps, f"{len(flaps)} activations of a player still reported injured"
+    forced = sum(len(m.ir_log) for m in season.field)
+    return (f"forced drop and swap cost 0 moves; season: {activations[0]} activations, "
+            f"0 while injured, {forced} forced drops, no healthy player left on IR")
+
+
+def check_streaming() -> str:
+    """Rung 7 (section 10): with zero streaming spots it is rung 5 seat for seat; with spots, no
+    rental breaks the reserve, clears less than its drop cost, drops anyone but a designated spot,
+    or pushes a week past its budget."""
+    from dataclasses import replace
+
+    from decisionlayer import adddrop, streaming
+
+    def run(rungs, spots):
+        season, _ = _small_season(rungs, params=adddrop.AddDropParams(), sims=0)
+        for m in season.field:
+            if m.rung == 7:
+                m.stream_params = replace(streaming.StreamParams(), spots=spots)
+                m.plan.stream_params = m.stream_params
+        rate = {int(k): 1.0 for k in season.player_pool()}
+        report = season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
+        return season, report["teams"][["seat", "points", "moves_spent", "forced_drops"]]
+
+    _, five = run((2, 5), 0)
+    _, seven = run((2, 7), 0)
+    assert five.equals(seven), "rung 7 with no streaming spots is not rung 5"
+
+    season, _ = run((2, 7), 2)
+    rentals = [r for m in season.field if m.rung == 7 for r in m.move_log if r["kind"] == "rental"]
+    assert rentals, "two streaming spots made no rentals over a season"
+    for r in rentals:
+        assert r["moves_left"] >= r["reserve"], f"a rental broke the reserve: {r}"
+        assert r["predicted_gain"] > r["bar"] >= r["drop_cost"], f"a rental under its floor: {r}"
+        assert r["outgoing"] is None or r["spot"], f"a rental dropped a non-spot player: {r}"
+    weekly = pd.DataFrame(season.state.transactions).groupby(["team", "week"]).size()
+    assert weekly.max() <= season.config.moves_per_week, "a week went over budget"
+    return (f"k=0 identical to rung 5; k=2: {len(rentals)} rentals, reserve, floor, spot-only "
+            f"drops and the weekly budget all held")
+
+
 def check_modules() -> str:
     import decisionlayer
 
@@ -298,7 +395,8 @@ CHECKS = [("provenance", check_provenance), ("leakage", check_leakage),
           ("assignment", check_assignment), ("calendar", check_calendar),
           ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),
           ("ros provenance", check_ros_provenance),
-          ("hold", check_hold), ("modules", check_modules)]
+          ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
+          ("modules", check_modules)]
 
 
 def main():

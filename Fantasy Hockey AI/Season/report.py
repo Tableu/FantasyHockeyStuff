@@ -65,10 +65,11 @@ def write(report: dict, season: str, weeks: int, path=None) -> str:
 
     columns = ["rung", "strategy", "win_rate", "points_per_week", "games_started_rate",
                "decision_efficiency", "empty_slot_nights", "wasted_slot_nights", "moves_spent",
-               "move_hit_rate", "realized_gain_per_move"]
+               "forced_drops", "move_hit_rate", "realized_gain_per_move", "rentals",
+               "rental_hit_rate", "rental_gain"]
     headers = ["rung", "strategy", "win rate", "points / week", "games started",
-               "decision eff.", "empty slots", "wasted slots", "moves", "move hit rate",
-               "gain / move"]
+               "decision eff.", "empty slots", "wasted slots", "moves", "forced drops",
+               "move hit rate", "gain / move", "rentals", "rental hit", "rental gain"]
 
     for scoreset_name, payload in report["results"].items():
         table = pd.DataFrame(payload["by_rung"]).sort_values("rung")
@@ -162,7 +163,12 @@ def _verdict(table: pd.DataFrame, seats: pd.DataFrame = None) -> str:
     for higher, lower, label in ((5, 6, "The add/drop rule against never moving (rung 5 over 6)"),
                                  (5, 4, "The add/drop rule against rung 4's (rung 5 over 4)"),
                                  (5, 2, "Rung 5 against rung 2, which never touches the wire"),
-                                 (6, 2, "Holding with the full lineup against rung 2 (6 over 2)")):
+                                 (6, 2, "Holding with the full lineup against rung 2 (6 over 2)"),
+                                 # Section 10: rung 7 is rung 5 plus streaming, so 7 over 5 is
+                                 # what the rentals are worth and nothing else.
+                                 (7, 5, "Streaming on top of the upgrades (rung 7 over 5)"),
+                                 (7, 6, "The orchestrator against never moving (rung 7 over 6)"),
+                                 (7, 2, "Rung 7 against rung 2")):
         if higher in by_rung.index and lower in by_rung.index:
             mean, se = paired_difference(seats, higher, lower)
             if mean is not None:

@@ -25,7 +25,9 @@ has to offer, so a live runner can hand the same managers a view built from real
 import logging
 
 import adddrop
+import orchestrator
 import slots as slots_module
+import streaming
 
 log = logging.getLogger("managers")
 
@@ -56,22 +58,53 @@ class Manager:
         return None
 
     def manage_ir(self, view) -> None:
-        """Stash the injured and activate the recovered. Free in this format, so it is
-        unconditional -- the only question is eligibility, and rungs 2 upward all do it."""
+        """Activate the recovered and stash the injured. Free in this format, so stashing is
+        unconditional -- but an activation needs a roster spot, and on a full roster it FORCES a
+        drop. That drop is a decision, priced by `activation_drop`.
+
+        A player counts as recovered when his team's latest lockout report says so
+        (`view.healthy_on_ir`), not when his team is merely idle tonight; and the league does not
+        let him sit on IR once he is healthy, so each one is resolved today, in the cheapest way
+        available: an open spot, then a swap with a newly injured player going the other way,
+        and only then a drop.
+        """
         state = view._state
-        for player_id in view.ir:
-            if player_id not in view.unavailable:
-                try:
-                    state.activate(self.team_index, player_id)
-                except Exception:
-                    pass          # no roster spot free today; try again tomorrow
-        for player_id in sorted(view.ir_eligible()):
+        eligible = view.ir_eligible()
+        to_stash = sorted(eligible)
+        for player_id in view.healthy_on_ir():
+            if view.roster_room() > 0:
+                state.activate(self.team_index, player_id)
+            elif to_stash:
+                state.activate(self.team_index, player_id, stash=to_stash.pop(0),
+                               ir_eligible=eligible)
+            else:
+                drop = self.activation_drop(view, player_id)
+                state.activate(self.team_index, player_id, drop=drop, today=view.day)
+                self.ir_log.append({"day": view.day, "returning": player_id, "dropped": drop})
+        for player_id in to_stash:
             if len(state.teams[self.team_index].ir) >= self.config.ir:
                 break
-            try:
-                state.stash(self.team_index, player_id, view.ir_eligible())
-            except Exception:
-                pass
+            state.stash(self.team_index, player_id, eligible)
+
+    @property
+    def ir_log(self) -> list:
+        if not hasattr(self, "_ir_log"):
+            self._ir_log = []
+        return self._ir_log
+
+    def activation_drop(self, view, returning):
+        """Whom a forced activation drops, the returning player included.
+
+        The default reads only the box score -- season-to-date points per game, shrunk toward
+        last season (`view.history`), which any manager can read off the platform -- so rungs 2
+        and 3 stay model-free. The cheapest player whose release leaves the roster fieldable.
+        """
+        roster = list(view.roster)
+        eligibility = view._state.eligibility
+        options = [returning] + [d for d in roster
+                                 if self._fieldable([p for p in roster if p != d] + [returning],
+                                                    eligibility)]
+        return min(options, key=lambda p: (view.history.get(p), p))
 
     # A slot filled by a body is never worth less than an empty slot, so every startable player
     # is floored above zero. Without this the solver treats a player it values at 0.0 -- a rookie
@@ -227,20 +260,27 @@ class ScheduleStreamer(Manager):
             if not roster:
                 break
 
-            # The cheapest legal drop by FORWARD value, not by this week's. A swap that leaves a
-            # slot unfillable is not an improvement at any value either.
-            drops = sorted(roster, key=forward_value)
-            outgoing = next(
-                (d for d in drops
-                 if self._fieldable([p for p in roster if p != d] + [incoming], eligibility)),
-                None)
-            if outgoing is None:
-                continue
-            # The stopping rule, and it compares like with like: what the incoming player is worth
-            # over the same forward window the drop is priced on. Unused moves expire, but a move
-            # that does not beat what it displaces is still worth not making.
-            if forward_value(incoming) <= forward_value(outgoing):
-                break
+            if view.roster_room() > 0:
+                # An open spot -- a stash just made one -- displaces nobody, so the add only has
+                # to be worth something. This is what makes an IR stash worth anything at all.
+                outgoing = None
+                if forward_value(incoming) <= 0.0:
+                    continue
+            else:
+                # The cheapest legal drop by FORWARD value, not by this week's. A swap that leaves
+                # a slot unfillable is not an improvement at any value either.
+                drops = sorted(roster, key=forward_value)
+                outgoing = next(
+                    (d for d in drops
+                     if self._fieldable([p for p in roster if p != d] + [incoming], eligibility)),
+                    None)
+                if outgoing is None:
+                    continue
+                # The stopping rule, and it compares like with like: what the incoming player is
+                # worth over the same forward window the drop is priced on. Unused moves expire,
+                # but a move that does not beat what it displaces is still worth not making.
+                if forward_value(incoming) <= forward_value(outgoing):
+                    break
             try:
                 state.add(self.team_index, incoming, view.day, drop=outgoing, reason="stream")
             except Exception as error:
@@ -379,20 +419,46 @@ class FullSystem(Manager):
         while view.moves_left > 0 and candidates:
             gain, incoming = candidates.pop(0)
             roster = [p for p in view.roster if p not in view.ir]
-            drops = sorted(roster, key=forward)
-            outgoing = next(
-                (d for d in drops
-                 if self._fieldable([x for x in roster if x != d] + [incoming], eligibility)),
-                None)
-            if outgoing is None:
-                continue
-            if gain <= forward(outgoing):
-                break
+            if view.roster_room() > 0:
+                outgoing = None           # an open spot (after a stash) displaces nobody
+            else:
+                drops = sorted(roster, key=forward)
+                outgoing = next(
+                    (d for d in drops
+                     if self._fieldable([x for x in roster if x != d] + [incoming], eligibility)),
+                    None)
+                if outgoing is None:
+                    continue
+                if gain <= forward(outgoing):
+                    break
             try:
                 state.add(self.team_index, incoming, view.day, drop=outgoing, reason="upgrade")
             except Exception as error:
                 log.debug("team %d could not upgrade to %s: %s", self.team_index, incoming, error)
                 continue
+
+    # How a forced activation drop is priced: section 9's defaults. Rung 5 and up use their own
+    # add/drop parameters instead, so both of a manager's drop decisions read the same numbers.
+    def _drop_pricing(self):
+        return 3, "per_game"
+
+    def activation_drop(self, view, returning):
+        """Price the forced drop on the roster: the player whose removal costs the fewest lineup
+        points over the window, with the returning player on it. He is a candidate himself."""
+        import valuation
+
+        horizon, source = self._drop_pricing()
+        eligibility = view._state.eligibility
+        full = list(view.roster) + [returning]
+        rates = {p: valuation.rate(view, p, source) for p in full}
+        nights = valuation.RosterNights(view, full, rates, horizon, self.slot_order,
+                                        eligibility, self.accepts)
+        options = [returning] + [
+            d for d in view.roster
+            # Unknown is not worthless: a player nobody has projected is never the forced drop.
+            if valuation.known(view, d, source)
+            and self._fieldable([p for p in full if p != d], eligibility)]
+        return min(options, key=lambda d: (nights.removal_cost(d), d))
 
 
 class FullSystemAddDrop(FullSystem):
@@ -413,6 +479,9 @@ class FullSystemAddDrop(FullSystem):
             self.params = params
             self.name = f"full-system-adddrop[{params.describe()}]"
         self.move_log = []
+
+    def _drop_pricing(self):
+        return self.params.horizon_weeks, self.params.rate_source
 
     def transactions(self, view) -> None:
         view.p_start_column = self.p_start_column
@@ -438,8 +507,50 @@ LADDER = {1: AutodraftForget, 2: StartEveryone, 3: ScheduleStreamer, 4: FullSyst
           5: FullSystemAddDrop, 6: FullSystemHold}
 
 
+class Orchestrated(FullSystemAddDrop):
+    """Rung 7: section 10's orchestrator -- rung 5's upgrades plus a streaming layer that spends
+    only the moves the upgrades leave, run as one fixed, logged daily sequence
+    (`orchestrator.DailyPlan`).
+
+    With zero streaming spots it is rung 5 step for step: same IR, same upgrades, same lineup.
+    `Season/verify.py` holds it to that, which is what makes the gap to rung 5 the value of
+    streaming and nothing else.
+    """
+
+    name = "orchestrated"
+    rung = 7
+    stream_params = streaming.StreamParams()
+
+    def __init__(self, team_index, config, scoreset, params=None, stream_params=None):
+        super().__init__(team_index, config, scoreset, params=params)
+        if stream_params is not None:
+            self.stream_params = stream_params
+        self.name = f"orchestrated[{self.params.describe()} {self.stream_params.describe()}]"
+        self.plan = orchestrator.DailyPlan(self, self.stream_params)
+
+    # The engine calls manage_ir -> transactions -> set_lineup. The plan owns the order, so IR
+    # runs inside `transactions` (still before any move and before the engine's IR check).
+    def manage_ir(self, view) -> None:
+        return None
+
+    def manage_ir_step(self, view) -> None:
+        Manager.manage_ir(self, view)
+
+    def transactions(self, view) -> None:
+        self.plan.before_lock(view)
+
+    def lineup_step(self, view):
+        return FullSystem.set_lineup(self, view)
+
+    def set_lineup(self, view):
+        return self.plan.at_lock(view)
+
+
+LADDER[7] = Orchestrated
+
+
 def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_horizon=None,
-                replication=0, adddrop_params=None):
+                replication=0, adddrop_params=None, stream_params=None):
     """One manager per seat, rungs interleaved so seats are not blocked by strategy.
 
     Interleaving matters: three consecutive seats all drafting for the same rung would give that
@@ -459,6 +570,9 @@ def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_hori
                                           horizon_weeks=streamer_horizon))
         elif rung == 5 and adddrop_params is not None:
             field.append(FullSystemAddDrop(seat, config, scoreset, params=adddrop_params))
+        elif rung == 7:
+            field.append(Orchestrated(seat, config, scoreset, params=adddrop_params,
+                                      stream_params=stream_params))
         else:
             field.append(LADDER[rung](seat, config, scoreset))
     if len(field) != config.teams:
