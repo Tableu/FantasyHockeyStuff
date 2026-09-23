@@ -7,30 +7,30 @@ third of them decisively or it is not paying for itself. This is what the harnes
 
 Phase 1 replays **the real 2025-26 season**: outcomes are the actual stat lines, not samples, so
 there is no Monte Carlo noise in these numbers. One mixed twelve-team league, four clones of each
-rung, double round robin over 26 matchup weeks.
+rung, double round robin over 22 matchup weeks.
 
 
 ## points-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | move hit rate | gain / move |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.254 | 144.505 | 0.740 | 0.826 | 0.000 | 1392.429 | 0.000 | nan | nan |
-| 2 | start-everyone | 0.467 | 168.617 | 0.914 | 0.963 | 35.857 | 73.500 | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.610 | 186.795 | 0.860 | 0.951 | 82.714 | 115.607 | 174.536 | 0.570 | 2.631 |
-| 4 | full-system | 0.669 | 191.267 | 0.914 | 0.952 | 45.643 | 77.321 | 181.929 | 0.611 | 3.516 |
+| 2 | start-everyone | 0.420 | 158.900 | 0.899 | 0.950 | 50.500 | 45.833 | 0.000 | nan | nan |
+| 4 | full-system | 0.517 | 170.866 | 0.885 | 0.929 | 65.042 | 59.417 | 154.000 | 0.592 | 3.358 |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.625 | 179.911 | 0.920 | 0.968 | 24.625 | 54.625 | 16.708 | 0.634 | 4.456 |
+| 6 | full-system-hold | 0.438 | 159.912 | 0.893 | 0.960 | 45.833 | 57.958 | 0.000 | nan | nan |
 
-Attention alone (rung 2 over rung 1) is worth **+24.1 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **18.2 points a week** at 175 moves spent. The modelling stack (rung 4 over rung 3) is worth **+4.5 points a week** (+4.3 +/- 2.1, clear of the noise). Section 16 asks whether it clears rung 3 decisively: it **clears it**. Against rung 2, which never touches the wire, rung 4 is +22.7 +/- 2.6 points a week.
+The add/drop rule against never moving (rung 5 over 6): **+20.0 points a week** (+20.0 +/- 2.7, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+9.0 points a week** (+9.0 +/- 1.8, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+21.0 points a week** (+21.0 +/- 1.7, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+1.0 points a week** (+1.0 +/- 1.2, **not distinguishable from zero** -- the gap is smaller than the spread across seats).
 
 ## banger-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | move hit rate | gain / move |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.170 | 228.120 | 0.728 | 0.804 | 0.000 | 1398.286 | 0.000 | nan | nan |
-| 2 | start-everyone | 0.470 | 285.684 | 0.910 | 0.977 | 17.750 | 96.929 | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.683 | 322.806 | 0.899 | 0.970 | 44.607 | 98.500 | 178.571 | 0.624 | 5.968 |
-| 4 | full-system | 0.677 | 321.656 | 0.908 | 0.962 | 40.607 | 91.571 | 181.964 | 0.617 | 5.628 |
+| 2 | start-everyone | 0.374 | 260.861 | 0.898 | 0.959 | 37.333 | 61.500 | 0.000 | nan | nan |
+| 4 | full-system | 0.602 | 285.186 | 0.878 | 0.952 | 57.542 | 74.250 | 154.000 | 0.621 | 5.872 |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.637 | 294.925 | 0.931 | 0.982 | 13.250 | 57.042 | 18.292 | 0.698 | 10.046 |
+| 6 | full-system-hold | 0.386 | 256.245 | 0.899 | 0.977 | 21.500 | 75.625 | 0.000 | nan | nan |
 
-Attention alone (rung 2 over rung 1) is worth **+57.6 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **37.1 points a week** at 179 moves spent. The modelling stack (rung 4 over rung 3) is worth **-1.2 points a week** (-1.5 +/- 2.8, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +36.1 +/- 5.6 points a week.
+The add/drop rule against never moving (rung 5 over 6): **+38.7 points a week** (+38.7 +/- 1.8, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+9.7 points a week** (+9.7 +/- 1.5, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+34.1 points a week** (+34.1 +/- 3.8, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **-4.6 points a week** (-4.6 +/- 2.1, clear of the noise).
 
 
 ## Reading the table

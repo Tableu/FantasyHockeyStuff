@@ -45,8 +45,16 @@ Saved models are namespaced by horizon. A season-length window and a six-week wi
 different labels with different noise, and loading one where the other is meant is the sort
 of mistake that produces plausible numbers.
 
+**A scored build can also hand its test-season projections to a consumer.** `--predictions-out`
+writes one row per player per date for every test row -- not only the thinned rows the metrics
+are computed on -- with the projected stat line over the window and the realized one as
+`target_*`. That is the rest-of-season input a backtest may use: trained on seasons before the
+one it projects, and carrying its outcomes so the consumer can prove as much. It never touches
+`models/`, which keeps the deployment build there intact.
+
 Usage:
     python ros_train.py --train 2023-24 2024-25 --test 2025-26 --weights points-league
+    python ros_train.py --train 2023-24 2024-25 --test 2025-26 --horizon season --predictions-out
     python ros_train.py --train 2023-24 2024-25 2025-26 --horizon season --no-holdout --save
 """
 
@@ -121,6 +129,9 @@ def parse_args():
                              "note on early stopping in the module docstring")
     parser.add_argument("--early-stopping", type=int, default=100)
     parser.add_argument("--out", default="ros_model.json")
+    parser.add_argument("--predictions-out", action="store_true",
+                        help="Also write every test row's projection, with its realized window, "
+                             "to reports/ros_predictions_<horizon>_<test>.parquet")
     return parser.parse_args()
 
 
@@ -197,7 +208,41 @@ def top_features(booster, columns, count=8):
             for i in order]
 
 
+def predictions_path(horizon, season):
+    return paths.REPORTS_DIR / f"ros_predictions_{ros.suffix(horizon)}_{season}.parquet"
+
+
+def write_predictions(test, boosters, columns, args):
+    """Every test row's projected window, beside what actually happened in it."""
+    factors = pd.DataFrame(index=test.index)
+    x = matrix(test, columns)
+    for factor, booster in boosters.items():
+        factors[factor] = np.clip(booster.predict(x, num_iteration=booster.best_iteration),
+                                  0, None)
+    factors["availability"] = factors["availability"].clip(0, 1)
+    projected = baselines.to_totals(test, factors)
+    realized = baselines.actual_totals(test)
+
+    out = test[["player_id", "team_id", "game_date", "position", "window_team_games"]].copy()
+    out["season"] = args.test
+    out["trained_on"] = ",".join(args.train)
+    for factor in factors.columns:
+        out[f"pred_{factor}"] = factors[factor].to_numpy("float64")
+    for column in projected.columns:
+        out[f"proj_{column}"] = projected[column].to_numpy("float64")
+    for column in realized.columns:
+        out[f"target_{column}"] = realized[column].to_numpy("float64")
+    destination = paths.ensure(paths.REPORTS_DIR) / predictions_path(args.horizon, args.test).name
+    out.to_parquet(destination, index=False)
+    log.info("wrote %d projected windows for %s (%d players, trained on %s) to %s",
+             len(out), args.test, out["player_id"].nunique(), out["trained_on"].iloc[0],
+             destination)
+
+
 def run(args):
+    if args.predictions_out and args.no_holdout:
+        raise SystemExit("--predictions-out needs a scored build: a deployment build has no "
+                         "unseen season to project")
     frames = [baselines.load(s, args.horizon) for s in args.train]
     train_all = baselines.add_asof(pd.concat(frames, ignore_index=True))
     deployment = args.no_holdout
@@ -238,6 +283,7 @@ def run(args):
 
     predictions = (pd.DataFrame(index=test_rows.index) if test_rows is not None else None)
     importances = {}
+    boosters = {}
     models = paths.ensure(paths.MODELS_DIR) if (args.save or deployment) else None
     prefix = model_prefix(args.horizon)
     for factor in baselines.FACTORS:
@@ -248,6 +294,7 @@ def run(args):
                 booster.predict(matrix(test_rows, columns),
                                 num_iteration=booster.best_iteration), 0, None)
         importances[factor] = top_features(booster, columns)
+        boosters[factor] = booster
         if models is not None:
             booster.save_model(str(models / f"{prefix}_{factor}.txt"),
                                num_iteration=booster.best_iteration)
@@ -282,6 +329,9 @@ def run(args):
         if deployment:
             log.warning("this is a deployment build: it was scored against nothing. The "
                         "numbers to quote come from the last scored build.")
+
+    if test is not None and args.predictions_out:
+        write_predictions(test, boosters, columns, args)
 
     if test_rows is None:
         return {"deployment_build": True, "trained_on": args.train,

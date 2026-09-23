@@ -86,6 +86,7 @@ class LeagueState:
         self.owner = {}                 # player_id -> team index
         self.waived = {}                # player_id -> date it clears waivers
         self.pending_claims = defaultdict(list)   # player_id -> [team index]
+        self.claim_drops = {}                     # (team index, player_id) -> player to drop
         self.week = None
         self.transactions = []
 
@@ -193,11 +194,17 @@ class LeagueState:
 
     # ---------- waivers ----------
 
-    def submit_claim(self, team_index: int, player_id) -> None:
-        """Register interest in a player on waivers; resolved at the next processing."""
+    def submit_claim(self, team_index: int, player_id, drop=None) -> None:
+        """Register interest in a player on waivers; resolved at the next processing.
+
+        `drop` is who goes if the claim is awarded. A full roster cannot take a player without
+        one, and the choice is made now, when the claim is priced, not at award time.
+        """
         if self.teams[team_index].moves_left <= 0:
             raise IllegalMove(f"team {team_index} has no moves left to claim with")
         self.pending_claims[player_id].append(team_index)
+        if drop is not None:
+            self.claim_drops[(team_index, player_id)] = drop
 
     def process_waivers(self, today, drops=None) -> list:
         """Award claims by rolling priority, then send winners to the back of the queue.
@@ -206,7 +213,7 @@ class LeagueState:
         is why it resolves here rather than being folded into `add`.
         """
         awarded = []
-        drops = drops or {}
+        drops = {**self.claim_drops, **(drops or {})}
         for player_id, claimants in sorted(self.pending_claims.items()):
             live = [t for t in claimants
                     if self.teams[t].moves_left > 0 and player_id in self.pool]
@@ -227,6 +234,7 @@ class LeagueState:
             self.teams[winner].waiver_priority = worst
             awarded.append((winner, player_id))
         self.pending_claims.clear()
+        self.claim_drops.clear()
         self.waived = {p: d for p, d in self.waived.items()
                        if pd.Timestamp(today) < d and p in self.pool}
         return awarded

@@ -28,11 +28,19 @@ here. The split exists so a live runner (section 10) can call the same code a ba
 ## Files
 
 ```
-managers.py     the four ladder rungs behind one interface, LADDER, build_field
+managers.py     the ladder rungs behind one interface, LADDER, build_field (rungs 1-4, plus
+                section 9's rung 5 add/drop and rung 6 hold)
 slots.py        the nightly lineup as an exact maximum-weight assignment; matching_size
-draft.py        draft boards, the prior rate, and choose_pick (positional need enforced)
+draft.py        draft boards, the prior rates (per game played, and per team game as the
+                fallback for a player the projections have not reached), and choose_pick
 estimators.py   NaiveHistory: rung 3's box-score projection
+valuation.py    a player's and a swap's forward value; a swap is priced on the roster by
+                re-solving the lineup on every night it touches; known() -- unknown is not zero
+adddrop.py      section 9's add/drop rule and AddDropParams (default H=3, m=1, rest-of-season)
 ```
+
+The add/drop rule's results, and the sensitivity reading behind its defaults, are in
+`Season/README.md` ("Section 9: the add/drop rule").
 
 ## The interface a manager is handed
 
@@ -44,14 +52,19 @@ reads only these:
 | Holdings | `roster`, `ir`, `moves_left`, `waiver_priority`, `free_agents()`, `on_waivers(p)`, `opponent_roster()` |
 | Tonight | `available(p)`, `startable(players)`, `ir_eligible()`, `unavailable`, `playing_tonight` |
 | Schedule | `games_remaining(p)`, `games_through(p, weeks_ahead)`, `day`, `week` |
-| Estimates | `history` (a `NaiveHistory`), `projected_rate(p)`, `moments(scoreset, players)`, `projected_points(scoreset)`, `p_start_column` |
+| Estimates | `history` (a `NaiveHistory`), `projected_rate(p, default)`, `ros_rate(p, default)`, `moments(scoreset, players)`, `projected_points(scoreset)`, `p_start_column` |
 | The matchup | `my_week_points`, `opponent_week_points` |
 | Acting | `_state`: `add`, `drop`, `stash`, `activate`, `submit_claim`, and `eligibility` |
 
 Every change goes through the state's own methods, which raise on an illegal move rather than
 quietly refusing it.
 
+`projected_rate` and `ros_rate` return `default` for a player nobody has projected yet; pass
+`default=None` to tell "unknown" from "worth zero".
+
 ## Checks
 
 The solver is checked against brute force by `Season/verify.py` (`assignment`), which passes the
-league's `SLOT_POSITIONS` into `slots.verify_optimal`.
+league's `SLOT_POSITIONS` into `slots.verify_optimal`. `hold` checks that the add/drop rule at an
+infinite margin never moves, and `opening rates` that no opening-week skater is priced as unknown
+and that an unprojected player reads as unknown rather than zero.

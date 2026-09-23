@@ -84,6 +84,26 @@ def prior_season_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFrame, scorese
     return shrunk
 
 
+def prior_season_team_game_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFrame,
+                                scoreset) -> pd.Series:
+    """Last season's fantasy points **per team game**, availability included -- the fallback rate.
+
+    The same units as a carried projection (`lambda x p_plays`), so it can stand in for one: a
+    player the projections have not reached yet (a call-up, a player back from a long injury) is
+    valued on what he did last season rather than priced at zero. `prior_season_rate` is per game
+    *played*; this multiplies it by the share of his team's games he played -- dressed games for a
+    skater, starts over dressed games for a goalie -- because a forward value is about games that
+    will happen, including the ones he misses. Rookies have no row and stay unknown.
+    """
+    rate = prior_season_rate(actuals, goalie_lines, scoreset)
+    skater_share = actuals["target_played"].astype(bool).groupby(actuals["player_id"]).mean()
+    goalie_share = goalie_lines["is_starter"].astype(bool).groupby(goalie_lines["player_id"]).mean()
+    share = pd.concat([skater_share, goalie_share]).groupby(level=0).max()
+    forward = (rate * share.reindex(rate.index).fillna(0.0)).rename("prior_team_game_rate")
+    log.info("prior team-game rate: %d players, median %.2f", len(forward), forward.median())
+    return forward
+
+
 def _unfillable(roster, config, eligibility) -> int:
     """How many active slots this roster still cannot fill at once.
 

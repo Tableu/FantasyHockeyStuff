@@ -66,6 +66,7 @@ class Calendar:
         self._week_of_period = {week_period: week.number
                                 for week_period, week in zip(counts.index, self.weeks)}
         self._period_of_week = {w.number: p for p, w in zip(counts.index, self.weeks)}
+        self._memo = {}
 
     def __len__(self):
         return len(self.weeks)
@@ -109,19 +110,34 @@ class Calendar:
         The drop side of a streaming decision needs this. An acquisition is a rental -- it can be
         re-evaluated next week -- but a **drop is permanent**, so pricing it over the current week
         alone says a star with no games left tonight is worth nothing, and any warm body with one
-        game beats him. Over a two-week window he is worth what he actually is.
+        game beats him. Over a two-week window he is worth what he actually is. `weeks_ahead=None`
+        runs to the end of the season. A team plays at most once a day, so this is the number of
+        `team_days`, which is cached: a manager asks it of every free agent every day.
         """
-        week = self.week_of(day)
-        if week is None:
-            return 0
-        if weeks_ahead is None:                      # the rest of the season
-            end = self.weeks[-1].end
-        else:
-            end = self.weeks[min(week - 1 + weeks_ahead, len(self.weeks) - 1)].end
-        rows = self.schedule
-        return int(rows[(rows["team_id"] == team_id)
-                        & (rows["game_date"] >= pd.Timestamp(day))
-                        & (rows["game_date"] <= end)]["game_id"].nunique())
+        return len(self.team_days(team_id, day, weeks_ahead))
+
+    def team_days(self, team_id: int, day, weeks_ahead=1) -> list:
+        """The dates a team plays from `day` through the end of the week `weeks_ahead` later.
+
+        The same window as `games_through`, returned as the nights themselves, because pricing a
+        swap on the roster means solving the lineup on each of those nights.
+        """
+        key = (team_id, pd.Timestamp(day), weeks_ahead)
+        if key not in self._memo:
+            week = self.week_of(day)
+            if week is None:
+                self._memo[key] = []
+            else:
+                if weeks_ahead is None:
+                    end = self.weeks[-1].end
+                else:
+                    end = self.weeks[min(week - 1 + weeks_ahead, len(self.weeks) - 1)].end
+                rows = self.schedule
+                dates = rows[(rows["team_id"] == team_id)
+                             & (rows["game_date"] >= pd.Timestamp(day))
+                             & (rows["game_date"] <= end)].drop_duplicates("game_id")["game_date"]
+                self._memo[key] = sorted(dates)
+        return list(self._memo[key])
 
     def gaps(self, min_days=7) -> list:
         """Stretches of `min_days` or more with no games, so the hole is reported not hidden."""

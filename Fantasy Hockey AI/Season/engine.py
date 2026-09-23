@@ -200,6 +200,58 @@ class Season:
         # leakage of precisely the kind section 2 exists to prevent.
         self.latest_rate = {}
 
+        # Each player's NHL team as of his latest appearance, carried forward like the rate. The
+        # view used to take the team map from tonight's slate alone, so a rostered player whose
+        # club was idle today had no team, zero games in any window, and a forward value of zero
+        # -- which made him the cheapest drop on the roster. Every transacting rung dropped
+        # players for no reason but a dark night (measured on rung 5: dropped players showed 0.34
+        # games in a window where they really played ~6). Seeded from opening-week rosters, which
+        # are public before the first puck drop; anyone who first appears later is unknown until
+        # he does.
+        self.latest_team = {}
+        opening = min(self.nhl_team_by_day) if self.nhl_team_by_day else None
+        if opening is not None:
+            first_week = [d for d in sorted(self.nhl_team_by_day)
+                          if d <= opening + pd.Timedelta(days=6)]
+            for day in first_week:
+                for player_id, team_id in self.nhl_team_by_day[day].items():
+                    self.latest_team.setdefault(player_id, team_id)
+
+        # Rest-of-season points per team game, from the holdout build, by the date of the row. A row
+        # dated d is built from games before d, so it is knowable at d's lock -- the same footing
+        # as the per-game projections. Carried forward like `latest_rate`, never read ahead.
+        self.ros_by_day = {}
+        self.latest_ros = {}
+        ros = self.data.get("ros")
+        if ros is not None and len(ros):
+            points = self.scoreset.score_columns(ros, prefix="proj_")
+            games = ros["window_team_games"].to_numpy("float64")
+            per_game = np.divide(points, games, out=np.zeros_like(points), where=games > 0)
+            frame = pd.DataFrame({"game_date": ros["game_date"].to_numpy(),
+                                  "player_id": ros["player_id"].astype(int).to_numpy(),
+                                  "rate": per_game})
+            for day, rows in frame.groupby("game_date"):
+                self.ros_by_day[pd.Timestamp(day)] = dict(zip(rows["player_id"], rows["rate"]))
+
+        # Opening-week seed for both rates, for the same reason `latest_team` is seeded: both fill
+        # only once a player's team has played, so on the first nights a star whose club had not
+        # opened yet had no rate, priced at zero, and was the first man dropped (rung 5 dropped 33
+        # such players a replication at -59 rest-of-season points each). A player's first row in
+        # opening week is built before his first game, from last season and the preseason, so it
+        # is knowable at the first lock. Skaters only: goalie rates are recomputed nightly from
+        # start shares, and a player who first appears after opening week stays unknown -- which
+        # the add/drop rule treats as unknown, never as zero.
+        if opening is not None:
+            for day in first_week:
+                frame = self.proj_by_day.get(day)
+                if frame is not None and len(frame):
+                    values = self.scoreset.score_columns(frame, prefix="lambda_")
+                    plays = frame["p_plays"].to_numpy("float64")
+                    for player_id, value in zip(frame["player_id"].astype(int), values * plays):
+                        self.latest_rate.setdefault(int(player_id), float(value))
+                for player_id, value in self.ros_by_day.get(pd.Timestamp(day), {}).items():
+                    self.latest_ros.setdefault(int(player_id), float(value))
+
         # The fitted P(start), if it has been built. Rung 4 reads it; nothing else may.
         self.p_start_model = {}
         pstart = self.data.get("p_start")
@@ -280,19 +332,26 @@ class Season:
             goalie_projections=goalie_projections,
             unavailable=self.unavailable_by_day.get(day, set()),
             playing_tonight=playing,
-            nhl_team=self.nhl_team_by_day.get(day, {}),
+            nhl_team=self.latest_team,
             history=history, state=self.state, team_index=team_index,
             opponent_index=opponent,
             my_week_points=self.weekly[week][team_index],
             opponent_week_points=self.weekly[week][opponent] if opponent is not None else 0.0,
             decision_points=self.decision_draws(day),
-            rate_estimate=self.latest_rate)
+            rate_estimate=self.latest_rate,
+            ros_estimate=self.latest_ros)
 
     # ---------- the loop ----------
 
-    def run(self, prior_board: dict, prior_rate: dict) -> dict:
+    def run(self, prior_board: dict, prior_rate: dict, prior_forward: dict | None = None) -> dict:
         import draftroom
         import state as state_module
+
+        # Last season's rate per team game, for anyone the opening-week projections did not reach.
+        # setdefault, so it never overrides a projection; a player with neither (a rookie) stays
+        # unknown, which the add/drop rule refuses to price as zero.
+        for player_id, value in (prior_forward or {}).items():
+            self.latest_rate.setdefault(int(player_id), float(value))
 
         self.state = state_module.LeagueState(self.config, self.player_pool(), self.eligibility)
         board = pd.Series(prior_board).sort_values(ascending=False)
@@ -327,6 +386,8 @@ class Season:
                         actuals[actuals["game_date"].isin(seen)], prior_rate, self.scoreset)
 
             opponents = self._opponents_for(schedule.get(week, []))
+            self.latest_ros.update(self.ros_by_day.get(pd.Timestamp(day), {}))
+            self.latest_team.update(self.nhl_team_by_day.get(day, {}))
             goalie_projections = self._goalie_projections(day, history)
 
             self.state.process_waivers(day)
@@ -457,6 +518,38 @@ class Season:
                                         if self.hindsight[manager.team_index] else 0.0),
                 "moves_spent": sum(1 for t in self.state.transactions
                                    if t["team"] == manager.team_index),
+                **self._move_quality(manager.team_index),
             })
         return {"teams": pd.DataFrame(rows), "matchups": pd.DataFrame(self.results),
                 "transactions": pd.DataFrame(self.state.transactions)}
+
+    # The window a move is judged over, in matchup weeks after the current one. Fixed and shared by
+    # every rung, so hit rates compare -- it is an accounting convention, not any manager's horizon.
+    MOVE_ACCOUNTING_WEEKS = 1
+
+    def _move_quality(self, team_index) -> dict:
+        """Did this team's moves pay? Realized points of the player added minus the player dropped.
+
+        Counted over the move day through the end of next week, whether or not either man was
+        started -- it grades the choice of player, not the lineup around him. A move with no drop
+        is graded against zero. This is the decision-level metric for transactions: a rung can lose
+        points by picking badly or by moving too often, and a hit rate separates the two.
+        """
+        gains = []
+        for move in self.state.transactions:
+            if move["team"] != team_index:
+                continue
+            week = self.calendar.week_of(move["date"])
+            if week is None:
+                continue
+            last = min(week + self.MOVE_ACCOUNTING_WEEKS, len(self.calendar.weeks))
+            end = self.calendar.weeks[last - 1].end
+            days = [d for d in self.calendar.days if move["date"] <= d <= end]
+            added = sum(self.outcomes.score(d, move["player_id"]) for d in days)
+            dropped = (sum(self.outcomes.score(d, move["dropped"]) for d in days)
+                       if move["dropped"] is not None else 0.0)
+            gains.append(added - dropped)
+        if not gains:
+            return {"move_hit_rate": float("nan"), "realized_gain_per_move": float("nan")}
+        return {"move_hit_rate": float(np.mean([g > 0 for g in gains])),
+                "realized_gain_per_move": float(np.mean(gains))}

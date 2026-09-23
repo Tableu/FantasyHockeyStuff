@@ -10,6 +10,11 @@ season-level result rather than as an error:
     invariants      an illegal roster, an over-budget week, or an ineligible IR stash
     assignment      a sub-optimal lineup, which would understate every rung equally
     calendar        a game in no matchup week, or a week with no games
+    dark nights     a rostered player valued at zero games because his team is idle tonight
+    opening rates   a skater priced at zero on opening night because his club has not played yet
+    ros provenance  rest-of-season projections that saw the season they project
+    hold            the add/drop rule at an infinite margin making any move at all
+    modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
     python verify.py
 """
@@ -169,9 +174,131 @@ def check_calendar() -> str:
             f"{len(summary['gaps'])} break(s) found, every game in exactly one week")
 
 
+def _small_season(rungs, params=None, sims=0):
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    data = inputs.load_season(SEASON)
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    calendar = schedule_module.from_candidates(
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+    field = managers_module.build_field(config, scoreset, rungs=rungs, adddrop_params=params)
+    return engine_module.Season(config, calendar, data, eligibility, scoreset, field,
+                                decision_sims=sims), calendar
+
+
+def check_dark_nights() -> str:
+    """A player whose team is idle tonight still has this week's games in his window.
+
+    The bug this guards against valued every such player at zero games, so every transacting
+    rung dropped players for nothing but a dark night.
+    """
+    season, calendar = _small_season((2,))
+    day = calendar.days[60]
+    season.latest_team.update(season.nhl_team_by_day.get(day, {}))
+    tonight = set(season.nhl_team_by_day.get(day, {}))
+    idle = [p for p in season.latest_team if p not in tonight][:200]
+    assert idle, "no idle players found to test"
+    view = view_module.SlateView(
+        day=day, week=calendar.week_of(day), config=season.config, calendar=calendar,
+        projections=season.data["projections"].iloc[:0][["player_id"]],
+        goalie_projections=pd.DataFrame(), unavailable=set(), playing_tonight=tonight,
+        nhl_team=season.latest_team, history=None, state=None, team_index=0,
+        opponent_index=None, my_week_points=0.0, opponent_week_points=0.0)
+    counted = [view.games_through(p, weeks_ahead=1) for p in idle]
+    expected = [calendar.games_through(season.latest_team[p], day, 1) for p in idle]
+    assert counted == expected and sum(counted) > 0, "idle players lost their games"
+    return (f"{len(idle)} players idle on {pd.Timestamp(day).date()} keep "
+            f"{sum(counted)} games over the window")
+
+
+def check_opening_rates() -> str:
+    """Before the first night is played, every opening-week skater already has a rate.
+
+    Both rates used to fill only once a player's team had played, so on the first nights a star
+    whose club had not opened priced at zero and was the first man dropped. And a player nobody
+    has projected must read as unknown, never as zero, so the add/drop rule will not drop him.
+    """
+    from decisionlayer import valuation
+
+    season, calendar = _small_season((2,))
+    first_week = [d for d in calendar.days if d <= calendar.days[0] + pd.Timedelta(days=6)]
+    skaters = set()
+    for day in first_week:
+        frame = season.proj_by_day.get(day)
+        if frame is not None:
+            skaters |= set(frame["player_id"].astype(int))
+    missing = [p for p in skaters if p not in season.latest_rate]
+    assert not missing, f"{len(missing)} opening-week skaters have no rate before the first night"
+    ros_first_week = set()
+    for day in first_week:
+        ros_first_week |= set(season.ros_by_day.get(pd.Timestamp(day), {}))
+    missing_ros = [p for p in ros_first_week if p not in season.latest_ros]
+    assert not missing_ros, f"{len(missing_ros)} opening-week skaters have no rest-of-season rate"
+
+    view = view_module.SlateView(
+        day=calendar.days[0], week=1, config=season.config, calendar=calendar,
+        projections=season.data["projections"].iloc[:0][["player_id"]],
+        goalie_projections=pd.DataFrame(), unavailable=set(), playing_tonight=set(),
+        nhl_team={}, history=None, state=None, team_index=0, opponent_index=None,
+        my_week_points=0.0, opponent_week_points=0.0, rate_estimate={}, ros_estimate={})
+    assert not valuation.known(view, 1, "ros") and not valuation.known(view, 1, "per_game"),         "a player with no rate reads as known"
+    return (f"{len(skaters)} skaters rated and {len(ros_first_week)} with rest-of-season before "
+            f"the first night; an unprojected player reads as unknown")
+
+
+def check_ros_provenance() -> str:
+    """The holdout rest-of-season table loads; a table trained on the season is refused."""
+    table = inputs.load_ros(SEASON)
+    if table is None:
+        return "not built (skipped) -- run Projections/ros_train.py --predictions-out"
+    raw = pd.read_parquet(paths.ros_predictions(SEASON))
+    raw["trained_on"] = f"2024-25,{SEASON}"
+    bad = paths.REPORTS_DIR / "_verify_ros_in_sample.parquet"
+    paths.ensure(paths.REPORTS_DIR)
+    raw.to_parquet(bad, index=False)
+    original = paths.ros_predictions
+    try:
+        paths.ros_predictions = lambda season, horizon="season": bad
+        inputs.load_ros(SEASON)
+        raise AssertionError("a rest-of-season table trained on the replayed season was accepted")
+    except inputs.ProvenanceError:
+        pass
+    finally:
+        paths.ros_predictions = original
+        bad.unlink(missing_ok=True)
+    return f"holdout accepted ({len(table)} rows), in-sample refused"
+
+
+def check_hold() -> str:
+    """At an infinite margin the add/drop rule is a manager that never moves."""
+    from dataclasses import replace
+
+    from decisionlayer import adddrop
+
+    params = replace(adddrop.AddDropParams(), margin=float("inf"))
+    season, _ = _small_season((5,), params=params)
+    rate = {int(k): 1.0 for k in season.player_pool()}
+    season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
+    moves = len(season.state.transactions)
+    assert moves == 0, f"an infinite margin still made {moves} moves"
+    return "margin inf: 0 moves over a full season"
+
+
+def check_modules() -> str:
+    import decisionlayer
+
+    return f"no collisions; Decisions/ provides {', '.join(sorted(decisionlayer.__all__))}"
+
+
 CHECKS = [("provenance", check_provenance), ("leakage", check_leakage),
           ("draws", check_draws), ("invariants", check_invariants),
-          ("assignment", check_assignment), ("calendar", check_calendar)]
+          ("assignment", check_assignment), ("calendar", check_calendar),
+          ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),
+          ("ros provenance", check_ros_provenance),
+          ("hold", check_hold), ("modules", check_modules)]
 
 
 def main():

@@ -29,9 +29,11 @@ if _collisions:
 if str(paths.DECISIONS_DIR) not in sys.path:
     sys.path.append(str(paths.DECISIONS_DIR))
 
+import adddrop        # noqa: E402
 import draft          # noqa: E402
 import estimators     # noqa: E402
 import managers       # noqa: E402
 import slots          # noqa: E402
+import valuation      # noqa: E402
 
-__all__ = ["draft", "estimators", "managers", "slots"]
+__all__ = ["adddrop", "draft", "estimators", "managers", "slots", "valuation"]

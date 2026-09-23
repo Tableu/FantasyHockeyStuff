@@ -64,9 +64,11 @@ def write(report: dict, season: str, weeks: int, path=None) -> str:
     lines = [PREAMBLE.format(season=season, weeks=weeks)]
 
     columns = ["rung", "strategy", "win_rate", "points_per_week", "games_started_rate",
-               "decision_efficiency", "empty_slot_nights", "wasted_slot_nights", "moves_spent"]
+               "decision_efficiency", "empty_slot_nights", "wasted_slot_nights", "moves_spent",
+               "move_hit_rate", "realized_gain_per_move"]
     headers = ["rung", "strategy", "win rate", "points / week", "games started",
-               "decision eff.", "empty slots", "wasted slots", "moves"]
+               "decision eff.", "empty slots", "wasted slots", "moves", "move hit rate",
+               "gain / move"]
 
     for scoreset_name, payload in report["results"].items():
         table = pd.DataFrame(payload["by_rung"]).sort_values("rung")
@@ -74,8 +76,8 @@ def write(report: dict, season: str, weeks: int, path=None) -> str:
         lines.append("| " + " | ".join(headers) + " |")
         lines.append("|" + "|".join(["---"] * len(headers)) + "|")
         for row in table.itertuples():
-            values = [str(getattr(row, c)) if c in ("rung", "strategy")
-                      else f"{getattr(row, c):.3f}" for c in columns]
+            values = [str(getattr(row, c, "")) if c in ("rung", "strategy")
+                      else f"{getattr(row, c, float('nan')):.3f}" for c in columns]
             lines.append("| " + " | ".join(values) + " |")
         lines.append("")
         lines.append(_verdict(table, pd.DataFrame(payload["by_seat"])))
@@ -155,4 +157,14 @@ def _verdict(table: pd.DataFrame, seats: pd.DataFrame = None) -> str:
         if mean2 is not None:
             out.append(f"Against rung 2, which never touches the wire, rung 4 is "
                        f"{mean2:+.1f}{'' if se2 is None else f' +/- {se2:.1f}'} points a week.")
+    # Section 9's add/drop arms. Rung 6 is rung 4's lineup with no moves at all, so the gap from it
+    # to rung 5 is exactly what the transactions are worth.
+    for higher, lower, label in ((5, 6, "The add/drop rule against never moving (rung 5 over 6)"),
+                                 (5, 4, "The add/drop rule against rung 4's (rung 5 over 4)"),
+                                 (5, 2, "Rung 5 against rung 2, which never touches the wire"),
+                                 (6, 2, "Holding with the full lineup against rung 2 (6 over 2)")):
+        if higher in by_rung.index and lower in by_rung.index:
+            mean, se = paired_difference(seats, higher, lower)
+            if mean is not None:
+                out.append(f"{label}: **{mean:+.1f} points a week**{_significance(mean, se)}.")
     return " ".join(out)

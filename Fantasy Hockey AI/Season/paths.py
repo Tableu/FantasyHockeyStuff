@@ -95,6 +95,15 @@ def holdout_predictions(variant: str = "A") -> Path:
     return PROJECTIONS_REPORTS / f"predictions_{variant}.parquet"
 
 
+def ros_predictions(season: str, horizon: str = "season") -> Path:
+    """Rest-of-season projections from a build that held `season` out.
+
+    Written by `Projections/ros_train.py --predictions-out`. Not `ros_projections_*.parquet`,
+    which `ros_predict.py` makes from the deployment build -- trained on the season being replayed.
+    """
+    return PROJECTIONS_REPORTS / f"ros_predictions_{horizon}_{season}.parquet"
+
+
 def scoreset(name: str) -> Path:
     path = Path(name)
     return path if path.exists() else SCORESETS_DIR / f"{path.stem}.json"

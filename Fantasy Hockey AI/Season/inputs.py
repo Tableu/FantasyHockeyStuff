@@ -133,6 +133,34 @@ def _assert_out_of_sample(table: pd.DataFrame, season: str, path) -> None:
             f"like a deployment build, which would be in-sample on {season}.")
 
 
+def load_ros(season: str):
+    """Rest-of-season projections for the replayed season, from a build that never saw it.
+
+    Optional: returns None when the file has not been built, and a manager that needs it says so.
+    Three checks, because the deployment build sits one directory over and would produce the same
+    columns: every row carries its realized window (`target_*`), the table spans one season, and
+    the seasons it was trained on do not include this one.
+    """
+    path = paths.ros_predictions(season)
+    if not path.exists():
+        log.info("no rest-of-season projections at %s; managers that need them will refuse", path)
+        return None
+    table = pd.read_parquet(path)
+    if "target_games" not in table.columns:
+        raise ProvenanceError(f"{path} carries no realized windows, so it cannot be a scored "
+                              f"holdout build.")
+    _assert_out_of_sample(table.rename(columns={"target_games": "target_played"}), season, path)
+    trained_on = set(str(table["trained_on"].iloc[0]).split(","))
+    if season in trained_on:
+        raise ProvenanceError(f"{path} was trained on {sorted(trained_on)}, which includes "
+                              f"{season}: in-sample on the season being replayed.")
+    table["game_date"] = pd.to_datetime(table["game_date"])
+    out = table[[c for c in table.columns if not c.startswith("target_")]]
+    log.info("rest-of-season: %d rows, %d players, trained on %s (%s)", len(out),
+             out["player_id"].nunique(), sorted(trained_on), path.name)
+    return out
+
+
 def load_actuals(season: str) -> pd.DataFrame:
     """The realized skater line per player-game -- what a lineup actually scored."""
     table = pd.read_parquet(paths.base_table(season),
@@ -244,6 +272,7 @@ def load_season(season: str, variant: str = "A") -> dict:
         "goalie_candidates": load_goalie_candidates(season, variant),
         "availability": load_availability(season, variant),
         "p_start": load_p_start(season),
+        "ros": load_ros(season),
     }
 
 

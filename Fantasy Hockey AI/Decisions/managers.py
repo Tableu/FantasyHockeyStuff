@@ -24,6 +24,7 @@ has to offer, so a live runner can hand the same managers a view built from real
 
 import logging
 
+import adddrop
 import slots as slots_module
 
 log = logging.getLogger("managers")
@@ -394,11 +395,51 @@ class FullSystem(Manager):
                 continue
 
 
-LADDER = {1: AutodraftForget, 2: StartEveryone, 3: ScheduleStreamer, 4: FullSystem}
+class FullSystemAddDrop(FullSystem):
+    """Rung 4's lineup, with section 9's add/drop rule in place of its transactions.
+
+    Same projections, same distributions, same z-scored lineup; only the transaction half
+    changes, so the gap to rung 4 is the value of the new rule and nothing else. See
+    `adddrop.py` for the rule and `AddDropParams` for what can be varied.
+    """
+
+    name = "full-system-adddrop"
+    rung = 5
+    params = adddrop.AddDropParams()
+
+    def __init__(self, team_index, config, scoreset, params=None):
+        super().__init__(team_index, config, scoreset)
+        if params is not None:
+            self.params = params
+            self.name = f"full-system-adddrop[{params.describe()}]"
+        self.move_log = []
+
+    def transactions(self, view) -> None:
+        view.p_start_column = self.p_start_column
+        self.move_log += adddrop.run(view, self.params, self.slot_order, self.accepts,
+                                     self._fieldable)
+
+
+class FullSystemHold(FullSystem):
+    """Rung 4's lineup and nothing else: never transacts.
+
+    The comparison arm for add/drop. Rung 2 also never transacts, but it slots by attention alone;
+    this slots with the full stack, so the gap between it and rung 5 is what the moves are worth.
+    """
+
+    name = "full-system-hold"
+    rung = 6
+
+    def transactions(self, view) -> None:
+        return None
+
+
+LADDER = {1: AutodraftForget, 2: StartEveryone, 3: ScheduleStreamer, 4: FullSystem,
+          5: FullSystemAddDrop, 6: FullSystemHold}
 
 
 def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_horizon=None,
-                replication=0):
+                replication=0, adddrop_params=None):
     """One manager per seat, rungs interleaved so seats are not blocked by strategy.
 
     Interleaving matters: three consecutive seats all drafting for the same rung would give that
@@ -416,6 +457,8 @@ def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_hori
         if rung == 3 and streamer_horizon is not None:
             field.append(ScheduleStreamer(seat, config, scoreset,
                                           horizon_weeks=streamer_horizon))
+        elif rung == 5 and adddrop_params is not None:
+            field.append(FullSystemAddDrop(seat, config, scoreset, params=adddrop_params))
         else:
             field.append(LADDER[rung](seat, config, scoreset))
     if len(field) != config.teams:

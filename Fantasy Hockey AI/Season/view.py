@@ -57,7 +57,7 @@ class SlateView:
     def __init__(self, day, week, config, calendar, projections, goalie_projections,
                  unavailable, playing_tonight, nhl_team, history, state, team_index,
                  opponent_index, my_week_points, opponent_week_points,
-                 decision_points=None, rate_estimate=None):
+                 decision_points=None, rate_estimate=None, ros_estimate=None):
         self.day = pd.Timestamp(day)
         self.week = week
         self.config = config
@@ -66,7 +66,9 @@ class SlateView:
         self.goalie_projections = assert_clean(goalie_projections, "goalie projections")
         self.unavailable = unavailable            # set of player_ids out tonight
         self.playing_tonight = playing_tonight    # set of player_ids whose team plays
-        self.nhl_team = nhl_team                  # player_id -> his NHL team id today
+        # player_id -> his NHL team as of his latest appearance, NOT tonight's slate only: a
+        # player whose club is idle tonight still has games this week (see engine.latest_team).
+        self.nhl_team = nhl_team
         self.history = history                    # naive season-to-date, through yesterday
         self.team_index = team_index
         self.opponent_index = opponent_index
@@ -80,6 +82,9 @@ class SlateView:
         # engine so a transaction can value a player whose team is dark tonight. Never a
         # future projection -- see engine.latest_rate.
         self.rate_estimate = rate_estimate or {}
+        # {player_id: rest-of-season points per team game}, from the latest rest-of-season row at
+        # or before today, out of a build that held this season out. Empty unless the run has it.
+        self.ros_estimate = ros_estimate or {}
         self._state = state
 
     # ---------- the manager's own holdings ----------
@@ -154,6 +159,13 @@ class SlateView:
             return 0
         return self.calendar.games_through(team_id, self.day, weeks_ahead)
 
+    def nights_through(self, player_id, weeks_ahead=1) -> list:
+        """The dates his team plays from today through the end of the week `weeks_ahead` later."""
+        team_id = self.nhl_team.get(player_id)
+        if team_id is None:
+            return []
+        return self.calendar.team_days(team_id, self.day, weeks_ahead)
+
     def moments(self, scoreset, players=None) -> dict:
         """{player_id: (mean, sd)} of tonight's fantasy points, for the candidates asked about.
 
@@ -190,9 +202,20 @@ class SlateView:
     # gets the fitted model. Set by the manager, so the two cannot silently read the same thing.
     p_start_column = "p_start_naive"
 
-    def projected_rate(self, player_id, default=0.0) -> float:
-        """His latest projected points per game, whether or not his team plays tonight."""
-        return float(self.rate_estimate.get(int(player_id), default))
+    def projected_rate(self, player_id, default=0.0):
+        """His latest projected points per game, whether or not his team plays tonight.
+
+        `default=None` returns None for a player nobody has projected yet, so a caller can tell
+        "unknown" from "worth zero" -- they are not the same, and pricing the first as the second
+        is how a star whose club had not opened yet became the cheapest drop on a roster.
+        """
+        value = self.rate_estimate.get(int(player_id))
+        return default if value is None else float(value)
+
+    def ros_rate(self, player_id, default=None):
+        """His rest-of-season points per team game (availability included), or `default`."""
+        value = self.ros_estimate.get(int(player_id))
+        return default if value is None else float(value)
 
     # ---------- what the projections say ----------
 

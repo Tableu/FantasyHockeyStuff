@@ -145,6 +145,9 @@ def run(args):
              draft_module.prior_season_board(prior_actuals, prior_goalies, scoreset).items()}
     rate = {int(k): float(v) for k, v in
             draft_module.prior_season_rate(prior_actuals, prior_goalies, scoreset).items()}
+    forward = {int(k): float(v) for k, v in
+               draft_module.prior_season_team_game_rate(prior_actuals, prior_goalies,
+                                                        scoreset).items()}
 
     # The oracle's cheat sheet, built from the same Outcomes the engine resolves nights with.
     outcomes = engine_module.Outcomes(data["actuals"], data["goalie_starts"], scoreset)
@@ -160,7 +163,7 @@ def run(args):
                                             replication=replication)
         season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                      replication=replication, decision_sims=args.decision_sims)
-        table = season.run(board, rate)["teams"]
+        table = season.run(board, rate, forward)["teams"]
         rows.append(table.assign(replication=replication))
     seats = pd.concat(rows, ignore_index=True)
     seats["pts_wk"] = seats["points"] / seats["weeks"]

@@ -14,23 +14,23 @@ rung, double round robin over 26 matchup weeks.
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | move hit rate | gain / move |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.254 | 144.505 | 0.740 | 0.826 | 0.000 | 1392.429 | 0.000 | nan | nan |
-| 2 | start-everyone | 0.467 | 168.617 | 0.914 | 0.963 | 35.857 | 73.500 | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.610 | 186.795 | 0.860 | 0.951 | 82.714 | 115.607 | 174.536 | 0.570 | 2.631 |
-| 4 | full-system | 0.669 | 191.267 | 0.914 | 0.952 | 45.643 | 77.321 | 181.929 | 0.611 | 3.516 |
+| 2 | start-everyone | 0.404 | 168.995 | 0.905 | 0.967 | 37.429 | 82.429 | 0.000 | nan | nan |
+| 4 | full-system | 0.533 | 184.248 | 0.916 | 0.949 | 45.929 | 74.250 | 181.929 | 0.609 | 3.563 |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.654 | 197.706 | 0.935 | 0.982 | 12.857 | 72.107 | 22.643 | 0.730 | 4.571 |
+| 6 | full-system-hold | 0.409 | 170.951 | 0.913 | 0.969 | 37.857 | 72.071 | 0.000 | nan | nan |
 
-Attention alone (rung 2 over rung 1) is worth **+24.1 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **18.2 points a week** at 175 moves spent. The modelling stack (rung 4 over rung 3) is worth **+4.5 points a week** (+4.3 +/- 2.1, clear of the noise). Section 16 asks whether it clears rung 3 decisively: it **clears it**. Against rung 2, which never touches the wire, rung 4 is +22.7 +/- 2.6 points a week.
+The add/drop rule against never moving (rung 5 over 6): **+27.0 points a week** (+27.0 +/- 1.8, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+13.8 points a week** (+13.8 +/- 1.4, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+28.7 points a week** (+28.7 +/- 2.7, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+1.7 points a week** (+1.7 +/- 2.3, **not distinguishable from zero** -- the gap is smaller than the spread across seats).
 
 ## banger-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | move hit rate | gain / move |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.170 | 228.120 | 0.728 | 0.804 | 0.000 | 1398.286 | 0.000 | nan | nan |
-| 2 | start-everyone | 0.470 | 285.684 | 0.910 | 0.977 | 17.750 | 96.929 | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.683 | 322.806 | 0.899 | 0.970 | 44.607 | 98.500 | 178.571 | 0.624 | 5.968 |
-| 4 | full-system | 0.677 | 321.656 | 0.908 | 0.962 | 40.607 | 91.571 | 181.964 | 0.617 | 5.628 |
+| 2 | start-everyone | 0.316 | 276.335 | 0.912 | 0.974 | 24.429 | 87.429 | 0.000 | nan | nan |
+| 4 | full-system | 0.620 | 316.150 | 0.906 | 0.961 | 44.821 | 91.750 | 182.000 | 0.623 | 5.842 |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.635 | 322.131 | 0.931 | 0.985 | 7.893 | 83.750 | 24.893 | 0.789 | 11.045 |
+| 6 | full-system-hold | 0.429 | 289.695 | 0.915 | 0.982 | 18.536 | 90.536 | 0.000 | nan | nan |
 
-Attention alone (rung 2 over rung 1) is worth **+57.6 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **37.1 points a week** at 179 moves spent. The modelling stack (rung 4 over rung 3) is worth **-1.2 points a week** (-1.5 +/- 2.8, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +36.1 +/- 5.6 points a week.
+The add/drop rule against never moving (rung 5 over 6): **+32.6 points a week** (+32.6 +/- 4.9, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+6.2 points a week** (+6.2 +/- 1.7, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+45.8 points a week** (+45.8 +/- 2.1, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+13.3 points a week** (+13.3 +/- 4.7, clear of the noise).
 
 
 ## Reading the table
