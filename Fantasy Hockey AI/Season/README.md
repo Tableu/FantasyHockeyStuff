@@ -52,7 +52,7 @@ python goalie_starts.py --train --save --predict --season 2025-26
 
 python ladder.py --season 2025-26 --weights points-league --weights banger-league \
     --replications 8 --decision-sims 120
-python ladder.py --league config/league-12team-simple.json --replications 8 \
+python ladder.py --league league-12team-simple --replications 8 \
     --weights points-league --weights banger-league
 python compare.py --a league-12team-simple --b league   # what a format change does
 python verify.py         # provenance, leakage, draws, invariants, assignment, calendar
@@ -139,8 +139,8 @@ the 23-point claim survived as long as it did.
 identical everything else:
 
 ```
-A  12 teams   2C 2LW 2RW 4D 2G          12 active, 4 bench, 22 weeks   config/league-12team-simple.json
-B  14 teams   2C 2LW 2RW 1F 4D 1F/D 2G  14 active, 4 bench, 26 weeks   config/league.json
+A  12 teams   2C 2LW 2RW 4D 2G          12 active, 4 bench, 22 weeks   rosters/league-12team-simple.json
+B  14 teams   2C 2LW 2RW 1F 4D 1F/D 2G  14 active, 4 bench, 26 weeks   rosters/league.json
 ```
 
 `F` accepts any forward and `F/D` any skater, so B has two **composite** slots. Points per week are

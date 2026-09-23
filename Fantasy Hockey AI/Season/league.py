@@ -135,7 +135,7 @@ class LeagueConfig:
 
 
 def load(path=None) -> LeagueConfig:
-    path = Path(path) if path else paths.LEAGUE_CONFIG
+    path = paths.league_config(path) if path else paths.LEAGUE_CONFIG
     if not path.exists():
         raise FileNotFoundError(f"no league config at {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))

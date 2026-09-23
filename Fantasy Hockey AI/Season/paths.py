@@ -6,7 +6,8 @@ Section 6 starts from files three siblings produced and opens no database of its
                                    per-player availability flag, the goalie start lines
     ModelFeatures/data/lineups/    the goalie candidate set and who actually started
     Projections/reports/           the projections, out of sample on the simulated season
-    Projections/scoresets/         what a goal is worth
+    LeagueSettings/scoring/        what a goal is worth
+    LeagueSettings/rosters/        the format: slots, bench, IR, moves, playoffs
 
 It is the first folder in the stack that also imports *code* from a sibling -- `Simulation`'s
 sampler, scoring and copula -- because drawing a night is a computation, not a file. That one
@@ -28,15 +29,16 @@ PROJECTIONS_REPORTS = PROJECTIONS_DIR / "reports"
 # module was imported first -- which, with this folder on sys.path, is this one. So this constant
 # has to keep pointing where Simulation/paths.py points. `simlayer.assert_scoreset_dirs_agree`
 # checks it rather than trusting it.
-SCORESETS_DIR = PROJECTIONS_DIR / "scoresets"
+SETTINGS_DIR = SIBLINGS / "LeagueSettings"
+SCORESETS_DIR = SETTINGS_DIR / "scoring"
+ROSTERS_DIR = SETTINGS_DIR / "rosters"
 FEATURES_DIR = SIBLINGS / "ModelFeatures" / "data" / "features"
 LINEUPS_DIR = SIBLINGS / "ModelFeatures" / "data" / "lineups"
 
-CONFIG_DIR = PROJECT_ROOT / "config"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
 
-LEAGUE_CONFIG = CONFIG_DIR / "league.json"
+LEAGUE_CONFIG = ROSTERS_DIR / "league.json"
 
 # The Monte Carlo layer's two fitted files, read by `simlayer.py` so that nothing here has to
 # import Simulation's own `paths` module -- which it cannot, because this one shadows it.
@@ -93,6 +95,11 @@ def holdout_predictions(variant: str = "A") -> Path:
 def scoreset(name: str) -> Path:
     path = Path(name)
     return path if path.exists() else SCORESETS_DIR / f"{path.stem}.json"
+
+
+def league_config(name: str) -> Path:
+    path = Path(name)
+    return path if path.exists() else ROSTERS_DIR / f"{path.stem}.json"
 
 
 def ladder_report(season: str, config_name: str = None) -> Path:

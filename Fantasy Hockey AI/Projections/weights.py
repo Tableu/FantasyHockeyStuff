@@ -4,10 +4,10 @@ The models in this folder project **stats**, never points. Nothing here, and not
 `train.py` or `predict.py`, knows what a goal is worth. A scoring system is data the caller
 supplies, so the same fitted models serve any number of leagues:
 
-    python evaluate.py --weights scoresets/points-league.json
-    python evaluate.py --weights scoresets/banger-league.json
+    python evaluate.py --weights points-league
+    python evaluate.py --weights ../LeagueSettings/scoring/banger-league.json
 
-`scoresets/` holds example files. None of them is a default and nothing loads one
+`LeagueSettings/scoring/` holds the scoring files, shared by every folder. None of them is a default and nothing loads one
 automatically -- if no weights are given, only per-category metrics are reported.
 
 A scoring file is JSON:
@@ -101,5 +101,5 @@ def load(path) -> ScoreSet:
 
 
 def available() -> list[Path]:
-    """Example scoring files shipped alongside, for `--list-scoresets`."""
+    """The scoring files in `LeagueSettings/scoring/`, for `--list-scoresets`."""
     return sorted(paths.SCORESETS_DIR.glob("*.json")) if paths.SCORESETS_DIR.exists() else []

@@ -22,8 +22,8 @@ same projections -- which is also how to compare formats against one fixed set o
 Usage:
     python evaluate.py --variant B
     python evaluate.py --variant B --cross-features A    # the B-models scored on A features
-    python evaluate.py --variant B --weights scoresets/points-league.json
-    python evaluate.py --variant B --weights scoresets/points-league.json                                    --weights scoresets/banger-league.json
+    python evaluate.py --variant B --weights points-league.json
+    python evaluate.py --variant B --weights points-league.json                                    --weights banger-league.json
 """
 
 import argparse

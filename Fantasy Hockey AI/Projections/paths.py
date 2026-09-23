@@ -6,8 +6,8 @@ NHLStats even by accident. `--features-dir` overrides the default for anyone kee
 parquets elsewhere.
 
 MODELS_DIR and REPORTS_DIR hold derived artefacts (boosters, metrics, predictions) and are
-gitignored; DOCS_DIR holds the committed model cards, and SCORESETS_DIR the example scoring
-files that `weights.py` can load by name.
+gitignored; DOCS_DIR holds the committed model cards. SCORESETS_DIR is the shared
+`LeagueSettings/scoring/` folder, whose files `weights.py` can load by name.
 """
 
 from pathlib import Path
@@ -17,7 +17,7 @@ FEATURES_DIR = PROJECT_ROOT.parent / "ModelFeatures" / "data" / "features"
 MODELS_DIR = PROJECT_ROOT / "models"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
-SCORESETS_DIR = PROJECT_ROOT / "scoresets"
+SCORESETS_DIR = PROJECT_ROOT.parent / "LeagueSettings" / "scoring"
 
 
 def ensure(directory: Path) -> Path:

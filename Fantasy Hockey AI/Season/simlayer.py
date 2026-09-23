@@ -21,10 +21,10 @@ dispersion and the fitted copula structure -- are JSON files, and JSON read by p
 every other layer in this stack consumes the one below it.
 
 **On `scoring`:** it does `import paths` and asks for `paths.SCORESETS_DIR`, which resolves to
-*this* folder's paths module. It works only because `Season/paths.py` defines `SCORESETS_DIR`
-pointing at the same directory `Simulation/paths.py` does. That is a coincidence rather than a
-design, and it is load-bearing, so it is written down here and asserted below rather than left to
-be discovered when one of the two folders moves.
+*this* folder's paths module. It works because `Season/paths.py` and `Simulation/paths.py` both
+point `SCORESETS_DIR` at the shared `LeagueSettings/scoring/` folder. That agreement is
+load-bearing, so it is written down here and asserted below rather than left to be discovered
+when one of the two changes.
 """
 
 import json
@@ -45,17 +45,17 @@ _sim_paths = paths.SIMULATION_DIR / "paths.py"
 
 
 def assert_scoreset_dirs_agree() -> None:
-    """The load-bearing coincidence, checked rather than assumed.
+    """The load-bearing agreement, checked rather than assumed.
 
     `Simulation/scoring.py` resolves `paths.SCORESETS_DIR` against whichever `paths` module got
     imported first, which here is this folder's. If the two ever disagree, scoring files would
     silently be looked for in the wrong place -- so fail loudly instead.
     """
     text = _sim_paths.read_text(encoding="utf-8")
-    if "SCORESETS_DIR" not in text:
-        raise RuntimeError(f"{_sim_paths} no longer defines SCORESETS_DIR; Simulation/scoring.py "
-                           f"resolves it against Season/paths.py under the flat-module "
-                           f"convention, so the two have to agree. See simlayer.py.")
+    if 'SCORESETS_DIR = PROJECT_ROOT.parent / "LeagueSettings" / "scoring"' not in text:
+        raise RuntimeError(f"{_sim_paths} no longer points SCORESETS_DIR at LeagueSettings/scoring; "
+                           f"Simulation/scoring.py resolves it against Season/paths.py under the "
+                           f"flat-module convention, so the two have to agree. See simlayer.py.")
     if not paths.SCORESETS_DIR.exists():
         raise RuntimeError(f"{paths.SCORESETS_DIR} does not exist, so no scoring file can load")
 

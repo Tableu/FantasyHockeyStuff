@@ -12,7 +12,7 @@ Simulation/rosters.py    a total, and a matchup       "you are 5.2% to win this 
 ```
 
 **This layer applies no scoring system and opens no database.** What a goal is worth is data
-you supply (`../Projections/scoresets/*.json`, or your own), so one set of draws answers
+you supply (`../LeagueSettings/scoring/*.json`, or your own), so one set of draws answers
 several leagues at once; and like `Projections/`, everything here starts from parquet and
 JSON read by path. There is no `pyodbc` in `requirements.txt`, and no model library either.
 

@@ -44,7 +44,7 @@ def parse_args():
 def load(stem, season, scoreset):
     path = paths.ladder_report(season, stem)
     if not path.exists():
-        raise SystemExit(f"{path} not found -- run `python ladder.py --league config/{stem}.json`")
+        raise SystemExit(f"{path} not found -- run `python ladder.py --league {stem}`")
     payload = json.loads(path.read_text(encoding="utf-8"))
     if scoreset not in payload["results"]:
         raise SystemExit(f"{path.name} has no {scoreset} results (has "

@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument("--replications", type=int, default=1,
                         help="Seat rotations; outcomes are deterministic in phase 1, so this "
                              "varies draft position only")
-    parser.add_argument("--league", default=None, help="League config JSON")
+    parser.add_argument("--league", default=None, help="League config: a name in LeagueSettings/rosters/, or a path")
     parser.add_argument("--decision-sims", type=int, default=200,
                         help="Monte Carlo draws per slate for rung 4's decisions. Drawn on a "
                              "stream independent of anything that resolves a night.")
