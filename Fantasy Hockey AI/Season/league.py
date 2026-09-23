@@ -15,7 +15,7 @@ by `ModelFeatures/build_fantasy_positions.py`), and it is genuinely multi-positi
 position per player the problem decomposes -- the C slots cannot take a player the D slots
 wanted, so filling each position with its own best `n` is optimal by construction. Multi-position
 eligibility couples the slots, and a greedy fill can strand points on the bench: a C/LW taken by
-a C slot may be exactly the player the second LW slot needed. `slots.py` solves it properly.
+a C slot may be exactly the player the second LW slot needed. `Decisions/slots.py` solves it properly.
 """
 
 import json
@@ -36,7 +36,7 @@ NHL_TO_FANTASY = {"C": "C", "L": "LW", "R": "RW", "D": "D", "G": "G"}
 # and a format with composite slots behaves qualitatively differently: a spare forward is no longer
 # stranded because the two centre slots are full, so the effective bench shrinks and the nightly
 # assignment couples every slot to every other. That is why this is a mapping rather than an
-# identity, and why `slots.py` tests set intersection rather than membership.
+# identity, and why `Decisions/slots.py` tests set intersection rather than membership.
 SLOT_POSITIONS = {
     "C": frozenset({"C"}),
     "LW": frozenset({"LW"}),
@@ -119,7 +119,7 @@ class LeagueConfig:
     def slot_order(self) -> list:
         """Slots as a flat list, one entry per fillable slot, in a stable order.
 
-        This is the left-hand side of the nightly assignment: `slots.py` matches these against
+        This is the left-hand side of the nightly assignment: `Decisions/slots.py` matches these against
         eligible players. The order is stable so that two runs produce the same lineup when the
         assignment has ties, and carries no priority of its own -- the solver does not need one.
         """

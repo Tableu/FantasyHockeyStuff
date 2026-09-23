@@ -22,8 +22,8 @@ window every honest rung uses. It is not a strategy and it cannot be played -- i
     the gap between them  =  headroom, i.e. how much better a transaction model could get
 
 It deliberately bypasses `view.py`, which exists to make exactly this impossible. That is why it
-lives in its own script instead of `managers.py`, is named so it cannot be mistaken for a rung, and
-is never seated by `ladder.py`.
+lives in its own script instead of `Decisions/managers.py`, is named so it cannot be mistaken for a
+rung, and is never seated by `ladder.py`.
 
     python headroom.py --weights points-league
 """
@@ -34,13 +34,13 @@ from collections import defaultdict
 
 import pandas as pd
 
-import draft as draft_module
 import engine as engine_module
 import inputs
 import league as league_module
-import managers as managers_module
 import schedule as schedule_module
 import simlayer
+from decisionlayer import draft as draft_module
+from decisionlayer import managers as managers_module
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 log = logging.getLogger("headroom")

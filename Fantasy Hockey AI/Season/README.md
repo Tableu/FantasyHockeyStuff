@@ -20,17 +20,21 @@ and nowhere else, and it is narrower than it looks: `Simulation/simulate.py` and
 flat-module convention both folders use. The two fitted JSONs they would have supplied are read by
 path instead, which is how every other layer here consumes the one below it.
 
+**It measures; `Decisions/` chooses.** Every policy the ladder seats -- the four rungs, the lineup
+solver, the draft rule, rung 3's box-score estimator -- lives in the sibling `Decisions/` folder so
+a live runner can use the same code a backtest scored. It is reached through `decisionlayer.py`,
+which refuses to start if a module name in `Decisions/` also exists here or in `Simulation/`.
+
 ```
 paths.py      where every input lives
 league.py     the format as data: slots, bench, IR, the move cap, the playoff shape
 schedule.py   game days and Mon-Sun matchup weeks, derived from the schedule, never assumed
 inputs.py     the loaders, and the provenance assertion that makes the measurement honest
 state.py      rosters, IR, the free-agent pool, waivers, the weekly move counter
-slots.py      the nightly lineup, as an exact maximum-weight assignment
 view.py       SlateView -- the only thing a manager sees
-draft.py      one shared board, snake, positional need enforced
-managers.py   the ladder: all four rungs
+draftroom.py  the draft as an event: seat order, the snake; the pick itself is Decisions/draft.py
 simlayer.py   the bridge to Simulation/, and the module-name collision it works around
+decisionlayer.py  the bridge to Decisions/ (managers, slots, draft, estimators)
 engine.py     the day loop: lock, resolve, accumulate by week
 ladder.py     CLI                                          -> reports/ladder_<season>.json
 report.py     the results as prose                         -> docs/ladder-<config>.md
@@ -56,7 +60,6 @@ python ladder.py --league league-12team-simple --replications 8 \
     --weights points-league --weights banger-league
 python compare.py --a league-12team-simple --b league   # what a format change does
 python verify.py         # provenance, leakage, draws, invariants, assignment, calendar
-python slots.py          # the lineup solver against brute force
 ```
 
 ## What the ladder measured

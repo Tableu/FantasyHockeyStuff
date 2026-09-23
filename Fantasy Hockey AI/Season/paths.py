@@ -23,6 +23,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 SIBLINGS = PROJECT_ROOT.parent
 
 SIMULATION_DIR = SIBLINGS / "Simulation"
+# The decision policies -- managers, the lineup solver, the draft rule. Code, not files, so it is
+# reached through `decisionlayer.py` and nowhere else.
+DECISIONS_DIR = SIBLINGS / "Decisions"
 PROJECTIONS_DIR = SIBLINGS / "Projections"
 PROJECTIONS_REPORTS = PROJECTIONS_DIR / "reports"
 # NOTE: `Simulation/scoring.py` does `import paths` and reads SCORESETS_DIR from whichever paths

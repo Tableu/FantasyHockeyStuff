@@ -19,7 +19,6 @@ import sys
 
 import pandas as pd
 
-import draft as draft_module
 import engine as engine_module
 import inputs
 import league as league_module
@@ -28,6 +27,7 @@ import report as report_module
 import schedule as schedule_module
 
 import simlayer
+from decisionlayer import draft as draft_module
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("ladder")
@@ -63,7 +63,7 @@ def prior_season(prior_season_name, scoreset):
 
 def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, verbose_weeks,
             decision_sims=0):
-    import managers as managers_module
+    from decisionlayer import managers as managers_module
 
     field = managers_module.build_field(config, scoreset, rungs=rungs,
                                         replication=replication)

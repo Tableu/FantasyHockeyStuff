@@ -15,7 +15,11 @@ the harness exists to produce.
 
 `set_lineup` returns a `slots.Lineup`; `transactions` mutates state through `state.LeagueState`'s
 methods, which raise rather than silently refuse. Nothing here ever sees an outcome -- a manager
-only gets a `SlateView` (see `view.py`).
+only gets a `SlateView` (see `Season/view.py`).
+
+This module imports nothing from `Season/`. It works against the view's interface -- the holdings,
+tonight's slate, the schedule, the projections -- and the README lists exactly what that interface
+has to offer, so a live runner can hand the same managers a view built from real data.
 """
 
 import logging

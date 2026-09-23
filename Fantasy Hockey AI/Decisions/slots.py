@@ -30,8 +30,6 @@ import logging
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
-import league as league_module
-
 log = logging.getLogger("slots")
 
 # Larger than any plausible single-player value, used to forbid an ineligible pairing. The solver
@@ -165,8 +163,11 @@ def matching_size(players, slots: list, eligibility: dict, accepts=None) -> int:
     return lineup.filled
 
 
-def verify_optimal(trials=400, seed=17) -> dict:
+def verify_optimal(slot_positions: dict, trials=400, seed=17) -> dict:
     """Check the solver against brute force, and price the greedy alternative.
+
+    `slot_positions` maps each slot code to the positions it accepts -- the league's
+    `SLOT_POSITIONS`, passed in because this folder reads no league config of its own.
 
     Small random instances only -- brute force is factorial -- but the property being checked
     (the matching is maximum weight) does not depend on size, and a bug here silently costs every
@@ -187,7 +188,7 @@ def verify_optimal(trials=400, seed=17) -> dict:
         n_slots = int(rng.integers(2, 6))
         n_players = int(rng.integers(1, 7))
         slots = list(rng.choice(all_slots, size=n_slots))
-        accepts = {s: league_module.SLOT_POSITIONS[s] for s in set(slots)}
+        accepts = {s: slot_positions[s] for s in set(slots)}
         eligibility = {i: combos[int(rng.integers(0, len(combos)))] for i in range(n_players)}
         values = {i: float(round(rng.uniform(0, 10), 2)) for i in range(n_players)}
 
@@ -220,9 +221,3 @@ def verify_optimal(trials=400, seed=17) -> dict:
         "greedy_suboptimal_instances": greedy_losses,
         "greedy_mean_loss_when_wrong": (greedy_loss_total / greedy_losses) if greedy_losses else 0.0,
     }
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    import json
-    print(json.dumps(verify_optimal(), indent=2))

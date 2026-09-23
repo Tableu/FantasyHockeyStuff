@@ -259,7 +259,7 @@ def load_eligibility(config, universe: pd.DataFrame) -> dict:
     legal, it widens them for every manager at once, and a player's eligible positions are close
     to stable year over year. A 2026-27 *draft board*, by contrast, encodes how players performed
     in 2025-26 -- the season being replayed -- so drafting from it would hand the field a season
-    of hindsight. Hence eligibility here, and a prior-season ranking in `draft.py`.
+    of hindsight. Hence eligibility here, and a prior-season ranking in `Decisions/draft.py`.
 
     **Coverage is 97.8% and the rest fall back to their NHL position.** A fallback player is
     strictly no worse off than under single-position eligibility, so the gap cannot flatter

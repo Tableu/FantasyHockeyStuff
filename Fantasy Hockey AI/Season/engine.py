@@ -12,8 +12,9 @@ Two boundaries are enforced rather than trusted:
   * a manager receives a `SlateView` and nothing else (`view.py`), so it cannot see tonight;
   * every roster mutation goes through `state.LeagueState`, which raises on an illegal state.
 
-This module holds the stack's only code dependency on a sibling folder: `Simulation/` supplies
-the scoring, and in phase 3 the sampler. Everything else still arrives as a file.
+Code arrives from two siblings, each through one module: `Simulation/` supplies the scoring and
+the sampler (`simlayer.py`), and `Decisions/` supplies every policy -- the managers, the lineup
+solver, the draft rule, rung 3's estimator (`decisionlayer.py`). Everything else is a file.
 """
 
 import logging
@@ -24,10 +25,11 @@ import numpy as np
 import pandas as pd
 
 import paths
-import slots as slots_module
 import view as view_module
 
-import simlayer                                 # the one code dependency; see its docstring
+import simlayer                                 # Simulation's code; see its docstring
+from decisionlayer import estimators as estimators_module
+from decisionlayer import slots as slots_module
 
 log = logging.getLogger("engine")
 
@@ -289,21 +291,21 @@ class Season:
     # ---------- the loop ----------
 
     def run(self, prior_board: dict, prior_rate: dict) -> dict:
-        import draft as draft_module
+        import draftroom
         import state as state_module
 
         self.state = state_module.LeagueState(self.config, self.player_pool(), self.eligibility)
         board = pd.Series(prior_board).sort_values(ascending=False)
-        draft_module.run(self.state, self.config, board, self.eligibility, self.replication)
-        draft_module.verify_rosters_fieldable(self.state, self.config, self.eligibility)
+        draftroom.run(self.state, self.config, board, self.eligibility, self.replication)
+        draftroom.verify_rosters_fieldable(self.state, self.config, self.eligibility)
 
         schedule = matchup_schedule(self.config, self.config.regular_season_weeks)
         # The board is a season TOTAL and the rate is per game played. They are different
-        # quantities and conflating them puts the prior ~80x too high (see draft.py).
+        # quantities and conflating them puts the prior ~80x too high (see Decisions/draft.py).
         prior_rate = {int(p): float(v) for p, v in prior_rate.items()}
         # Before a game is played the prior IS the history, and every player's dress share is the
         # league's -- nobody has shown anything yet.
-        history = view_module.NaiveHistory(dict(prior_rate), {}, 1.0)
+        history = estimators_module.NaiveHistory(dict(prior_rate), {}, 1.0)
         actuals = self.data["actuals"]
         seen = []
         current_week = None
@@ -321,7 +323,7 @@ class Season:
                 # than nightly because that is how often a manager would actually recompute it,
                 # and because it keeps the cost off the day loop.
                 if seen:
-                    history = view_module.naive_history(
+                    history = estimators_module.naive_history(
                         actuals[actuals["game_date"].isin(seen)], prior_rate, self.scoreset)
 
             opponents = self._opponents_for(schedule.get(week, []))

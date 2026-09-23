@@ -21,16 +21,16 @@ import sys
 import numpy as np
 import pandas as pd
 
-import draft as draft_module
 import engine as engine_module
 import inputs
 import league as league_module
 import paths
 import schedule as schedule_module
 import simlayer
-import slots as slots_module
 import state as state_module
 import view as view_module
+from decisionlayer import managers as managers_module
+from decisionlayer import slots as slots_module
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 log = logging.getLogger("verify")
@@ -87,7 +87,6 @@ def check_draws(day_limit=6) -> str:
     calendar = schedule_module.from_candidates(
         data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
 
-    import managers as managers_module
     field = managers_module.build_field(config, scoreset, rungs=(4,))
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                   decision_sims=150)
@@ -152,7 +151,7 @@ def check_invariants(steps=20000, seed=17) -> str:
 
 
 def check_assignment() -> str:
-    result = slots_module.verify_optimal(trials=300)
+    result = slots_module.verify_optimal(league_module.SLOT_POSITIONS, trials=300)
     assert result["solver_optimal"]
     return (f"{result['trials']} instances optimal against brute force; greedy wrong on "
             f"{result['greedy_suboptimal_instances']}, mean loss "
