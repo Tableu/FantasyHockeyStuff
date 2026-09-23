@@ -39,7 +39,7 @@ engine.py     the day loop: lock, resolve, accumulate by week
 ladder.py     CLI                                          -> reports/ladder_<season>.json
 report.py     the results as prose                         -> docs/ladder-<config>.md
 compare.py    two formats against each other, paired
-verify.py     the eleven checks that have to pass before a number means anything
+verify.py     the sixteen checks that have to pass before a number means anything
 ```
 
 ## Running it
@@ -62,7 +62,7 @@ python ladder.py --league league-12team-simple --replications 8 \
 python ladder.py --rung 2 --rung 4 --rung 5 --rung 6 --replications 8 --tag adddrop     --weights points-league --weights banger-league      # section 9: add/drop against hold
 python ladder.py ... --horizon-weeks season --margin 0 --rate-source per_game --tag sens-x
 python compare.py --a league-12team-simple --b league   # what a format change does
-python verify.py         # the eleven checks, from provenance to dark nights and opening rates
+python verify.py         # the sixteen checks, from provenance to frozen rosters
 ```
 
 ## What the ladder measured
@@ -242,6 +242,36 @@ rung 7 − rung 5 against the defaults', paired by replication):
 
 Defaults unchanged; reserve and lam go to section 11's search, on 2024-25. One reading is not yet
 explained: lam = 0 made *fewer* rentals than the default under banger scoring (76 against 98).
+
+## Re-measured after the freeze fix (2026-09-23) -- these supersede the tables above
+
+Two changes landed together, so every rung 3-7 number above predates them:
+
+- **A goalie on IR froze a team for the season.** The fieldability test was absolute, so with one
+  goalie for two G slots every swap failed it; and a forced IR activation could drop the returning
+  goalie, leaving the team short for good. Under banger scoring 9 of 28 rung-7 seats (14-team) and
+  7 of 24 (12-team) made under 40 moves in a season -- seat 7 of the first rotation made none from
+  week 2 to week 26 with a G slot empty every night. The test is now relative, the forced drop keeps
+  the roster fillable, and `Manager.repair_roster` restores a short roster first. No seat freezes now.
+- **The variant-A holdout was rebuilt** with the short-handed-point model (it had been zero-filled).
+
+8 rotations, paired (`docs/ladder-league*.md`, `_adddrop`, `_orch2` are regenerated):
+
+| comparison | 14-team points | 14-team banger | 12-team points | 12-team banger |
+|---|---|---|---|---|
+| attention (2 − 1) | +24.1 ± 1.2 | +57.6 ± 4.7 | +25.8 ± 1.9 | +40.5 ± 1.7 |
+| naive streaming (3 − 2) | +21.8 ± 1.5 | +40.5 ± 4.9 | +18.5 ± 3.2 | +47.6 ± 0.6 |
+| the stack, rung 4 (4 − 3) | +4.2 ± 1.7 | +2.0 ± 2.1 | +4.5 ± 2.2 | −8.3 ± 0.8 |
+| add/drop vs hold (5 − 6) | **+34.7 ± 1.7** | **+44.5 ± 4.5** | **+29.0 ± 1.8** | **+47.3 ± 1.4** |
+| add/drop vs rung 4 (5 − 4) | +19.0 ± 2.9 | +11.4 ± 1.6 | +17.6 ± 2.5 | +13.9 ± 1.4 |
+| streaming on top (7 − 5) | **+13.5 ± 1.2** | **+29.0 ± 4.2** | **+10.1 ± 4.6** | **+28.1 ± 3.4** |
+| orchestrator vs hold (7 − 6) | +35.8 ± 1.6 | +76.5 ± 1.6 | +29.0 ± 2.5 | +59.3 ± 1.4 |
+
+The freeze hid most of streaming's value under banger scoring (7 − 5 was +12.9 there, and is +29.0)
+because the frozen seats were mostly rung 7. Under points scoring no seat had frozen, and streaming's
+edge is unchanged within noise (+14.9 -> +13.5) with a tighter error. The streaming ablations above
+were run before this fix and are sensitivity readings only; their ordering should be re-checked in
+section 11.
 
 ## Formats
 
