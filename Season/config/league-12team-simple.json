@@ -1,0 +1,16 @@
+{
+  "name": "target-league",
+  "description": "The target league from section 0: 12-team head-to-head weekly points, daily lock, no games-played cap, 7 acquisitions a week.",
+  "teams": 12,
+  "active_slots": {"C": 2, "LW": 2, "RW": 2, "D": 4, "G": 2},
+  "bench": 4,
+  "ir": 2,
+  "moves_per_week": 7,
+  "moves_carry_over": false,
+  "week_starts_on": "MON",
+  "regular_season_weeks": 22,
+  "playoff_rounds": 3,
+  "playoff_teams": 8,
+  "eligibility_platform": "yahoo",
+  "eligibility_season": "2026-27"
+}

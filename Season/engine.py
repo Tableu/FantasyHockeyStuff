@@ -1,0 +1,460 @@
+"""The day loop: step the schedule, lock a lineup, resolve the night, accumulate the week.
+
+This is the environment every decision model in sections 7 and 8 will eventually be evaluated
+against, and in phase 1 it runs one deterministic replay: **outcomes are the real 2025-26 lines**,
+not samples. That is the build order's "single-strategy backtest first", and it has a property
+multi-replication does not -- the projections were built from the real season's history, so they
+are consistent with the outcomes they are scored against, and there is no Monte Carlo noise to
+argue about when rung 4 and rung 3 come out close.
+
+Two boundaries are enforced rather than trusted:
+
+  * a manager receives a `SlateView` and nothing else (`view.py`), so it cannot see tonight;
+  * every roster mutation goes through `state.LeagueState`, which raises on an illegal state.
+
+This module holds the stack's only code dependency on a sibling folder: `Simulation/` supplies
+the scoring, and in phase 3 the sampler. Everything else still arrives as a file.
+"""
+
+import logging
+import sys
+from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+
+import paths
+import slots as slots_module
+import view as view_module
+
+import simlayer                                 # the one code dependency; see its docstring
+
+log = logging.getLogger("engine")
+
+# The league-average goalie line, in fantasy points per start. Measured, not assumed: this is what
+# `build_goalie_starts.py` reports for the season being replayed, and the standing treatment is
+# `P(start) x this` because per-start goalie quality is not projectable (R2 -0.8%).
+# The league-average goalie line is NOT a constant: it is a property of the scoring file. Under
+# points-league a start is worth 4.39 with a spread of 4.03; a banger league prices saves at 0.20
+# instead of 0.25 and pays nothing for a loss, which moves both. Hard-coding either number makes
+# every goalie decision wrong in exactly the formats the ladder is run against to find out whether
+# a verdict travels. So it is measured from the same export the harness resolves nights with,
+# under whichever scoreset is in play.
+#
+# The spread matters out of proportion to the mean, which is why it is carried at all: goalies are
+# not sampled until phase 3, so rung 4 gets their variance in closed form from the
+# Bernoulli-times-line mixture, Var = p(sigma^2 + mu^2) - (p mu)^2. A skater floors at 0.00 and a
+# pulled goalie does not.
+def goalie_line(goalie_starts, scoreset):
+    """(mean, sd) of one start's fantasy points under this scoring, from the realized export."""
+    started = goalie_starts[goalie_starts["is_starter"].astype(bool)]
+    points = scoreset.score_columns(started, side="goalies")
+    return float(points.mean()), float(points.std())
+
+
+def round_robin(teams: int) -> list:
+    """The circle method: `teams - 1` rounds in which everybody plays once.
+
+    Repeated to fill the regular season, so a 12-team league plays two full cycles over 22 weeks
+    -- which is why `regular_season_weeks` defaults to 22 rather than to however many weeks the
+    NHL schedule happens to have.
+    """
+    if teams % 2:
+        raise ValueError("round robin needs an even number of teams")
+    order = list(range(teams))
+    rounds = []
+    for _ in range(teams - 1):
+        pairs = [(order[i], order[teams - 1 - i]) for i in range(teams // 2)]
+        rounds.append(pairs)
+        order = [order[0]] + [order[-1]] + order[1:-1]
+    return rounds
+
+
+def matchup_schedule(config, weeks: int) -> dict:
+    """{week: [(home, away), ...]} over the regular season, cycling the round robin."""
+    cycle = round_robin(config.teams)
+    return {week: cycle[(week - 1) % len(cycle)] for week in range(1, weeks + 1)}
+
+
+class Outcomes:
+    """What every player actually did, by date -- the engine's half of the world.
+
+    Kept apart from anything a manager touches. A skater's night comes from `target_*`; a goalie's
+    from the per-start export, which carries a row for every *dressed* goalie so a backup who sat
+    scores the zero he really scored.
+    """
+
+    def __init__(self, actuals, goalie_starts, scoreset):
+        skaters = actuals.copy()
+        skaters["points"] = scoreset.score_columns(skaters, prefix="target_")
+        skaters.loc[~skaters["target_played"].astype(bool), "points"] = 0.0
+        skaters["played"] = skaters["target_played"].astype(bool)
+
+        goalies = goalie_starts.copy()
+        goalies["points"] = scoreset.score_columns(goalies, side="goalies")
+        goalies["played"] = goalies["appeared"].astype(bool)
+
+        columns = ["game_date", "player_id", "team_id", "points", "played"]
+        both = pd.concat([skaters[columns], goalies[columns]], ignore_index=True)
+        # A traded player can legitimately appear in two clubs' rows on one date; the row where he
+        # actually played is the real one (see ModelFeatures' team-id join finding).
+        both = both.sort_values("played", ascending=False).drop_duplicates(
+            ["game_date", "player_id"], keep="first")
+
+        self.points = {(d, int(p)): float(v) for d, p, v
+                       in zip(both["game_date"], both["player_id"], both["points"])}
+        self.played = {(d, int(p)) for d, p, y
+                       in zip(both["game_date"], both["player_id"], both["played"]) if y}
+
+    def score(self, day, player_id) -> float:
+        return self.points.get((pd.Timestamp(day), int(player_id)), 0.0)
+
+
+class Season:
+    """One full simulated season for one field of managers."""
+
+    def __init__(self, config, calendar, data, eligibility, scoreset, field,
+                 replication=0, log_every_week=False, decision_sims=0,
+                 decision_seed=90210):
+        self.config = config
+        self.calendar = calendar
+        self.data = data
+        self.eligibility = eligibility
+        self.scoreset = scoreset
+        self.field = field
+        self.replication = replication
+        self.log_every_week = log_every_week
+        self.slot_order = config.slot_order()
+        self.accepts = config.accepts
+
+        # Decision draws, on a SEPARATE random stream from anything that resolves a night. In
+        # phase 1 outcomes are the real season so no seed can collide -- but rung 4 samples to
+        # decide and phase 3 will sample to resolve, and if those two ever share a stream the
+        # manager is choosing the players who are about to score. Keeping them apart from the
+        # start costs nothing; discovering it later invalidates every number.
+        self.decision_sims = int(decision_sims)
+        self.simulator = None
+        if self.decision_sims:
+            self.simulator = simlayer.build_simulator(seed=decision_seed)
+            log.info("decision draws: %d sims a slate, seed %d (independent of outcomes)",
+                     self.decision_sims, decision_seed)
+
+        self.outcomes = Outcomes(data["actuals"], data["goalie_starts"], scoreset)
+        self.goalie_line_mean, self.goalie_line_sd = goalie_line(data["goalie_starts"], scoreset)
+        log.info("goalie line under %s: %.2f points a start, sd %.2f",
+                 scoreset.name, self.goalie_line_mean, self.goalie_line_sd)
+        self._index_inputs()
+        self.weekly = defaultdict(lambda: defaultdict(float))
+        # team -> [occupied, productive, offered]. Three counts rather than one ratio, because a
+        # slot occupied by a player who did not play and a slot left empty are different errors
+        # and only rung 1 makes the first one.
+        self.slot_fill = defaultdict(lambda: [0, 0, 0])
+        # Section 16's decision-level metric: realized points against the best legal lineup the
+        # same roster could have started, known only in hindsight. The ratio separates decision
+        # error from roster quality -- a manager holding a weak roster can still be slotting it
+        # perfectly, and a season total cannot tell the two apart.
+        self.hindsight = defaultdict(float)
+        self.results = []
+
+    # ---------- indexing, once, because it is reused every night ----------
+
+    def _index_inputs(self):
+        projections = self.data["projections"]
+        self.proj_by_day = {d: f for d, f in projections.groupby("game_date")}
+        self.nhl_team_by_day = {
+            d: dict(zip(f["player_id"].astype(int), f["team_id"]))
+            for d, f in projections.groupby("game_date")}
+
+        goalies = self.data["goalie_candidates"]
+        self.goalies_by_day = {d: f for d, f in goalies.groupby("game_date")}
+        for day, frame in self.goalies_by_day.items():
+            self.nhl_team_by_day.setdefault(day, {}).update(
+                dict(zip(frame["player_id"].astype(int), frame["team_id"])))
+
+        unavailable = self.data["availability"]
+        unavailable = unavailable[unavailable["injured_at_lockout"]]
+        by_game = defaultdict(set)
+        for game_id, player_id in zip(unavailable["game_id"], unavailable["player_id"]):
+            by_game[game_id].add(int(player_id))
+        game_days = (pd.concat([projections[["game_id", "game_date"]],
+                               goalies[["game_id", "game_date"]]])
+                     .drop_duplicates("game_id"))
+        self.unavailable_by_day = defaultdict(set)
+        for game_id, day in zip(game_days["game_id"], game_days["game_date"]):
+            self.unavailable_by_day[day] |= by_game.get(game_id, set())
+
+        # Naive goalie start share, which is all rung 3 has: appearances over team games to date.
+        self.goalie_starts_to_date = defaultdict(float)
+        self.goalie_games_to_date = defaultdict(float)
+
+        # Each player's most recently projected points per game, carried forward as the season
+        # runs. A transaction is about games that have not been played yet, so it needs a rate that
+        # survives a night his team is idle -- valuing him at tonight's projection makes every
+        # player on a dark team worth exactly zero and therefore the first man dropped.
+        #
+        # It has to be the LATEST projection, never a future one. The lambda table holds a row for
+        # every game of the season, but a row two weeks out was built from rolling features as of
+        # that game, which include results that have not happened today. Reading it would be
+        # leakage of precisely the kind section 2 exists to prevent.
+        self.latest_rate = {}
+
+        # The fitted P(start), if it has been built. Rung 4 reads it; nothing else may.
+        self.p_start_model = {}
+        pstart = self.data.get("p_start")
+        if pstart is not None and len(pstart):
+            for day, frame in pstart.groupby("game_date"):
+                self.p_start_model[day] = dict(zip(frame["player_id"].astype(int),
+                                                   frame["p_start"].astype(float)))
+
+    def player_pool(self) -> list:
+        skaters = self.data["projections"]["player_id"].astype(int).unique().tolist()
+        goalies = self.data["goalie_candidates"]["player_id"].astype(int).unique().tolist()
+        return sorted(set(skaters) | set(goalies))
+
+    # ---------- the manager's-eye view ----------
+
+    def _goalie_projections(self, day, history):
+        """Two P(start) estimates per goalie: the naive one and the fitted one.
+
+        Rung 3 may only read `p_start_naive`, a start share off a box score. Rung 4 reads
+        `p_start_model` from `Projections/goalie_starts.py`, fitted on 2023-24 and 2024-25 and held
+        out of the simulated season. That column is where the goalie half of the modelling stack
+        earns its place or does not, and keeping both on one frame makes the comparison a column
+        swap rather than a rebuild.
+        """
+        frame = self.goalies_by_day.get(day)
+        if frame is None or not len(frame):
+            return pd.DataFrame(columns=["player_id", "p_start", "p_start_naive",
+                                         "p_start_model", "expected_line", "line_sd"])
+        modelled = self.p_start_model.get(day, {})
+        rows = []
+        for player_id, team_id in zip(frame["player_id"].astype(int), frame["team_id"]):
+            games = self.goalie_games_to_date.get(player_id, 0.0)
+            starts = self.goalie_starts_to_date.get(player_id, 0.0)
+            # Shrunk toward a tandem even split. Deliberately NOT "who started last game", which
+            # carries an AUC of 0.520 over all candidates and inverts among the healthy ones.
+            naive = (starts + 2.0 * 0.5) / (games + 2.0)
+            rows.append({"player_id": player_id,
+                         "p_start_naive": naive,
+                         "p_start_model": float(modelled.get(player_id, naive)),
+                         "p_start": naive,
+                         "expected_line": self.goalie_line_mean,
+                         "line_sd": self.goalie_line_sd})
+        return pd.DataFrame(rows)
+
+    def decision_draws(self, day):
+        """Per-candidate fantasy-point samples for tonight, drawn once and shared.
+
+        Section 6 says projections are deterministic given the lockout snapshot, so inference
+        belongs outside the loop. The same argument applies to the draws: every rung-4 clone on a
+        given night faces the same slate, so one draw serves all of them. Returns
+        {player_id: array of sims}.
+        """
+        if not self.simulator:
+            return {}
+        cached = getattr(self, "_draw_cache", None)
+        if cached is not None and cached[0] == day:
+            return cached[1]
+        frame = self.proj_by_day.get(day)
+        if frame is None or not len(frame):
+            self._draw_cache = (day, {})
+            return {}
+        draws = self.simulator.draw(frame.reset_index(drop=True), self.decision_sims)
+        points = self.scoreset.score_draws(draws)                     # [rows, sims]
+        out = {int(p): points[i] for i, p in enumerate(draws.keys["player_id"])}
+        self._draw_cache = (day, out)
+        return out
+
+    def _view_for(self, team_index, day, week, opponent, history, goalie_projections):
+        projections = self.proj_by_day.get(day, self.data["projections"].iloc[:0])
+        keep = [c for c in projections.columns if not c.startswith("target_")]
+        playing = set(projections["player_id"].astype(int))
+        goalie_frame = self.goalies_by_day.get(day)
+        if goalie_frame is not None:
+            playing |= set(goalie_frame["player_id"].astype(int))
+        return view_module.SlateView(
+            day=day, week=week, config=self.config, calendar=self.calendar,
+            projections=projections[keep],
+            goalie_projections=goalie_projections,
+            unavailable=self.unavailable_by_day.get(day, set()),
+            playing_tonight=playing,
+            nhl_team=self.nhl_team_by_day.get(day, {}),
+            history=history, state=self.state, team_index=team_index,
+            opponent_index=opponent,
+            my_week_points=self.weekly[week][team_index],
+            opponent_week_points=self.weekly[week][opponent] if opponent is not None else 0.0,
+            decision_points=self.decision_draws(day),
+            rate_estimate=self.latest_rate)
+
+    # ---------- the loop ----------
+
+    def run(self, prior_board: dict, prior_rate: dict) -> dict:
+        import draft as draft_module
+        import state as state_module
+
+        self.state = state_module.LeagueState(self.config, self.player_pool(), self.eligibility)
+        board = pd.Series(prior_board).sort_values(ascending=False)
+        draft_module.run(self.state, self.config, board, self.eligibility, self.replication)
+        draft_module.verify_rosters_fieldable(self.state, self.config, self.eligibility)
+
+        schedule = matchup_schedule(self.config, self.config.regular_season_weeks)
+        # The board is a season TOTAL and the rate is per game played. They are different
+        # quantities and conflating them puts the prior ~80x too high (see draft.py).
+        prior_rate = {int(p): float(v) for p, v in prior_rate.items()}
+        # Before a game is played the prior IS the history, and every player's dress share is the
+        # league's -- nobody has shown anything yet.
+        history = view_module.NaiveHistory(dict(prior_rate), {}, 1.0)
+        actuals = self.data["actuals"]
+        seen = []
+        current_week = None
+
+        for day in self.calendar.days:
+            week = self.calendar.week_of(day)
+            if week is None or week > self.config.regular_season_weeks:
+                continue
+            if week != current_week:
+                if current_week is not None:
+                    self._settle_week(current_week, schedule.get(current_week, []))
+                self.state.start_week(week)
+                current_week = week
+                # Refresh the naive rate once a week, from everything played so far. Weekly rather
+                # than nightly because that is how often a manager would actually recompute it,
+                # and because it keeps the cost off the day loop.
+                if seen:
+                    history = view_module.naive_history(
+                        actuals[actuals["game_date"].isin(seen)], prior_rate, self.scoreset)
+
+            opponents = self._opponents_for(schedule.get(week, []))
+            goalie_projections = self._goalie_projections(day, history)
+
+            self.state.process_waivers(day)
+            for manager in self.field:
+                v = self._view_for(manager.team_index, day, week,
+                                   opponents.get(manager.team_index), history,
+                                   goalie_projections)
+                manager.manage_ir(v)
+                manager.transactions(v)
+            self.state.assert_legal()
+
+            for manager in self.field:
+                v = self._view_for(manager.team_index, day, week,
+                                   opponents.get(manager.team_index), history,
+                                   goalie_projections)
+                lineup = manager.set_lineup(v)
+                self._resolve(manager.team_index, day, week, lineup, v)
+
+            self._track_goalie_starts(day)
+            self._carry_rates(day, goalie_projections)
+            seen.append(day)
+
+        if current_week is not None:
+            self._settle_week(current_week, schedule.get(current_week, []))
+        return self._report()
+
+    def _opponents_for(self, pairs) -> dict:
+        out = {}
+        for home, away in pairs:
+            out[home], out[away] = away, home
+        return out
+
+    def _resolve(self, team_index, day, week, lineup, v) -> None:
+        """Score tonight's started players. The only place outcomes enter."""
+        if not slots_module.is_legal(lineup, self.slot_order, self.eligibility, self.accepts):
+            raise AssertionError(f"team {team_index} started an illegal lineup on {day}")
+        held = set(self.state.teams[team_index].roster)
+        productive = 0
+        for player_id in lineup.started:
+            if player_id not in held:
+                raise AssertionError(f"team {team_index} started {player_id} on {day} without "
+                                     f"holding him")
+            self.weekly[week][team_index] += self.outcomes.score(day, player_id)
+            if (pd.Timestamp(day), int(player_id)) in self.outcomes.played:
+                productive += 1
+        # The hindsight-optimal lineup: the same assignment problem, solved with what actually
+        # happened as the values. Anything a manager leaves on the table shows up here.
+        realized = {p: self.outcomes.score(day, p) for p in v.startable(v.roster)}
+        if realized:
+            best = slots_module.assign(self.slot_order, realized, self.eligibility,
+                                       self.accepts)
+            self.hindsight[team_index] += slots_module.total_value(best, realized)
+
+        offered = min(len(v.startable(v.roster)), len(self.slot_order))
+        self.slot_fill[team_index][0] += lineup.filled
+        self.slot_fill[team_index][1] += productive
+        self.slot_fill[team_index][2] += offered
+
+    def _carry_rates(self, day, goalie_projections) -> None:
+        """Update the running rate estimate from tonight's slate, after the night has been set."""
+        frame = self.proj_by_day.get(day)
+        if frame is not None and len(frame):
+            values = self.scoreset.score_columns(frame, prefix="lambda_")
+            plays = frame["p_plays"].to_numpy("float64")
+            for player_id, value in zip(frame["player_id"].astype(int), values * plays):
+                self.latest_rate[int(player_id)] = float(value)
+        if len(goalie_projections):
+            for row in goalie_projections.itertuples():
+                # Stored at the naive share; a manager rescales by whichever P(start) it may read.
+                self.latest_rate[int(row.player_id)] = float(
+                    row.p_start_naive * row.expected_line)
+
+    def _track_goalie_starts(self, day) -> None:
+        frame = self.goalies_by_day.get(day)
+        if frame is None:
+            return
+        started = self.data["goalie_starts"]
+        for player_id in frame["player_id"].astype(int):
+            self.goalie_games_to_date[player_id] += 1.0
+        todays = started[started["game_date"] == day]
+        for player_id, is_starter in zip(todays["player_id"].astype(int), todays["is_starter"]):
+            if is_starter:
+                self.goalie_starts_to_date[player_id] += 1.0
+
+    def _settle_week(self, week, pairs) -> None:
+        for home, away in pairs:
+            mine, theirs = self.weekly[week][home], self.weekly[week][away]
+            if mine > theirs:
+                self.state.teams[home].matchup_wins += 1.0
+            elif theirs > mine:
+                self.state.teams[away].matchup_wins += 1.0
+            else:
+                self.state.teams[home].matchup_wins += 0.5
+                self.state.teams[away].matchup_wins += 0.5
+            self.results.append({"week": week, "home": home, "away": away,
+                                 "home_points": mine, "away_points": theirs})
+        for team in self.state.teams:
+            team.weekly_points[week] = self.weekly[week][team.team]
+        if self.log_every_week:
+            log.info("week %2d settled: mean %.1f points, spread %.1f-%.1f", week,
+                     np.mean([self.weekly[week][t] for t in range(self.config.teams)]),
+                     min(self.weekly[week].values()), max(self.weekly[week].values()))
+
+    def _report(self) -> dict:
+        rows = []
+        for manager in self.field:
+            team = self.state.teams[manager.team_index]
+            occupied, productive, offered = self.slot_fill[manager.team_index]
+            weeks = [w for w in self.weekly if self.weekly[w].get(manager.team_index) is not None]
+            rows.append({
+                "seat": manager.team_index,
+                "rung": manager.rung,
+                "strategy": manager.name,
+                "matchup_wins": team.matchup_wins,
+                "weeks": len(weeks),
+                "points": float(sum(team.weekly_points.values())),
+                "slot_nights_occupied": occupied,
+                "slot_nights_productive": productive,
+                "slot_nights_offered": offered,
+                # Of the games a manager could have started, how many he actually got. This is the
+                # section 15 metric, and it is the one that separates rungs 1 and 2.
+                "games_started_rate": productive / offered if offered else 0.0,
+                "empty_slot_nights": max(0, offered - occupied),
+                "wasted_slot_nights": occupied - productive,
+                "hindsight_points": self.hindsight[manager.team_index],
+                "decision_efficiency": (float(sum(team.weekly_points.values()))
+                                        / self.hindsight[manager.team_index]
+                                        if self.hindsight[manager.team_index] else 0.0),
+                "moves_spent": sum(1 for t in self.state.transactions
+                                   if t["team"] == manager.team_index),
+            })
+        return {"teams": pd.DataFrame(rows), "matchups": pd.DataFrame(self.results),
+                "transactions": pd.DataFrame(self.state.transactions)}

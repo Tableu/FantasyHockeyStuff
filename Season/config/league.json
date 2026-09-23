@@ -1,0 +1,16 @@
+{
+  "name": "target-league",
+  "description": "14-team head-to-head weekly points, daily lock, 7 acquisitions a week. Active: 2C 2LW 2RW 1F 4D 1F/D 2G. The F and F/D slots are composite -- they accept any forward and any skater respectively.",
+  "teams": 14,
+  "active_slots": {"C": 2, "LW": 2, "RW": 2, "F": 1, "D": 4, "F/D": 1, "G": 2},
+  "bench": 4,
+  "ir": 2,
+  "moves_per_week": 7,
+  "moves_carry_over": false,
+  "week_starts_on": "MON",
+  "regular_season_weeks": 26,
+  "playoff_rounds": 3,
+  "playoff_teams": 8,
+  "eligibility_platform": "yahoo",
+  "eligibility_season": "2026-27"
+}
