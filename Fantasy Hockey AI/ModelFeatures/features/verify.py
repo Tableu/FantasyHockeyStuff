@@ -252,6 +252,27 @@ def injury_flag_knowable(table: pd.DataFrame) -> bool:
                    f"{outside} flagged outside a spell, {wrong} in-spell rows flagged wrongly")
 
 
+def age(table: pd.DataFrame) -> bool:
+    """`age_years` is filled for nearly every row, plausible, and rises through the season.
+
+    Coverage depends on pipeline/backfill_player_bio.py having run: Reference.Players.BirthDate
+    was empty for every player before it did.
+    """
+    if "age_years" not in table.columns:
+        return _report("age", False, "no age_years column -- rebuild the base table")
+    rows = table if "copy_index" not in table.columns else table[table["copy_index"] == 0]
+    coverage = float(rows["age_years"].notna().mean())
+    known = rows.dropna(subset=["age_years"])
+    implausible = int(((known["age_years"] < 17) | (known["age_years"] > 46)).sum())
+    ordered = known.sort_values(["player_id", "game_date"], kind="mergesort")
+    backwards = int((ordered.groupby("player_id")["age_years"].diff() < 0).sum())
+    ok = coverage >= 0.99 and implausible == 0 and backwards == 0
+    return _report("age", ok,
+                   f"{coverage:.1%} of rows have an age (need 99%), range "
+                   f"{known['age_years'].min():.1f}-{known['age_years'].max():.1f}, "
+                   f"{implausible} implausible, {backwards} going backwards")
+
+
 def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFrame, season_id: int) -> bool:
     from features import extract
     has_prior = extract.prior_season_ids(cursor, [season_id])[season_id] is not None
@@ -271,6 +292,7 @@ def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFram
         one_team_per_player_game(table),
         dressed_agrees_with_played(table),
         injury_flag_knowable(table),
+        age(table),
     ]
     passed = sum(1 for r in results if r)
     log.info("%d / %d checks passed", passed, len(results))

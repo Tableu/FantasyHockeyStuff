@@ -214,9 +214,25 @@ def build_base(cursor, season_ids: list, candidates: pd.DataFrame) -> tuple:
         if not prior.empty:
             skaters = skaters.merge(prior, on=["player_id", "season_id"], how="left")
 
+    skaters = add_age(skaters, extract.player_birthdates(cursor))
     skaters = add_targets(skaters, facts)
     assert_no_leakage(skaters)
     return skaters, goalies
+
+
+def add_age(skaters: pd.DataFrame, birthdates: pd.DataFrame) -> pd.DataFrame:
+    """`age_years`: the player's age on the game date, in years.
+
+    Lineup-independent, so it lives in the base table and reaches both variants and the
+    rest-of-season model -- which is where an aging curve matters: young players rise and older
+    ones fall over a season, and nothing else in the table says which a player is. A birth date
+    is known forever, so there is no leakage question. A player with no bio yet gets NaN rather
+    than an imputed age; LightGBM routes missing values on its own, and `verify.age` reports
+    the coverage.
+    """
+    merged = skaters.merge(birthdates, on="player_id", how="left")
+    merged["age_years"] = (merged["game_date"] - merged["birth_date"]).dt.days / 365.25
+    return merged.drop(columns=["birth_date"])
 
 
 def add_targets(skaters: pd.DataFrame, facts: pd.DataFrame) -> pd.DataFrame:

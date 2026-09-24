@@ -128,6 +128,12 @@ def parse_args():
                         help="Boosting rounds, and the real regularizer here -- see the "
                              "note on early stopping in the module docstring")
     parser.add_argument("--early-stopping", type=int, default=100)
+    parser.add_argument("--exclude-feature", action="append", default=[], metavar="COLUMN",
+                        help="Drop this feature column before training (repeatable) -- for an "
+                             "ablation. Needs --tag, so the build does not replace the real one")
+    parser.add_argument("--tag", default=None,
+                        help="Suffix for this build's models, predictions and summaries, e.g. "
+                             "no-age, so an experiment sits beside the real build")
     parser.add_argument("--out", default="ros_model.json")
     parser.add_argument("--predictions-out", action="store_true",
                         help="Also write every test row's projection, with its realized window, "
@@ -208,8 +214,9 @@ def top_features(booster, columns, count=8):
             for i in order]
 
 
-def predictions_path(horizon, season):
-    return paths.REPORTS_DIR / f"ros_predictions_{ros.suffix(horizon)}_{season}.parquet"
+def predictions_path(horizon, season, tag=None):
+    suffix = f"_{tag}" if tag else ""
+    return paths.REPORTS_DIR / f"ros_predictions_{ros.suffix(horizon)}_{season}{suffix}.parquet"
 
 
 def write_predictions(test, boosters, columns, args):
@@ -232,7 +239,8 @@ def write_predictions(test, boosters, columns, args):
         out[f"proj_{column}"] = projected[column].to_numpy("float64")
     for column in realized.columns:
         out[f"target_{column}"] = realized[column].to_numpy("float64")
-    destination = paths.ensure(paths.REPORTS_DIR) / predictions_path(args.horizon, args.test).name
+    destination = (paths.ensure(paths.REPORTS_DIR)
+                   / predictions_path(args.horizon, args.test, args.tag).name)
     out.to_parquet(destination, index=False)
     log.info("wrote %d projected windows for %s (%d players, trained on %s) to %s",
              len(out), args.test, out["player_id"].nunique(), out["trained_on"].iloc[0],
@@ -243,7 +251,10 @@ def run(args):
     if args.predictions_out and args.no_holdout:
         raise SystemExit("--predictions-out needs a scored build: a deployment build has no "
                          "unseen season to project")
-    frames = [baselines.load(s, args.horizon) for s in args.train]
+    if args.exclude_feature and not args.tag:
+        raise SystemExit("--exclude-feature needs --tag, or the ablation replaces the real build")
+    frames = [baselines.load(s, args.horizon).drop(columns=args.exclude_feature)
+              for s in args.train]
     train_all = baselines.add_asof(pd.concat(frames, ignore_index=True))
     deployment = args.no_holdout
     if deployment:
@@ -252,7 +263,8 @@ def run(args):
                      ", ".join(args.train))
         test = None
     else:
-        test = baselines.add_asof(baselines.load(args.test, args.horizon))
+        test = baselines.add_asof(baselines.load(args.test, args.horizon)
+                                  .drop(columns=args.exclude_feature))
 
     # Fit the shrinkage on the *training* rows only, thinned the same way the ladder was.
     fitted = {}
@@ -288,7 +300,8 @@ def run(args):
     # season after the last one trained on.
     prefix = model_prefix(args.horizon)
     models = (paths.ensure(paths.models_dir(
-        paths.target_season(args.train, None if deployment else args.test), prefix))
+        paths.target_season(args.train, None if deployment else args.test),
+        f"{prefix}_{args.tag}" if args.tag else prefix))
         if (args.save or deployment) else None)
     for factor in baselines.FACTORS:
         booster = train_factor(fit_rows, valid_rows, factor, columns, args.rounds,

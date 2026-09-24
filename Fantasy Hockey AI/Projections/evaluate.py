@@ -63,13 +63,14 @@ def parse_args():
                         help="Show the example scoring files and exit")
     parser.add_argument("--recalibrate", action="store_true",
                         help="Apply drift.py's rolling level correction before scoring")
+    parser.add_argument("--tag", default=None, help="Score a tagged (ablation) build's predictions")
     parser.add_argument("--walk-forward", action="store_true",
                         help="Score the monthly refit backtest instead of the single fit")
     return parser.parse_args()
 
 
-def load(variant, season, walk_forward=False):
-    path = paths.predictions(variant, season, walk_forward)
+def load(variant, season, walk_forward=False, tag=None):
+    path = paths.predictions(variant, season, walk_forward, tag)
     if not path.exists():
         raise FileNotFoundError(
             f"{path} is missing -- run train.py --all --variant {variant}"
@@ -203,8 +204,8 @@ def start_sit_accuracy(frame, actual_points, predicted_points, top_n=100):
     return float(captured / available) if available else float("nan")
 
 
-def evaluate(variant, season, walk_forward=False, recalibrate=False, scoresets=()):
-    frame = load(variant, season, walk_forward)
+def evaluate(variant, season, walk_forward=False, recalibrate=False, scoresets=(), tag=None):
+    frame = load(variant, season, walk_forward, tag)
     if recalibrate:
         import drift
         frame = drift.recalibrate(frame)
@@ -419,14 +420,15 @@ def main():
     if scoresets:
         log.info("scoring under: %s", ", ".join(x.name for x in scoresets))
     report = evaluate(args.variant, args.holdout_season, args.walk_forward, args.recalibrate,
-                      scoresets)
+                      scoresets, args.tag)
 
     if args.cross_features and not args.walk_forward:
         report["cross_features"] = cross_features(
             args.cross_features, args.holdout_season, report, scoresets)
 
     kind = "metrics_walkforward_" if args.walk_forward else "metrics_"
-    path = paths.REPORTS_DIR / f"{kind}{args.variant}_{args.holdout_season}.json"
+    suffix = f"_{args.tag}" if args.tag else ""
+    path = paths.REPORTS_DIR / f"{kind}{args.variant}_{args.holdout_season}{suffix}.json"
     path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(summarise(report))
     log.info("wrote %s", path.name)

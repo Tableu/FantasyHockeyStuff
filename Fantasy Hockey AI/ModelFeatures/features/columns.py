@@ -44,6 +44,7 @@ PATTERNS = [
     (r"^(line|pair|pp|pk)_known$", "The source lineup knew his unit, as opposed to leaving it unknown."),
     (r"^lineup_age_days$", "Days between the source lineup's game and this one (variant A)."),
     (r"^injured_at_lockout$", "Known out at the lockout: inside an injury spell that had already cost him a game (a spell's first game is not knowable)."),
+    (r"^age_years$", "Age on the game date, in years (Reference.Players.BirthDate; NaN where the bio is missing)."),
     (r"^label_in_spell$", "Label: inside an injury spell on the game date (realized absence, first game included)."),
     (r"^games_dressed_lookback$", "Games he dressed in the team's previous 10."),
     (r"^label_dressed$", "Target: did he actually dress."),

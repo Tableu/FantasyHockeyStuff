@@ -280,3 +280,13 @@ def prior_season_ids(cursor, season_ids: list) -> dict:
         start = int(str(nhl_by_id[season_id])[:4]) - 1
         out[season_id] = by_nhl.get(int(f"{start}{start + 1}"))
     return out
+
+
+def player_birthdates(cursor) -> pd.DataFrame:
+    """(player_id, birth_date) from Reference.Players, for players whose bio has been fetched
+    (pipeline/backfill_player_bio.py). A static attribute, so reading it leaks nothing about any
+    game -- the same footing as the position fallback in lineups/store.py."""
+    cursor.execute("SELECT PlayerID, BirthDate FROM Reference.Players WHERE BirthDate IS NOT NULL")
+    rows = cursor.fetchall()
+    return pd.DataFrame({"player_id": [r.PlayerID for r in rows],
+                         "birth_date": pd.to_datetime([r.BirthDate for r in rows])})

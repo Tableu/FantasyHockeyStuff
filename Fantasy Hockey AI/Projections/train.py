@@ -60,6 +60,12 @@ def parse_args():
                              "The deployment build: no metrics come out of it, so docs/ keeps "
                              "describing the last model that was actually scored.")
     parser.add_argument("--features-dir", type=Path, default=None)
+    parser.add_argument("--exclude-feature", action="append", default=[], metavar="COLUMN",
+                        help="Drop this feature column before training (repeatable) -- for an "
+                             "ablation. Needs --tag, so the build does not replace the real one")
+    parser.add_argument("--tag", default=None,
+                        help="Suffix for this build's models, predictions and summaries, e.g. "
+                             "no-age, so an experiment sits beside the real build")
     parser.add_argument("--models-dir", type=Path, default=None,
                         help="Where the boosters go. Default models/<season>/skaters/<variant>/, where "
                              "<season> is the one the build predicts: the holdout, or for a "
@@ -231,6 +237,12 @@ def run(args):
     holdout_season = None if args.no_holdout else args.holdout_season
     seasons = train_seasons + ([holdout_season] if holdout_season else [])
     table = data.load_seasons(seasons, args.variant, args.features_dir)
+    if args.exclude_feature and not args.tag:
+        raise SystemExit("--exclude-feature needs --tag, or the ablation replaces the real build")
+    absent = [c for c in args.exclude_feature if c not in table.columns]
+    if absent:
+        raise SystemExit(f"--exclude-feature names column(s) the table does not have: {absent}")
+    table = table.drop(columns=args.exclude_feature)
     matrix, columns = data.build_feature_matrix(table)
     split = data.chronological_split(table, train_seasons, holdout_season)
     if holdout_season is None:
@@ -257,7 +269,8 @@ def run(args):
     # so a variant-A build, a variant-B build and the deployment build silently replaced one
     # another. Each build now has its own folder, named for the season it predicts.
     models_dir = args.models_dir or paths.models_dir(
-        paths.target_season(train_seasons, holdout_season), "skaters", args.variant)
+        paths.target_season(train_seasons, holdout_season), "skaters",
+        f"{args.variant}-{args.tag}" if args.tag else args.variant)
     paths.ensure(models_dir)
     paths.ensure(paths.REPORTS_DIR)
     log.info("boosters -> %s", models_dir)
@@ -280,13 +293,17 @@ def run(args):
                             "feature_columns": columns}, indent=2), encoding="utf-8")
 
     if len(split.holdout):
-        save_predictions(table, split, chain, args.variant, holdout_season)
+        save_predictions(table, split, chain, args.variant, holdout_season, args.tag)
 
     # training_<variant>.json describes what is in models/, so only a deployment build writes it.
-    summary_path = paths.REPORTS_DIR / (f"training_{args.variant}.json" if holdout_season is None
-                                        else f"training_{args.variant}_{holdout_season}.json")
+    stem = (f"training_{args.variant}" if holdout_season is None
+            else f"training_{args.variant}_{holdout_season}")
+    suffix = f"_{args.tag}" if args.tag else ""
+    summary_path = paths.REPORTS_DIR / f"{stem}{suffix}.json"
     summary_path.write_text(json.dumps({
         "models_dir": str(models_dir),
+        "excluded_features": args.exclude_feature,
+        "tag": args.tag,
         "variant": args.variant,
         "train_seasons": train_seasons,
         "holdout_season": holdout_season,
@@ -313,7 +330,7 @@ def required_targets(wanted):
     return needed
 
 
-def save_predictions(table, split, chain, variant, season):
+def save_predictions(table, split, chain, variant, season, tag=None):
     """Holdout-season predictions beside the actuals, for evaluate.py and calibrate.py."""
     keep = [c for c in data.KEY_COLUMNS if c in table.columns] + ["season"]
     frame = table.loc[split.holdout, keep].copy()
@@ -325,7 +342,7 @@ def save_predictions(table, split, chain, variant, season):
     for column in data.BASELINE_COLUMNS:
         if column in table.columns:
             frame[column] = table.loc[split.holdout, column].to_numpy()
-    path = paths.predictions(variant, season)
+    path = paths.predictions(variant, season, tag=tag)
     frame.to_parquet(path, index=False)
     log.info("wrote %s: %d rows", path.name, len(frame))
 
