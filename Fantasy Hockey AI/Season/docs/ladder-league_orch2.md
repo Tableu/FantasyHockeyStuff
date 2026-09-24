@@ -14,23 +14,23 @@ rung, double round robin over 26 matchup weeks.
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2 | start-everyone | 0.357 | 168.823 | 0.904 | 0.966 | 37.429 | 83.429 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.576 | 192.734 | 0.932 | 0.972 | 17.607 | 77.036 | 28.357 | 8.679 | 0.817 | 8.527 | 0.000 | nan | nan |
-| 6 | full-system-hold | 0.360 | 170.272 | 0.908 | 0.974 | 37.429 | 78.286 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 7 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0] | 0.707 | 206.108 | 0.936 | 0.974 | 15.786 | 77.821 | 144.643 | 8.071 | 0.793 | 8.793 | 113.036 | 0.679 | 2.954 |
+| 2 | start-everyone | 0.338 | 169.163 | 0.908 | 0.964 | 37.643 | 78.714 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.596 | 195.188 | 0.930 | 0.973 | 18.500 | 79.607 | 27.893 | 8.714 | 0.839 | 8.873 | 0.000 | nan | nan |
+| 6 | full-system-hold | 0.365 | 170.488 | 0.911 | 0.972 | 37.643 | 75.357 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 7 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0] | 0.701 | 207.229 | 0.942 | 0.975 | 13.714 | 71.857 | 147.000 | 8.643 | 0.798 | 8.481 | 116.357 | 0.687 | 2.908 |
 
-The add/drop rule against never moving (rung 5 over 6): **+22.3 points a week** (+22.3 +/- 1.6, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+23.8 points a week** (+23.8 +/- 1.5, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+1.5 points a week** (+1.5 +/- 2.6, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Streaming on top of the upgrades (rung 7 over 5): **+13.5 points a week** (+13.5 +/- 1.2, clear of the noise). The orchestrator against never moving (rung 7 over 6): **+35.8 points a week** (+35.8 +/- 1.6, clear of the noise). Rung 7 against rung 2: **+37.2 points a week** (+37.2 +/- 1.5, clear of the noise).
+The add/drop rule against never moving (rung 5 over 6): **+24.4 points a week** (+24.4 +/- 4.3, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+25.7 points a week** (+25.7 +/- 4.0, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+1.3 points a week** (+1.3 +/- 3.2, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Streaming on top of the upgrades (rung 7 over 5): **+12.1 points a week** (+12.1 +/- 1.7, clear of the noise). The orchestrator against never moving (rung 7 over 6): **+36.5 points a week** (+36.5 +/- 4.1, clear of the noise). Rung 7 against rung 2: **+37.8 points a week** (+37.8 +/- 4.1, clear of the noise).
 
 ## banger-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2 | start-everyone | 0.288 | 276.467 | 0.912 | 0.975 | 24.429 | 87.857 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.617 | 326.698 | 0.929 | 0.981 | 10.143 | 90.286 | 28.393 | 8.857 | 0.843 | 15.718 | 0.000 | nan | nan |
-| 6 | full-system-hold | 0.319 | 278.639 | 0.913 | 0.982 | 24.429 | 86.607 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 7 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0] | 0.775 | 355.426 | 0.941 | 0.982 | 7.929 | 80.143 | 166.714 | 8.000 | 0.798 | 14.605 | 135.786 | 0.691 | 4.829 |
+| 2 | start-everyone | 0.310 | 281.471 | 0.911 | 0.975 | 22.286 | 91.214 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.600 | 321.950 | 0.928 | 0.981 | 9.357 | 91.607 | 28.357 | 8.000 | 0.832 | 15.089 | 0.000 | nan | nan |
+| 6 | full-system-hold | 0.326 | 283.459 | 0.912 | 0.982 | 22.286 | 89.571 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 7 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0] | 0.764 | 349.437 | 0.937 | 0.981 | 8.964 | 85.107 | 166.143 | 7.464 | 0.806 | 14.826 | 134.536 | 0.687 | 4.761 |
 
-The add/drop rule against never moving (rung 5 over 6): **+47.4 points a week** (+47.4 +/- 3.1, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+49.6 points a week** (+49.6 +/- 2.3, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+2.2 points a week** (+2.2 +/- 2.3, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Streaming on top of the upgrades (rung 7 over 5): **+29.0 points a week** (+29.0 +/- 4.2, clear of the noise). The orchestrator against never moving (rung 7 over 6): **+76.5 points a week** (+76.5 +/- 1.6, clear of the noise). Rung 7 against rung 2: **+78.6 points a week** (+78.6 +/- 2.9, clear of the noise).
+The add/drop rule against never moving (rung 5 over 6): **+37.7 points a week** (+37.7 +/- 4.3, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+39.7 points a week** (+39.7 +/- 4.9, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+1.9 points a week** (+1.9 +/- 5.6, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Streaming on top of the upgrades (rung 7 over 5): **+27.8 points a week** (+27.8 +/- 2.2, clear of the noise). The orchestrator against never moving (rung 7 over 6): **+65.5 points a week** (+65.5 +/- 5.6, clear of the noise). Rung 7 against rung 2: **+67.4 points a week** (+67.4 +/- 5.0, clear of the noise).
 
 
 ## Reading the table

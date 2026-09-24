@@ -14,23 +14,19 @@ rung, double round robin over 22 matchup weeks.
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2 | start-everyone | 0.384 | 157.784 | 0.890 | 0.949 | 52.083 | 53.500 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 4 | full-system | 0.545 | 172.317 | 0.882 | 0.929 | 69.375 | 58.958 | 153.958 | 6.292 | 0.612 | 3.912 | 0.000 | nan | nan |
-| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.701 | 188.224 | 0.920 | 0.964 | 24.750 | 59.708 | 22.292 | 7.917 | 0.734 | 7.842 | 0.000 | nan | nan |
-| 6 | full-system-hold | 0.369 | 159.051 | 0.891 | 0.957 | 52.083 | 52.958 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 2 | start-everyone | 0.484 | 157.790 | 0.906 | 0.946 | 47.979 | 41.562 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 12 | start-everyone[vor draft] | 0.516 | 161.937 | 0.885 | 0.958 | 44.917 | 68.229 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
 
-The add/drop rule against never moving (rung 5 over 6): **+29.2 points a week** (+29.2 +/- 1.7, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+15.9 points a week** (+15.9 +/- 1.8, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+30.4 points a week** (+30.4 +/- 1.7, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+1.3 points a week** (+1.3 +/- 1.6, **not distinguishable from zero** -- the gap is smaller than the spread across seats).
+Drafting by value over replacement, in-season manager held at rung 2 (rung 12 over 2): **+4.1 points a week** (+4.1 +/- 0.2, clear of the noise).
 
 ## banger-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2 | start-everyone | 0.328 | 257.213 | 0.896 | 0.965 | 30.917 | 69.417 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 4 | full-system | 0.634 | 293.103 | 0.880 | 0.949 | 55.792 | 75.875 | 154.000 | 5.917 | 0.625 | 6.964 | 0.000 | nan | nan |
-| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.661 | 299.269 | 0.920 | 0.977 | 15.750 | 68.500 | 22.042 | 6.375 | 0.729 | 14.816 | 0.000 | nan | nan |
-| 6 | full-system-hold | 0.377 | 259.357 | 0.898 | 0.973 | 30.917 | 67.792 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 2 | start-everyone | 0.538 | 258.447 | 0.882 | 0.958 | 41.396 | 72.708 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 12 | start-everyone[vor draft] | 0.462 | 252.110 | 0.887 | 0.968 | 37.333 | 70.500 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
 
-The add/drop rule against never moving (rung 5 over 6): **+39.9 points a week** (+39.9 +/- 1.9, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+6.2 points a week** (+6.2 +/- 1.2, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+42.1 points a week** (+42.1 +/- 3.1, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+2.1 points a week** (+2.1 +/- 3.0, **not distinguishable from zero** -- the gap is smaller than the spread across seats).
+Drafting by value over replacement, in-season manager held at rung 2 (rung 12 over 2): **-6.3 points a week** (-6.3 +/- 0.4, clear of the noise).
 
 
 ## Reading the table

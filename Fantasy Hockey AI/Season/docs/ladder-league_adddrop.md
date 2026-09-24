@@ -14,23 +14,23 @@ rung, double round robin over 26 matchup weeks.
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2 | start-everyone | 0.394 | 168.823 | 0.904 | 0.966 | 37.429 | 83.429 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 4 | full-system | 0.519 | 187.078 | 0.914 | 0.947 | 52.321 | 72.464 | 181.964 | 8.393 | 0.623 | 3.824 | 0.000 | nan | nan |
-| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.698 | 205.542 | 0.936 | 0.976 | 14.357 | 74.500 | 31.500 | 7.607 | 0.743 | 6.762 | 0.000 | nan | nan |
-| 6 | full-system-hold | 0.389 | 171.337 | 0.913 | 0.971 | 37.857 | 72.143 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 2 | start-everyone | 0.353 | 169.163 | 0.908 | 0.964 | 37.643 | 78.714 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 4 | full-system | 0.567 | 188.634 | 0.911 | 0.946 | 54.143 | 75.071 | 182.000 | 8.429 | 0.624 | 3.909 | 0.000 | nan | nan |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.687 | 204.770 | 0.936 | 0.974 | 16.000 | 74.143 | 31.036 | 8.393 | 0.769 | 7.210 | 0.000 | nan | nan |
+| 6 | full-system-hold | 0.393 | 170.492 | 0.910 | 0.972 | 37.643 | 75.536 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
 
-The add/drop rule against never moving (rung 5 over 6): **+34.7 points a week** (+34.7 +/- 1.7, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+19.0 points a week** (+19.0 +/- 2.9, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+37.0 points a week** (+37.0 +/- 3.2, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+2.3 points a week** (+2.3 +/- 2.2, **not distinguishable from zero** -- the gap is smaller than the spread across seats).
+The add/drop rule against never moving (rung 5 over 6): **+34.2 points a week** (+34.2 +/- 3.3, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+15.8 points a week** (+15.8 +/- 2.4, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+35.5 points a week** (+35.5 +/- 2.4, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+1.3 points a week** (+1.3 +/- 4.6, **not distinguishable from zero** -- the gap is smaller than the spread across seats).
 
 ## banger-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 2 | start-everyone | 0.295 | 276.467 | 0.912 | 0.975 | 24.429 | 87.857 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 4 | full-system | 0.633 | 323.134 | 0.904 | 0.960 | 42.750 | 97.964 | 182.000 | 7.500 | 0.631 | 6.573 | 0.000 | nan | nan |
-| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.684 | 334.106 | 0.930 | 0.980 | 8.857 | 89.179 | 30.786 | 8.179 | 0.837 | 16.289 | 0.000 | nan | nan |
-| 6 | full-system-hold | 0.388 | 289.676 | 0.915 | 0.982 | 18.536 | 90.714 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 2 | start-everyone | 0.321 | 281.471 | 0.911 | 0.975 | 22.286 | 91.214 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 4 | full-system | 0.593 | 322.906 | 0.901 | 0.960 | 46.286 | 98.821 | 182.000 | 7.821 | 0.645 | 7.031 | 0.000 | nan | nan |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=inf] | 0.705 | 335.037 | 0.932 | 0.981 | 9.679 | 86.679 | 30.429 | 8.179 | 0.820 | 15.015 | 0.000 | nan | nan |
+| 6 | full-system-hold | 0.380 | 283.493 | 0.912 | 0.982 | 22.286 | 89.571 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
 
-The add/drop rule against never moving (rung 5 over 6): **+44.5 points a week** (+44.5 +/- 4.5, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+11.4 points a week** (+11.4 +/- 1.6, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+57.6 points a week** (+57.6 +/- 1.8, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+13.1 points a week** (+13.1 +/- 4.5, clear of the noise).
+The add/drop rule against never moving (rung 5 over 6): **+51.2 points a week** (+51.2 +/- 5.4, clear of the noise). The add/drop rule against rung 4's (rung 5 over 4): **+12.1 points a week** (+12.1 +/- 2.6, clear of the noise). Rung 5 against rung 2, which never touches the wire: **+53.2 points a week** (+53.2 +/- 4.9, clear of the noise). Holding with the full lineup against rung 2 (6 over 2): **+2.0 points a week** (+2.0 +/- 6.0, **not distinguishable from zero** -- the gap is smaller than the spread across seats).
 
 
 ## Reading the table

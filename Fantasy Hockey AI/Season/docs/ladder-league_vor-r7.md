@@ -14,23 +14,19 @@ rung, double round robin over 26 matchup weeks.
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.239 | 143.938 | 0.745 | 0.820 | 0.000 | 1384.714 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 2 | start-everyone | 0.477 | 169.163 | 0.908 | 0.964 | 37.643 | 78.714 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.605 | 189.046 | 0.855 | 0.945 | 89.964 | 121.750 | 177.857 | 6.179 | 0.580 | 2.766 | 0.000 | nan | nan |
-| 4 | full-system | 0.679 | 195.159 | 0.913 | 0.949 | 50.929 | 75.607 | 182.000 | 8.250 | 0.610 | 3.793 | 0.000 | nan | nan |
+| 7 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0] | 0.509 | 197.514 | 0.937 | 0.975 | 14.018 | 78.304 | 134.589 | 8.179 | 0.778 | 8.042 | 102.946 | 0.665 | 2.249 |
+| 17 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0][vor draft] | 0.491 | 200.001 | 0.936 | 0.977 | 14.982 | 78.750 | 132.071 | 6.804 | 0.770 | 7.612 | 101.911 | 0.654 | 2.204 |
 
-Attention alone (rung 2 over rung 1) is worth **+25.2 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **19.9 points a week** at 178 moves spent. The modelling stack (rung 4 over rung 3) is worth **+6.1 points a week** (+6.1 +/- 3.5, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +26.0 +/- 2.9 points a week.
+Drafting by value over replacement, in-season manager held at rung 7 (rung 17 over 7): **+2.5 points a week** (+2.5 +/- 0.9, clear of the noise).
 
 ## banger-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.174 | 231.263 | 0.728 | 0.802 | 0.000 | 1394.929 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 2 | start-everyone | 0.445 | 281.471 | 0.911 | 0.975 | 22.286 | 91.214 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.703 | 327.342 | 0.898 | 0.966 | 46.464 | 101.679 | 180.357 | 5.214 | 0.624 | 6.006 | 0.000 | nan | nan |
-| 4 | full-system | 0.677 | 326.385 | 0.906 | 0.961 | 42.143 | 95.179 | 182.000 | 7.679 | 0.632 | 6.746 | 0.000 | nan | nan |
+| 7 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0] | 0.503 | 331.406 | 0.932 | 0.983 | 8.500 | 90.875 | 156.839 | 7.714 | 0.776 | 13.104 | 124.714 | 0.665 | 3.922 |
+| 17 | orchestrated[H=3 m=1 rate=ros claim=inf k=2 r=2 lam=2 ms=0][vor draft] | 0.497 | 335.395 | 0.935 | 0.983 | 7.071 | 88.839 | 154.196 | 6.732 | 0.778 | 12.302 | 122.196 | 0.664 | 3.976 |
 
-Attention alone (rung 2 over rung 1) is worth **+50.2 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **45.9 points a week** at 180 moves spent. The modelling stack (rung 4 over rung 3) is worth **-1.0 points a week** (-1.0 +/- 3.5, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +44.8 +/- 5.4 points a week.
+Drafting by value over replacement, in-season manager held at rung 7 (rung 17 over 7): **+4.0 points a week** (+4.0 +/- 1.9, clear of the noise).
 
 
 ## Reading the table

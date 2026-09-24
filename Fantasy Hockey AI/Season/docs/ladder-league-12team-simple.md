@@ -14,23 +14,23 @@ rung, double round robin over 22 matchup weeks.
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.225 | 132.889 | 0.735 | 0.794 | 0.000 | 1006.500 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 2 | start-everyone | 0.443 | 158.640 | 0.893 | 0.952 | 45.833 | 58.667 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.627 | 177.146 | 0.852 | 0.940 | 72.167 | 91.542 | 148.917 | 5.917 | 0.586 | 3.174 | 0.000 | nan | nan |
-| 4 | full-system | 0.705 | 181.655 | 0.887 | 0.934 | 64.792 | 58.750 | 153.917 | 6.333 | 0.607 | 3.987 | 0.000 | nan | nan |
+| 1 | autodraft-forget | 0.210 | 132.873 | 0.729 | 0.799 | 0.000 | 1003.917 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 2 | start-everyone | 0.451 | 157.784 | 0.890 | 0.949 | 52.083 | 53.500 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 3 | schedule-streamer | 0.667 | 178.400 | 0.857 | 0.940 | 69.125 | 89.042 | 148.625 | 5.708 | 0.588 | 3.272 | 0.000 | nan | nan |
+| 4 | full-system | 0.672 | 179.779 | 0.885 | 0.931 | 68.708 | 56.333 | 153.917 | 6.458 | 0.604 | 3.824 | 0.000 | nan | nan |
 
-Attention alone (rung 2 over rung 1) is worth **+25.8 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **18.5 points a week** at 149 moves spent. The modelling stack (rung 4 over rung 3) is worth **+4.5 points a week** (+4.5 +/- 2.2, clear of the noise). Section 16 asks whether it clears rung 3 decisively: it **clears it**. Against rung 2, which never touches the wire, rung 4 is +23.0 +/- 3.2 points a week.
+Attention alone (rung 2 over rung 1) is worth **+24.9 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **20.6 points a week** at 149 moves spent. The modelling stack (rung 4 over rung 3) is worth **+1.4 points a week** (+1.4 +/- 2.4, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +22.0 +/- 1.6 points a week.
 
 ## banger-league
 
 | rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.170 | 214.137 | 0.722 | 0.787 | 0.000 | 1005.833 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 2 | start-everyone | 0.384 | 254.664 | 0.897 | 0.971 | 21.500 | 77.500 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.754 | 302.264 | 0.879 | 0.954 | 60.958 | 73.917 | 152.917 | 5.792 | 0.630 | 6.863 | 0.000 | nan | nan |
-| 4 | full-system | 0.691 | 293.993 | 0.881 | 0.950 | 59.042 | 71.083 | 154.000 | 6.042 | 0.630 | 7.022 | 0.000 | nan | nan |
+| 1 | autodraft-forget | 0.163 | 208.364 | 0.712 | 0.781 | 0.000 | 1018.500 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 2 | start-everyone | 0.432 | 257.213 | 0.896 | 0.965 | 30.917 | 69.417 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 3 | schedule-streamer | 0.737 | 300.885 | 0.876 | 0.953 | 63.208 | 75.875 | 153.208 | 5.583 | 0.633 | 7.033 | 0.000 | nan | nan |
+| 4 | full-system | 0.669 | 296.493 | 0.885 | 0.950 | 54.125 | 72.292 | 154.000 | 6.417 | 0.627 | 6.961 | 0.000 | nan | nan |
 
-Attention alone (rung 2 over rung 1) is worth **+40.5 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **47.6 points a week** at 153 moves spent. The modelling stack (rung 4 over rung 3) is worth **-8.3 points a week** (-8.3 +/- 0.8, clear of the noise). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +39.3 +/- 0.5 points a week.
+Attention alone (rung 2 over rung 1) is worth **+48.8 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **43.7 points a week** at 153 moves spent. The modelling stack (rung 4 over rung 3) is worth **-4.4 points a week** (-4.4 +/- 2.4, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +39.3 +/- 2.9 points a week.
 
 
 ## Reading the table

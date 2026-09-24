@@ -39,7 +39,7 @@ engine.py     the day loop: lock, resolve, accumulate by week
 ladder.py     CLI                                          -> reports/ladder_<season>.json
 report.py     the results as prose                         -> docs/ladder-<config>.md
 compare.py    two formats against each other, paired
-verify.py     the sixteen checks that have to pass before a number means anything
+verify.py     the eighteen checks that have to pass before a number means anything
 ```
 
 ## Running it
@@ -62,7 +62,7 @@ python ladder.py --league league-12team-simple --replications 8 \
 python ladder.py --rung 2 --rung 4 --rung 5 --rung 6 --replications 8 --tag adddrop     --weights points-league --weights banger-league      # section 9: add/drop against hold
 python ladder.py ... --horizon-weeks season --margin 0 --rate-source per_game --tag sens-x
 python compare.py --a league-12team-simple --b league   # what a format change does
-python verify.py         # the sixteen checks, from provenance to frozen rosters
+python verify.py         # the eighteen checks, from provenance to the draft lottery
 ```
 
 ## What the ladder measured
@@ -243,35 +243,66 @@ rung 7 − rung 5 against the defaults', paired by replication):
 Defaults unchanged; reserve and lam go to section 11's search, on 2024-25. One reading is not yet
 explained: lam = 0 made *fewer* rentals than the default under banger scoring (76 against 98).
 
-## Re-measured after the freeze fix (2026-09-23) -- these supersede the tables above
+## Re-measured (2026-09-23) -- these supersede every table above
 
-Two changes landed together, so every rung 3-7 number above predates them:
+Three fixes landed before these numbers, so everything above predates at least one of them:
 
 - **A goalie on IR froze a team for the season.** The fieldability test was absolute, so with one
-  goalie for two G slots every swap failed it; and a forced IR activation could drop the returning
-  goalie, leaving the team short for good. Under banger scoring 9 of 28 rung-7 seats (14-team) and
-  7 of 24 (12-team) made under 40 moves in a season -- seat 7 of the first rotation made none from
-  week 2 to week 26 with a G slot empty every night. The test is now relative, the forced drop keeps
-  the roster fillable, and `Manager.repair_roster` restores a short roster first. No seat freezes now.
-- **The variant-A holdout was rebuilt** with the short-handed-point model (it had been zero-filled).
+  goalie for two G slots every swap failed it, and a forced IR activation could drop the returning
+  goalie. Under banger scoring 9 of 28 rung-7 seats made under 40 moves a season. The test is now
+  relative, the forced drop keeps the roster fillable, and `Manager.repair_roster` restores a short
+  roster first.
+- **"Eight rotations" were not eight drafts.** `draftroom.seat_order` rotated the draft order by
+  replication and `build_field` rotated which rung sits in which seat by replication; the two
+  cancelled (the rung at draft position k was rungs[(k + 2r) mod n]). A two-rung field replayed one
+  draft eight times -- a paired gap of +/- 0.0 -- and a four-rung field had two draft patterns. The
+  draft order is now a seeded lottery, reused for a block of n replications so every rung takes each
+  pick equally often (`verify.py` `draft lottery`). **Error bars are larger now, and honest.**
+- **The variant-A holdout was rebuilt** with the short-handed-point model.
 
-8 rotations, paired (`docs/ladder-league*.md`, `_adddrop`, `_orch2` are regenerated):
+8 replications = 8 different drafts, paired; bold is more than two standard errors from zero:
 
 | comparison | 14-team points | 14-team banger | 12-team points | 12-team banger |
 |---|---|---|---|---|
-| attention (2 − 1) | +24.1 ± 1.2 | +57.6 ± 4.7 | +25.8 ± 1.9 | +40.5 ± 1.7 |
-| naive streaming (3 − 2) | +21.8 ± 1.5 | +40.5 ± 4.9 | +18.5 ± 3.2 | +47.6 ± 0.6 |
-| the stack, rung 4 (4 − 3) | +4.2 ± 1.7 | +2.0 ± 2.1 | +4.5 ± 2.2 | −8.3 ± 0.8 |
-| add/drop vs hold (5 − 6) | **+34.7 ± 1.7** | **+44.5 ± 4.5** | **+29.0 ± 1.8** | **+47.3 ± 1.4** |
-| add/drop vs rung 4 (5 − 4) | +19.0 ± 2.9 | +11.4 ± 1.6 | +17.6 ± 2.5 | +13.9 ± 1.4 |
-| streaming on top (7 − 5) | **+13.5 ± 1.2** | **+29.0 ± 4.2** | **+10.1 ± 4.6** | **+28.1 ± 3.4** |
-| orchestrator vs hold (7 − 6) | +35.8 ± 1.6 | +76.5 ± 1.6 | +29.0 ± 2.5 | +59.3 ± 1.4 |
+| attention (2 − 1) | **+25.4 ± 4.6** | **+50.4 ± 5.1** | **+24.9 ± 1.8** | **+48.8 ± 3.5** |
+| naive streaming (3 − 2) | **+19.9 ± 4.3** | **+45.9 ± 5.1** | **+20.6 ± 2.0** | **+43.7 ± 2.6** |
+| the stack, rung 4 (4 − 3) | +6.1 ± 3.5 | −1.0 ± 3.5 | +1.4 ± 2.4 | −4.4 ± 2.4 |
+| add/drop vs hold (5 − 6) | **+34.2 ± 3.3** | **+51.2 ± 5.4** | **+29.2 ± 1.7** | **+39.9 ± 1.9** |
+| add/drop vs rung 4 (5 − 4) | **+15.8 ± 2.4** | **+12.1 ± 2.6** | **+15.9 ± 1.8** | **+6.2 ± 1.2** |
+| streaming on top (7 − 5) | **+12.1 ± 1.7** | **+27.8 ± 2.2** | **+13.3 ± 1.8** | **+29.2 ± 3.0** |
+| orchestrator vs hold (7 − 6) | **+36.5 ± 4.1** | **+65.5 ± 5.6** | **+33.4 ± 1.3** | **+64.4 ± 2.3** |
+| VOR draft, rung 2 held (12 − 2) | **−6.7 ± 0.5** | **−7.7 ± 1.8** | **+4.1 ± 0.2** | **−6.3 ± 0.4** |
+| VOR draft, rung 7 held (17 − 7) | **+2.5 ± 0.9** | **+4.0 ± 1.9** | **+4.9 ± 1.3** | +0.2 ± 1.9 |
 
-The freeze hid most of streaming's value under banger scoring (7 − 5 was +12.9 there, and is +29.0)
-because the frozen seats were mostly rung 7. Under points scoring no seat had frozen, and streaming's
-edge is unchanged within noise (+14.9 -> +13.5) with a tighter error. The streaming ablations above
-were run before this fix and are sensitivity readings only; their ordering should be re-checked in
-section 11.
+What still holds: attention, streaming, the add/drop rule and the orchestrator's rentals all clear
+the noise in every combination. What no longer does: **rung 4 against rung 3 is inside the noise in
+all four** -- the earlier "clears only just, in the target format" rested on two draft patterns.
+
+## Section 9 step 2: the draft by value over replacement
+
+`Decisions/draft.py` builds the board from draft-day knowledge only (`preseason_values`):
+opening-week rest-of-season rows from the holdout build for skaters, last season's starts times the
+league-average line for goalies, last season's total for anyone else. Replacement at each position
+is the best player left when the whole league drafts by that board (`replacement_levels`, which
+reuses the real pick rule); a player's value over replacement is measured against the lowest
+replacement level among his positions. `verify.py` (`vor board`) checks that inflating every
+rest-of-season row after opening week leaves the board unchanged.
+
+Twin rungs carry it: rung r + 10 is rung r drafting by VOR, so the gap is the board's worth with the
+in-season manager held fixed (last two rows above). Under points scoring it drafts Eriksson Ek and
+McAvoy, whom the old board left on the wire, and drops Owen Power to rank 525; 206 of 252 drafted
+players are the same under either board.
+
+**The board is worth what the manager does with the wire.** Value over replacement assumes a gap is
+filled from the pool at replacement level. Rung 2 never picks anyone up, so for it only raw value
+matters and the VOR board costs 6-8 points a week in three of four combinations. Rung 7 works the
+wire weekly, and with it the VOR board gains +2.5 to +4.9 in three of four (12-team banger is flat).
+The 14-team win rate does not move with it (−0.018 ± 0.019), so it is a points gain that has not yet
+become won weeks. **Ship it for rung 7; never pair it with a manager that holds.**
+
+The same work found one eligibility collision: Carolina's Sebastian Aho was listed C/D, sharing a
+name with the Islanders' defenceman, which put him third on the VOR board. Forward/defence mixes are
+now rejected like skater/goalie ones (`inputs._side`).
 
 ## Formats
 
