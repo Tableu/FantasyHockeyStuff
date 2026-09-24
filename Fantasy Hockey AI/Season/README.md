@@ -286,7 +286,9 @@ clear the noise in all four combinations, at sizes close to the day before. **Wh
 now clears rung 3 in the target format (+8.9) and loses to it clearly in 12-team banger (−6.6 at 16
 drafts); the one sign flip (12-team points 4 − 3) was noise, confirmed at 16 drafts. The VOR draft
 now helps the orchestrator in every combination and no longer measurably hurts a manager who never
-uses the wire in the 14-team points format (−1.3 ± 0.7), though it still does under banger.
+uses the wire in the 14-team points format (−1.3 ± 0.7), though it still does under banger. (These
+VOR rows are our model's board; the board now drafts from the external consensus -- see section 9
+step 2 below for its numbers.)
 
 **The playoffs separate the rungs more than points do.** Playoff rate, 14-team points: rungs 1-2
 4-32%, rung 4 57-75%, rung 5 86%, rung 7 79% (the field changes the number: each run seats a
@@ -368,25 +370,61 @@ principled default.
 
 ## Section 9 step 2: the draft by value over replacement
 
-`Decisions/draft.py` builds the board from draft-day knowledge only (`preseason_values`):
-opening-week rest-of-season rows from the holdout build for skaters, last season's starts times the
-league-average line for goalies, last season's total for anyone else. Replacement at each position
+**The board's values are the external sources' consensus** (`strategy.draft.vor_values:
+consensus`, since 2026-09-24). `ModelFeatures/build_external_projections.py` exports every preseason
+sheet in the database -- eleven sources for 2025-26, nine for 2026-27 -- and
+`inputs.load_external_projections` refuses any published on or after the opener.
+`draft.consensus_board` takes, per stat, the mean over the sources that project it (a stat a source
+omits is missing, not zero), scores it with the league's file, and needs three sources; a thinner
+player keeps last season's total, or his thin consensus if he has none. Replacement at each position
 is the best player left when the whole league drafts by that board (`replacement_levels`, which
 reuses the real pick rule); a player's value over replacement is measured against the lowest
-replacement level among his positions. `verify.py` (`vor board`) checks that inflating every
-rest-of-season row after opening week leaves the board unchanged.
+replacement level among his positions. `verify.py` (`consensus board`) checks the guard, the
+missing-stat mean, the fallbacks, and that the board is identical with every projection of ours
+removed.
 
-Twin rungs carry it: rung r + 10 is rung r drafting by VOR, so the gap is the board's worth with the
-in-season manager held fixed (last two rows above). Under points scoring it drafts Eriksson Ek and
-McAvoy, whom the old board left on the wire, and drops Owen Power to rank 525; 206 of 252 drafted
-players are the same under either board.
+**Why not our own model.** Its opening-week rest-of-season rows are built from the season's own
+games table -- the candidate universe, opening-night lineups, the lockout injury flag -- so before
+a real season they do not exist. It is kept as `own_model`, a backtest reference: skaters from
+their first row dated on or before their team's opener (a seven-day window let 35 of 682 rows in
+after a game or two), goalies at last season's starts times the league line (`vor board` checks
+it reads no later row).
 
-**The board is worth what the manager does with the wire.** Value over replacement assumes a gap is
-filled from the pool at replacement level. Rung 2 never picks anyone up, so for it only raw value
-matters and the VOR board costs 6-8 points a week in three of four combinations. Rung 7 works the
-wire weekly, and with it the VOR board gains +2.5 to +4.9 in three of four (12-team banger is flat).
-The 14-team win rate does not move with it (−0.018 ± 0.019), so it is a points gain that has not yet
-become won weeks. **Ship it for rung 7; never pair it with a manager that holds.**
+**Accuracy** (`board_accuracy.py`, `docs/board-accuracy-2025-26.md`): Spearman of each board's VOR
+against actual VOR, over every player either drafts.
+
+| VOR rank | 14-team points | 14-team banger | 12-team points | 12-team banger |
+|---|---|---|---|---|
+| consensus | **0.550** | **0.453** | **0.513** | **0.362** |
+| our model (reference) | 0.470 | 0.362 | 0.429 | 0.263 |
+| last season's totals | 0.440 | 0.323 | 0.427 | 0.254 |
+
+The sources overshoot -- they assume healthy full seasons, and the goalie and defence scoring rate
+most -- but a per-position scale fitted on the season's own actuals moves VOR rank by at most
++0.010: the order across positions barely changes, so no correction is applied.
+
+**The ladder**: twin rungs carry it, rung r + 10 being rung r drafting by VOR, so the gap is the
+board's worth over the last-season board with the in-season manager held fixed. 8 drafts, points a
+week:
+
+| manager | 14-team points | 14-team banger | 12-team points | 12-team banger |
+|---|---|---|---|---|
+| rung 7, consensus board | **+3.8 ± 1.4** | **+5.1 ± 2.2** | **+5.0 ± 1.2** | +2.8 ± 2.2 |
+| rung 7, our model's board | +2.3 ± 1.7 | **+3.3 ± 1.6** | **+7.5 ± 1.1** | +2.6 ± 1.8 |
+| rung 2, consensus board | **+7.1 ± 0.9** | **+4.8 ± 1.0** | **+3.4 ± 1.0** | −1.3 ± 1.0 |
+| rung 2, our model's board | **−1.6 ± 0.5** | **−7.0 ± 0.9** | **+4.9 ± 0.5** | **−10.2 ± 0.5** |
+
+The consensus board helps the orchestrator in every format, and it mostly removes the old finding
+that VOR hurts a manager who holds: that was our model's goalie and rookie values, not value over
+replacement. Only 12-team banger rung 2 still leans negative, within noise. Against our model's
+board the consensus is ahead or level except 12-team points (−2.5 ± 1.3 with rung 7), and our model
+is not available at a real draft anyway.
+
+**The live board**: `python draft_board.py --season 2026-27 --weights points-league` writes
+`reports/draft_board_2026-27_league_<scoring>.csv/.md` -- rank, player, team, positions, value, VOR,
+the position he is measured against, sources, what the value rests on, and Yahoo and ESPN ADP beside
+it for reading whether a target will last to the next pick. 2026-27 goalies have three sources
+(Dailyfaceoff, Dom, Lineup Experts), so a goalie needs all three or falls back.
 
 The same work found one eligibility collision: Carolina's Sebastian Aho was listed C/D, sharing a
 name with the Islanders' defenceman, which put him third on the VOR board. Forward/defence mixes are

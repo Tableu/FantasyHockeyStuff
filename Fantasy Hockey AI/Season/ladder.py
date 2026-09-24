@@ -83,6 +83,8 @@ def parse_args():
                         help="Playoffs: weight later rounds by P(reaching them), or count them flat")
     parser.add_argument("--z-source", choices=("closed_form", "sampled"), default=None,
                         help="Rung 4+: the matchup z from closed-form moments or sampled week totals")
+    parser.add_argument("--vor-values", choices=("own_model", "consensus"), default=None,
+                        help="What the VOR board values players on (strategy draft.vor_values)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Processes to run replications in (default: one per replication, at "
                              "most 6). 1 runs them in this process, one after another")
@@ -107,6 +109,8 @@ def load_strategy(args):
         strategy = replace(strategy, playoff_eliminated=args.playoff_eliminated)
     if args.playoff_weight:
         strategy = replace(strategy, playoff_week_weight=args.playoff_weight)
+    if args.vor_values:
+        strategy = replace(strategy, vor_values=args.vor_values)
     return strategy
 
 
@@ -157,17 +161,35 @@ def prior_season(prior_season_name, scoreset, strategy):
                                                      strategy.prior_rate_shrink_games))
 
 
+def team_openers(data) -> dict:
+    """Each team's first game of the season -- the schedule, knowable before the draft."""
+    games = data["projections"][["team_id", "game_date"]]
+    return pd.to_datetime(games["game_date"]).groupby(games["team_id"]).min().to_dict()
+
+
 def vor_board(data, prior_season_name, scoreset, config, eligibility, strategy):
-    """Section 9 step 2's draft board: value over replacement, from what is knowable on draft day
-    (opening-week rest-of-season rows from the holdout build, last season's goalie starts)."""
-    if data.get("ros") is None:
-        raise SystemExit("the VOR board needs rest-of-season projections -- run "
-                         "Projections/ros_train.py --horizon season --predictions-out")
+    """Section 9 step 2's draft board: value over replacement, from what is knowable on draft day.
+
+    The values follow strategy draft.vor_values: `consensus`, the external sources alone, read
+    through `inputs.load_external_projections` and so only if published before the opener; or
+    `own_model`, our opening-week rest-of-season rows, a backtest reference only.
+    """
     board = data["prior"][scoreset.name][0]
     board.index = board.index.astype(int)
-    values = draft_module.preseason_values(data["ros"], board,
-                                           inputs.load_goalie_starts(prior_season_name), scoreset,
-                                           opening_days=strategy.opening_days)
+    if strategy.vor_values == "consensus":
+        opener = data["projections"]["game_date"].min()
+        external = inputs.load_external_projections(data["season"], opener,
+                                                    strategy.undated_sources)
+        values = draft_module.values_for("consensus", scoreset, board, external=external,
+                                         min_sources=strategy.vor_min_sources)
+    else:
+        if data.get("ros") is None:
+            raise SystemExit("the own_model VOR board needs rest-of-season projections -- run "
+                             "Projections/ros_train.py --horizon season --predictions-out")
+        values = draft_module.values_for(
+            "own_model", scoreset, board, ros=data["ros"],
+            prior_goalie_lines=inputs.load_goalie_starts(prior_season_name),
+            opening_days=strategy.opening_days, team_openers=team_openers(data))
     return draft_module.vor_board(values[[p in eligibility for p in values.index]], config,
                                   eligibility)
 
@@ -296,7 +318,8 @@ def main():
     params, streams = strategy.adddrop, strategy.streaming
     log.info("strategy: %s", strategy.name)
     report = {"season": args.season, "league": config.name, "strategy": strategy.name,
-              "rungs": list(rungs), "replications": args.replications, "results": {}}
+              "rungs": list(rungs), "replications": args.replications, "results": {},
+              "vor_values": strategy.vor_values}
     if 5 in rungs:
         report["adddrop"] = params.describe()
         log.info("rung 5 add/drop: %s", params.describe())

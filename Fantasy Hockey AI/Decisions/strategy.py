@@ -36,6 +36,9 @@ class Strategy:
     opening_days: int                         # draft board: days of rest-of-season read as "now"
     playoff_eliminated: str                   # "hold" (stop transacting) or "continue"
     playoff_week_weight: str                  # "p_advance" (weight later rounds) or "flat"
+    vor_values: str                           # VOR board: "consensus" or "own_model" (reference)
+    vor_min_sources: int                      # ...sources a player needs, else last season
+    undated_sources: str                      # "include" or "exclude" a source with no publish date
     description: str = ""
 
 
@@ -68,9 +71,8 @@ def _exactly(block, cls, label, convert):
 def from_dict(payload: dict, name: str = "") -> Strategy:
     """Parse a strategy file's contents. Every key is required; unknown keys are refused."""
     sections = {"description", "adddrop", "streaming", "rung3_streamer", "rung4_full_system",
-                "priors", "playoffs"}
-    if set(payload) - sections or {"adddrop", "streaming", "rung3_streamer",
-                                   "rung4_full_system", "priors", "playoffs"} - set(payload):
+                "priors", "playoffs", "draft"}
+    if set(payload) - sections or sections - {"description"} - set(payload):
         raise ValueError(f"strategy {name}: sections must be {sorted(sections)}; "
                          f"got {sorted(payload)}")
     add = _exactly(payload["adddrop"], adddrop.AddDropParams, "adddrop",
@@ -97,6 +99,17 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
     if playoffs["future_week_weight"] not in ("p_advance", "flat"):
         raise ValueError(f"strategy {name}: playoffs.future_week_weight "
                          f"{playoffs['future_week_weight']!r}")
+    draft = payload["draft"]
+    if set(draft) != {"vor_values", "min_sources", "undated_sources"}:
+        raise ValueError(f"strategy {name} draft: needs exactly vor_values, min_sources, "
+                         f"undated_sources; got {sorted(draft)}")
+    if draft["vor_values"] not in ("own_model", "consensus"):
+        raise ValueError(f"strategy {name}: draft.vor_values {draft['vor_values']!r}")
+    if draft["undated_sources"] not in ("include", "exclude"):
+        raise ValueError(f"strategy {name}: draft.undated_sources {draft['undated_sources']!r}")
+    min_sources = draft["min_sources"]
+    if isinstance(min_sources, bool) or not isinstance(min_sources, int) or min_sources < 1:
+        raise ValueError(f"strategy {name}: draft.min_sources {draft['min_sources']!r}")
     if rung4["z_source"] not in ("closed_form", "sampled"):
         raise ValueError(f"strategy {name}: z_source {rung4['z_source']!r}; use closed_form or sampled")
     for source in (add.rate_source, rung4["drop_rate_source"]):
@@ -118,5 +131,8 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         opening_days=int(priors["opening_days"]),
         playoff_eliminated=playoffs["eliminated"],
         playoff_week_weight=playoffs["future_week_weight"],
+        vor_values=draft["vor_values"],
+        vor_min_sources=draft["min_sources"],
+        undated_sources=draft["undated_sources"],
         description=payload.get("description", ""),
     )

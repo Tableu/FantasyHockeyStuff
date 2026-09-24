@@ -12,6 +12,13 @@ alternative is unusable for a backtest: real ADP is in the database, but for 202
 ADP is close to useless as a *value* signal in this format anyway, because hits and blocks lift
 defencemen and bottom-six grinders well above their standard-league value.
 
+**The VOR board (section 9 step 2) has its own values** (`values_for`, by strategy
+draft.vor_values): the external sources' consensus (`consensus_board`, over the preseason sheets
+in the database) -- the only values a real draft has, since our own model's opening-week rows
+(`preseason_values`, kept as a backtest reference) need the season's own games. The sheets were
+published before the season, so they are clean for a 2025-26 replay; `Season/inputs.
+load_external_projections` refuses any that were not.
+
 **Positional need is enforced, not hoped for.** Best-available alone will happily leave a team with
 one goalie and no legal lineup on a night his backup sits, and that is a harness bug dressed up as a
 strategy result. Once a team's remaining picks equal the slots it still has to cover, it drafts for
@@ -20,6 +27,7 @@ need -- which is what every real autodraft does.
 
 import logging
 
+import numpy as np
 import pandas as pd
 
 import slots as slots_module
@@ -147,20 +155,22 @@ POSITIONS = ("C", "LW", "RW", "D", "G")
 
 
 def preseason_values(ros: pd.DataFrame, prior_board: pd.Series, prior_goalie_lines: pd.DataFrame,
-                     scoreset, opening_days: int) -> pd.Series:
-    """What each player is worth over the coming season, as known on draft day. Season totals.
+                     scoreset, opening_days: int, team_openers=None) -> pd.Series:
+    """Our own model's view on draft day, season totals -- the `own_model` board, a backtest
+    reference only: it cannot be built before a real season starts (see `values_for`).
 
-    **Skaters:** projected points from each player's first rest-of-season row, if it is dated in
-    opening week -- the same rows the engine seeds its opening-week rates from. They come from the
-    holdout build (the caller loads them through `inputs.load_ros`, which refuses anything trained
-    on the season), and a row dated d is built from games before d, so an opening-week row is last
-    season plus the preseason. Its window runs to the end of the season (~80 team games).
+    **Skaters:** projected points from each player's first rest-of-season row from the holdout
+    build (the caller loads them through `inputs.load_ros`, which refuses anything trained on the
+    season). A row dated d is built from games before d, so only a row dated on or before his
+    team's first game (`team_openers`) is draft-day knowledge; a skater whose first row comes later
+    -- scratched on opening night, a call-up -- has seen part of the season and keeps last season's
+    total instead. Without `team_openers`, the first `opening_days` of the season stand in.
 
-    **Goalies:** last season's starts x last season's league-average points per start. The
-    standing goalie treatment -- P(start) x league average, no goalie *quality* modelled, because
-    per-start quality did not project (R2 -0.8%).
+    **Goalies:** last season's starts x the league-average points per start. The standing goalie
+    treatment -- P(start) x league average, no goalie *quality* modelled, because per-start quality
+    did not project (R2 -0.8%).
 
-    **Everyone else** keeps last season's total, which is the board every rung used before.
+    **Everyone else** keeps last season's total.
     """
     values = prior_board.astype(float).copy()
     values.index = values.index.astype(int)
@@ -170,12 +180,7 @@ def preseason_values(ros: pd.DataFrame, prior_board: pd.Series, prior_goalie_lin
     goalies = started.groupby("player_id").size().astype(float) * line
     goalies.index = goalies.index.astype(int)
 
-    table = ros.copy()
-    table["game_date"] = pd.to_datetime(table["game_date"])
-    opening = table[table["game_date"] < table["game_date"].min() + pd.Timedelta(days=opening_days)]
-    first = opening.sort_values("game_date").groupby("player_id").head(1)
-    skaters = pd.Series(scoreset.score_columns(first, prefix="proj_"),
-                        index=first["player_id"].astype(int).to_numpy())
+    skaters = own_model_skaters(ros, scoreset, opening_days, team_openers)
 
     values = pd.concat([values.drop(goalies.index.union(skaters.index), errors="ignore"),
                         goalies, skaters])
@@ -184,6 +189,135 @@ def preseason_values(ros: pd.DataFrame, prior_board: pd.Series, prior_goalie_lin
              "season's total", len(skaters), len(goalies), line,
              len(values) - len(skaters) - len(goalies))
     return values.sort_values(ascending=False)
+
+
+def own_model_skaters(ros: pd.DataFrame, scoreset, opening_days: int,
+                      team_openers=None) -> pd.Series:
+    """Season points from each skater's first rest-of-season row, if it predates the season.
+
+    `team_openers` maps a team to its first game; a row qualifies only if it is dated on or before
+    it. 35 of 682 skaters' first 2025-26 rows came one or two team games in, before this.
+    """
+    table = ros.copy()
+    table["game_date"] = pd.to_datetime(table["game_date"])
+    opening = table[table["game_date"] < table["game_date"].min() + pd.Timedelta(days=opening_days)]
+    first = opening.sort_values("game_date").groupby("player_id").head(1)
+    if team_openers is not None:
+        opener = first["team_id"].map(team_openers)
+        first = first[opener.notna() & (first["game_date"] <= opener)]
+    return pd.Series(scoreset.score_columns(first, prefix="proj_"),
+                     index=first["player_id"].astype(int).to_numpy())
+
+
+def consensus_lines(external: pd.DataFrame) -> pd.DataFrame:
+    """One season stat line per player: per stat, the mean over the sources that project it.
+
+    Equal weights. A stat a source leaves NULL is missing, not zero -- Laidlaw projects no PIM and
+    Lineup Experts no PPP, and averaging their blanks in as zeros would mark every player they
+    cover down. A goalie source that gives GAA and SV% but not goals against or saves (Scott
+    Cullen) still contributes them, derived: GA = GAA x GP, saves = GA x SV% / (1 - SV%).
+    `sources` is how many sources project the player at all.
+    """
+    table = external.copy()
+    goalie = table["is_goalie"].astype(bool)
+    derived_ga = table["gaa"] * table["games"]
+    table.loc[goalie, "goals_against"] = table.loc[goalie, "goals_against"].fillna(derived_ga[goalie])
+    sv = table["save_pct"].where(table["save_pct"] < 1)
+    derived_saves = table["goals_against"] * sv / (1 - sv)
+    table.loc[goalie, "saves"] = table.loc[goalie, "saves"].fillna(derived_saves[goalie])
+
+    stats = [c for c in table.columns
+             if c not in ("source", "published_on", "player_id", "team_id", "is_goalie")]
+    keys = ["player_id", "is_goalie"]
+    lines = table.groupby(keys)[stats].mean()   # the mean skips NaN: missing, not zero
+    lines["sources"] = table.groupby(keys)["source"].nunique()
+    return lines.reset_index()
+
+
+def consensus_values(external: pd.DataFrame, scoreset) -> pd.DataFrame:
+    """Season fantasy points from the consensus line, under this league's scoring.
+
+    Returns player_id, is_goalie, sources, value -- season totals, the units the board uses, so
+    replacement levels and VOR are computed exactly as before.
+    """
+    lines = consensus_lines(external)
+    goalie = lines["is_goalie"].astype(bool).to_numpy()
+    value = pd.Series(0.0, index=lines.index)
+    value[~goalie] = scoreset.score_columns(lines[~goalie], side="skaters")
+    value[goalie] = scoreset.score_columns(lines[goalie], side="goalies")
+    out = lines[["player_id", "is_goalie", "sources"]].assign(value=value)
+    out["player_id"] = out["player_id"].astype(int)
+    return out
+
+
+def consensus_board(external: pd.DataFrame, prior_board: pd.Series, scoreset,
+                    min_sources: int = 3, scale=None, sides=None) -> pd.Series:
+    """The draft board from the external sources alone -- no model of ours anywhere in it.
+
+    A player covered by `min_sources` or more sources gets the consensus line's points. A thinly
+    covered one falls back to last season's total if he has one, so one optimistic sheet cannot
+    carry a player up the board, and otherwise keeps his thin consensus (a rookie one or two
+    sources project). A player no source covers keeps last season's total.
+
+    `scale` ({"F": x, "D": x, "G": x}, with `sides` mapping a player to F/D/G) multiplies each
+    position's consensus values. It leaves the order within a position alone and moves only the
+    order across positions, which is what VOR compares on one scale.
+    """
+    consensus = consensus_values(external, scoreset)
+    value = pd.Series(consensus["value"].to_numpy(), index=consensus["player_id"].to_numpy())
+    if scale is not None:
+        side = pd.Series(sides).reindex(value.index)
+        side[side.isna()] = np.where(consensus["is_goalie"].to_numpy()[side.isna().to_numpy()],
+                                     "G", "F")
+        value = value * side.map(scale).fillna(1.0).to_numpy()
+    sources = pd.Series(consensus["sources"].to_numpy(), index=value.index)
+    last = prior_board.astype(float).copy()
+    last.index = last.index.astype(int)
+    thin = sources < min_sources
+    fallback = [p for p in value.index[thin.to_numpy()] if p in last.index]
+    use = value.drop(fallback)
+    board = pd.concat([last.drop(use.index, errors="ignore"), use])
+    log.info("consensus board: %d players from %d+ sources, %d thin with last season's total, "
+             "%d thin on their thin consensus, %d on last season alone%s",
+             int((~thin).sum()), min_sources, len(fallback), int(thin.sum()) - len(fallback),
+             len(board) - len(use), f"; scaled {scale}" if scale else "")
+    return board.sort_values(ascending=False)
+
+
+def fit_position_scale(values: pd.Series, actual: pd.Series, sides, pool: dict) -> dict:
+    """Per position, actual points over board points across each position's top `pool[side]`
+    by the board: the factor that makes a position's board total match what it produced.
+    Fitted on a season's actuals, so honest only for a later season's draft."""
+    side = pd.Series(sides).reindex(values.index)
+    out = {}
+    for s, n in pool.items():
+        top = values[(side == s).to_numpy()].sort_values(ascending=False).head(n)
+        out[s] = float(actual.reindex(top.index).fillna(0.0).sum() / top.sum())
+    return out
+
+
+VOR_VALUE_KINDS = ("own_model", "consensus")
+
+
+def values_for(kind: str, scoreset, prior_board, *, external=None, min_sources: int = 3,
+               scale=None, sides=None, ros=None, prior_goalie_lines=None, opening_days=None,
+               team_openers=None) -> pd.Series:
+    """The VOR board's season values under `kind` (strategy: draft.vor_values).
+
+    `consensus` is the external sources alone (`consensus_board`), and is what a real draft can
+    use. `own_model` is our rest-of-season model's opening-week rows (`preseason_values`), kept as
+    a backtest reference: those rows are built from the season's own games table -- its candidate
+    universe, opening-night lineups, injury flags at the lockout -- so for a season that has not
+    started they do not exist.
+    """
+    if kind == "own_model":
+        return preseason_values(ros, prior_board, prior_goalie_lines, scoreset, opening_days,
+                                team_openers)
+    if kind == "consensus":
+        if external is None:
+            raise ValueError("vor_values 'consensus' needs the external projections")
+        return consensus_board(external, prior_board, scoreset, min_sources, scale, sides)
+    raise ValueError(f"vor_values {kind!r}; use one of {VOR_VALUE_KINDS}")
 
 
 def simulate_draft(board: pd.Series, config, eligibility) -> list:

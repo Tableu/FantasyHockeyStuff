@@ -168,6 +168,36 @@ def load_ros(season: str):
     return out
 
 
+def load_external_projections(season: str, opener, undated: str) -> pd.DataFrame:
+    """The external sources' preseason projections for `season`, one row per (source, player).
+
+    Refused unless every dated source was published before `opener`, the season's first game: a
+    projection sheet refreshed in November has seen October, and a draft board built from it knows
+    who got hot. `undated` ("include" or "exclude", strategy: draft.undated_sources) decides the
+    sources with no publish date -- Dom's 2025-26 sheet -- and is logged either way, never silent.
+    """
+    path = paths.external_projections(season)
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not found -- run `python build_external_projections.py "
+                                f"--season {season}` in ModelFeatures/.")
+    table = pd.read_parquet(path)
+    published = pd.to_datetime(table["published_on"])
+    opener = pd.Timestamp(opener).normalize()
+    late = sorted(table.loc[published >= opener, "source"].unique())
+    if late:
+        raise ProvenanceError(f"{path}: {late} published on or after {season}'s first game "
+                              f"({opener.date()}) -- a board from them knows the season.")
+    undated_sources = sorted(table.loc[published.isna(), "source"].unique())
+    if undated_sources and undated == "exclude":
+        table = table[published.notna()]
+    elif undated not in ("include", "exclude"):
+        raise ValueError(f"undated sources: {undated!r}; use include or exclude")
+    log.info("external projections: %d sources, %d rows, published by %s; undated %s %s",
+             table["source"].nunique(), len(table), published.max().date(),
+             "included:" if undated == "include" else "excluded:", undated_sources or "none")
+    return table.reset_index(drop=True)
+
+
 def load_actuals(season: str) -> pd.DataFrame:
     """The realized skater line per player-game -- what a lineup actually scored."""
     table = pd.read_parquet(paths.base_table(season),

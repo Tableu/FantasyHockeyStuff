@@ -283,6 +283,31 @@ def age(table: pd.DataFrame) -> bool:
                    f"{implausible} implausible, {backwards} going backwards")
 
 
+def external_projections(cursor, table: pd.DataFrame, season: str) -> bool:
+    """The external-projection export (build_external_projections.py) against the database: the
+    same rows per source and side, one row per (source, player), and no source dated after
+    another season's start. Run by that exporter, not by the feature-table build."""
+    counts = {}
+    for side, name in ((False, "SkaterProjections"), (True, "GoalieProjections")):
+        cursor.execute(f"""
+            SELECT s.SourceName, COUNT(*) FROM Projections.{name} p
+            JOIN Projections.Sources s ON s.SourceID = p.SourceID
+            JOIN Reference.Seasons r ON r.SeasonID = s.SeasonID
+            WHERE r.DisplayName = ? GROUP BY s.SourceName""", season)
+        counts.update({(src, side): n for src, n in cursor.fetchall()})
+    exported = table.groupby(["source", "is_goalie"]).size().to_dict()
+    mismatched = sorted(k for k in set(counts) | set(exported) if counts.get(k) != exported.get(k))
+    duplicates = int(table.duplicated(["source", "player_id", "is_goalie"]).sum())
+    first_year = int(season[:4])
+    dated = pd.to_datetime(table["published_on"]).dropna()
+    late = int((dated >= pd.Timestamp(f"{first_year}-10-01")).sum())
+    ok = not mismatched and duplicates == 0 and late == 0
+    return _report("external projections", ok,
+                   f"{len(exported)} (source, side) groups, {len(table):,} rows; mismatched "
+                   f"{mismatched or 'none'}; duplicates {duplicates}; rows dated from October "
+                   f"{first_year} on {late}")
+
+
 def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFrame, season_id: int) -> bool:
     from features import extract
     has_prior = extract.prior_season_ids(cursor, [season_id])[season_id] is not None

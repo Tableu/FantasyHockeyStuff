@@ -147,6 +147,9 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `goalie_start_share_prior` | 0.5 | the naive P(start) shrinks toward a tandem split... |
 | | `goalie_start_share_prior_games` | 2 | ...by this many games |
 | | `opening_days` | 7 | days of rest-of-season rows the VOR draft board treats as draft day |
+| `draft` | `vor_values` | `consensus` | what the VOR draft board values players on: `consensus`, the external sources' preseason projections alone (the only values a real draft has), or `own_model`, our opening-week rest-of-season rows (a backtest reference; they need the season's own games) |
+| | `min_sources` | 3 | sources a player needs for the consensus; below it he keeps last season's total, or his thin consensus if he has none |
+| | `undated_sources` | `include` | a source with no publish date (Dom's 2025-26 sheet; every 2026-27 file today) is used, or dropped with `exclude`; logged either way |
 
 ### Where the values come from
 
@@ -163,6 +166,10 @@ None is tuned: 2025-26 is the only clean holdout, so section 11 tunes on 2024-25
 - **`playoffs`**: `hold` and `p_advance` are the principled settings, adopted 2026-09-24; against
   `continue` / `flat` they move a few playoff rounds between rungs, within noise, and leave every
   regular season identical.
+- **`draft.vor_values = consensus`** since 2026-09-24 (`Season/docs/board-accuracy-2025-26.md`,
+  `Season/README.md`): it ranks value over replacement better than our model or last season in
+  every format and scoring, and drafting by it beats the last-season board with the orchestrator
+  in all four. Our model's rows cannot be built before a real season, so it is not a live option.
 - **`goalie_start_share_prior`**: deliberately not "who started last game", which has an AUC of
   0.520 over all candidates.
 

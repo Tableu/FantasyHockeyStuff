@@ -37,5 +37,10 @@
   "playoffs": {
     "eliminated": "hold",
     "future_week_weight": "p_advance"
+  },
+  "draft": {
+    "vor_values": "consensus",
+    "min_sources": 3,
+    "undated_sources": "include"
   }
 }

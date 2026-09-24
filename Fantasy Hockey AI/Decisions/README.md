@@ -31,8 +31,9 @@ here. The split exists so a live runner (section 10) can call the same code a ba
 managers.py     the ladder rungs behind one interface, LADDER, build_field (rungs 1-4, plus
                 section 9's rung 5 add/drop, rung 6 hold, and section 10's rung 7 orchestrator)
 slots.py        the nightly lineup as an exact maximum-weight assignment; matching_size
-draft.py        draft boards, the prior rates (per game played, and per team game as the
-                fallback for a player the projections have not reached), and choose_pick
+draft.py        draft boards (last season; the VOR board from the external consensus), the prior
+                rates (per game played, and per team game as the fallback for a player the
+                projections have not reached), and choose_pick
 estimators.py   NaiveHistory: rung 3's box-score projection
 valuation.py    a player's and a swap's forward value; a swap is priced on the roster by
                 re-solving the lineup on every night it touches; known() -- unknown is not zero

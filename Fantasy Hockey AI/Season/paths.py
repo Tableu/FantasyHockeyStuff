@@ -100,6 +100,24 @@ def fantasy_adp(platform: str, season: str) -> Path:
     return FEATURES_DIR / f"fantasy_adp_{platform.lower()}_{season}.parquet"
 
 
+def external_projections(season: str) -> Path:
+    """Every external source's preseason projections (ModelFeatures/build_external_projections.py)."""
+    return FEATURES_DIR / f"external_projections_{season}.parquet"
+
+
+def players() -> Path:
+    """Player names and NHL positions, for boards a person reads (ModelFeatures/build_players.py)."""
+    return FEATURES_DIR / "players.parquet"
+
+
+def teams() -> Path:
+    return FEATURES_DIR / "teams.parquet"
+
+
+def draft_board(season: str, league: str, scoring: str, suffix: str) -> Path:
+    return REPORTS_DIR / f"draft_board_{season}_{league}_{scoring}.{suffix}"
+
+
 def holdout_predictions(season: str, variant: str = "A") -> Path:
     """The projections the backtest runs on.
 

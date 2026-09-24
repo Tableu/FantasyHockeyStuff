@@ -21,6 +21,8 @@ season-level result rather than as an error:
                     its drop-cost floor, the spot rule or the weekly budget
     frozen rosters  a transacting team left short of its slots with a fix available (a goalie on IR)
     vor board       a draft board that read past draft day, or a VOR draft that leaves a roster short
+    consensus board an external source published after the opener, a missing stat counted as zero,
+                    or a thinly covered player carried by one sheet
     draft lottery   replications that repeat one draft, or give a rung more early picks
     claims          a waiver claim resolved early, awarded out of priority, or failing silently
     league rules    an unsupported league rule accepted, or a move cost charged wrongly
@@ -464,8 +466,11 @@ def check_frozen_rosters() -> str:
 
 
 def check_vor_board() -> str:
-    """The value-over-replacement draft board is built from draft-day knowledge only, against a
-    real replacement level, and drafting by it leaves every roster fieldable."""
+    """The own-model VOR board (the backtest reference) reads no rest-of-season row dated after
+    its team's first game, replacement levels are real, and drafting by it leaves every roster
+    fieldable."""
+    from dataclasses import replace
+
     import draftroom
     import ladder
 
@@ -479,23 +484,26 @@ def check_vor_board() -> str:
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     assert eligibility[240] == frozenset({"C"}), "a forward/defence name collision was kept"
-    strategy = _strategy()
+    strategy = replace(_strategy(), vor_values="own_model")
     data["prior"] = {scoreset.name: ladder.prior_season("2024-25", scoreset, strategy)}
     board = ladder.vor_board(data, "2024-25", scoreset, config, eligibility, strategy)
 
-    # Draft-day knowledge only: inflating every rest-of-season row after opening week must not
-    # move the board at all.
+    # Draft-day knowledge only: inflating every rest-of-season row dated after its team's first
+    # game must not move the board at all. (A seven-day window let 35 skaters' rows in after their
+    # team had played.)
+    openers = ladder.team_openers(data)
     later = data["ros"].copy()
-    cut = later["game_date"].min() + pd.Timedelta(days=7)
+    after = later["game_date"] > later["team_id"].map(openers)
     for column in [c for c in later.columns if c.startswith("proj_")]:
-        later.loc[later["game_date"] >= cut, column] *= 100.0
+        later.loc[after, column] *= 100.0
     poisoned = ladder.vor_board({**data, "ros": later}, "2024-25", scoreset, config, eligibility,
                                strategy)
     assert board.equals(poisoned), "the VOR board read rest-of-season rows from after draft day"
 
-    values = draft_module.preseason_values(data["ros"], data["prior"][scoreset.name][0],
-                                           inputs.load_goalie_starts("2024-25"), scoreset,
-                                           opening_days=strategy.opening_days)
+    values = draft_module.values_for("own_model", scoreset, data["prior"][scoreset.name][0],
+                                     ros=data["ros"],
+                                     prior_goalie_lines=inputs.load_goalie_starts("2024-25"),
+                                     opening_days=strategy.opening_days, team_openers=openers)
     levels = draft_module.replacement_levels(values[[p in eligibility for p in values.index]],
                                              config, eligibility)
     assert all(v > 0 for v in levels.values()), f"a position has no replacement level: {levels}"
@@ -504,8 +512,97 @@ def check_vor_board() -> str:
     draftroom.run(state, config, board, eligibility,
                   boards={seat: board for seat in range(config.teams)})
     draftroom.verify_rosters_fieldable(state, config, eligibility)
-    return (f"{len(board)} players valued from opening-week rows only; replacement "
+    return (f"{len(board)} players valued from rows dated by their team's opener; replacement "
             f"{ {k: round(v) for k, v in levels.items()} }; an all-VOR draft is fieldable")
+
+
+def check_consensus_board() -> str:
+    """The external-projection consensus board: sources published after the opener are refused, a
+    stat a source omits is missing rather than zero, a thin player falls back to last season's
+    total, and the board reads no model of ours -- it is identical with no projections at all."""
+    import tempfile
+    from dataclasses import replace
+
+    import ladder
+
+    from decisionlayer import draft as draft_module
+
+    strategy = _strategy()
+    data = inputs.load_season(SEASON)
+    opener = data["projections"]["game_date"].min()
+    external = inputs.load_external_projections(SEASON, opener, "include")
+
+    # The guard: one source re-dated to opening night is refused, and `exclude` drops the undated.
+    real_path = paths.external_projections
+    with tempfile.TemporaryDirectory() as tmp:
+        late = external.copy()
+        late.loc[late["source"] == late["source"].iloc[0], "published_on"] = opener
+        late_file = Path(tmp) / "late.parquet"
+        late.to_parquet(late_file, index=False)
+        paths.external_projections = lambda season: late_file
+        try:
+            try:
+                inputs.load_external_projections(SEASON, opener, "include")
+            except inputs.ProvenanceError:
+                pass
+            else:
+                raise AssertionError("a source published on opening night was accepted")
+        finally:
+            paths.external_projections = real_path
+    undated = set(external.loc[external["published_on"].isna(), "source"])
+    kept = set(inputs.load_external_projections(SEASON, opener, "exclude")["source"])
+    assert undated and not undated & kept, f"undated sources {undated} survived `exclude`"
+
+    # Missing is not zero: a player one source projects without PIM gets the mean of the rest.
+    lines = draft_module.consensus_lines(external).set_index(["player_id", "is_goalie"])
+    skaters = external[~external["is_goalie"]]
+    no_pim = skaters.groupby("player_id")["pim"].agg(lambda s: s.isna().any() and s.notna().any())
+    player = int(no_pim[no_pim].index[0])
+    rows = skaters[skaters["player_id"] == player]
+    by_hand = rows["pim"].dropna().mean()
+    assert abs(lines.loc[(player, False), "pim"] - by_hand) < 1e-9, "consensus PIM is not the mean"
+    assert abs(by_hand - rows["pim"].fillna(0).mean()) > 1e-6, "the check player cannot tell"
+
+    # A goalie source with GAA and SV% but no goals against still contributes them, derived.
+    goalies = external[external["is_goalie"]]
+    derivable = goalies[goalies["goals_against"].isna() & goalies["gaa"].notna()]
+    assert len(derivable), "no source needs goalie goals against derived; the check is empty"
+    g = int(derivable["player_id"].iloc[0])
+    grows = goalies[goalies["player_id"] == g]
+    expected = grows["goals_against"].fillna(grows["gaa"] * grows["games"]).mean()
+    assert abs(lines.loc[(g, True), "goals_against"] - expected) < 1e-9, "derived GA is wrong"
+
+    # Below min_sources a player falls back to last season's total, or keeps his thin consensus.
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    data["prior"] = {scoreset.name: ladder.prior_season("2024-25", scoreset, strategy)}
+    last = data["prior"][scoreset.name][0]
+    last.index = last.index.astype(int)
+    k = strategy.vor_min_sources
+    board = draft_module.values_for("consensus", scoreset, last, external=external, min_sources=k)
+    raw = draft_module.consensus_values(external, scoreset).set_index("player_id")
+    thin_last = [p for p in raw.index if raw.loc[p, "sources"] < k and p in last.index]
+    thin_new = [p for p in raw.index if raw.loc[p, "sources"] < k and p not in last.index]
+    full = raw.index[raw["sources"] >= k]
+    assert thin_last and thin_new, "no thin player of each kind to check"
+    assert (board[thin_last] == last[thin_last]).all(), "a thin player lost last season's total"
+    assert (board[thin_new] == raw.loc[thin_new, "value"]).all(), "a thin rookie lost his value"
+    assert (board[full] == raw.loc[full, "value"]).all(), "a covered player is not the consensus"
+
+    # No model of ours: the VOR board is identical with every projection table removed.
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    consensus = replace(strategy, vor_values="consensus")
+    vor = ladder.vor_board(data, "2024-25", scoreset, config, eligibility, consensus)
+    bare = {**data, "ros": None,
+            "projections": data["projections"].nsmallest(1, "game_date")[["game_date"]]}  # opener only
+    assert vor.equals(ladder.vor_board(bare, "2024-25", scoreset, config, eligibility, consensus)),         "the consensus board read a model of ours"
+    return (f"{external['source'].nunique()} sources, all before {opener.date()}; undated "
+            f"{sorted(undated)} dropped by exclude; missing stats skipped; {len(thin_last)} thin "
+            f"players on last season, {len(thin_new)} thin rookies on their sources; the board "
+            f"is identical with no projections")
 
 
 def check_draft_lottery(replications=8) -> str:
@@ -974,7 +1071,9 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
           ("frozen rosters", check_frozen_rosters),
-          ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("claims", check_claims), ("league rules", check_league_rules),
+          ("vor board", check_vor_board), ("consensus board", check_consensus_board),
+          ("draft lottery", check_draft_lottery), ("claims", check_claims),
+          ("league rules", check_league_rules),
           ("settings", check_settings), ("playoffs", check_playoffs),
           ("goalie draws", check_goalie_draws), ("week draws", check_week_draws),
           ("playoff objective", check_playoff_objective),
