@@ -89,8 +89,14 @@ class RosterNights:
         cost = 0.0
         for night in self.nights(player_id):
             players = [p for p in self.playing.get(night, []) if p != player_id]
-            cost += self.base.get(night, 0.0) - self._value(players, night)
+            cost += self._weight(night) * (self.base.get(night, 0.0) - self._value(players, night))
         return cost
+
+    def _weight(self, night) -> float:
+        """What this night's points are worth to the team: 1 except in the playoffs, where a bye
+        week and a round it may not reach count for less (`view.night_weight`)."""
+        weight = getattr(self.view, "night_weight", None)
+        return 1.0 if weight is None else weight(night)
 
     def nights(self, player_id) -> list:
         if player_id is None:              # no drop: an open roster spot
@@ -105,13 +111,17 @@ class RosterNights:
         later -- a waiver claim, awarded when the player clears -- so only nights from then on
         count, for both sides: the outgoing player keeps playing until the swap."""
         gain = 0.0
-        for night in set(self.nights(incoming)) | set(self.nights(outgoing)):
+        # Sorted, not a bare set: a Timestamp's hash is randomized per process, so a set's order --
+        # and with it the order this float sum is added up in -- changed from run to run. A swap
+        # sitting exactly at a threshold then went one way in one process and the other in the
+        # next, and a whole season diverged from it (2026-09-24).
+        for night in sorted(set(self.nights(incoming)) | set(self.nights(outgoing))):
             if from_day is not None and night < from_day:
                 continue
             players = [p for p in self.playing.get(night, []) if p != outgoing]
             if night in self.nights(incoming):
                 players.append(incoming)
-            gain += self._value(players, night) - self.base.get(night, 0.0)
+            gain += self._weight(night) * (self._value(players, night) - self.base.get(night, 0.0))
         return gain
 
     def swap_sd(self, incoming, outgoing) -> float:

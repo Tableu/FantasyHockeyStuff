@@ -833,6 +833,101 @@ def check_goalie_draws() -> str:
             f"the naive share keeps the closed form")
 
 
+def check_week_draws() -> str:
+    """The rest of the week is drawn from what today's lockout knows. Inflating every projection
+    row dated after today must not move the synthetic slates at all, and the slates hold one row
+    per player and both teams of every game."""
+    import time
+
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    data = inputs.load_season(SEASON)
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    calendar = schedule_module.from_candidates(
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+    season = engine_module.Season(config, calendar, data, eligibility, scoreset,
+                                  managers_module.build_field(config, scoreset, _strategy(),
+                                                              rungs=(4,)),
+                                  decision_sims=100)
+    # Carry two weeks of slates the way the day loop does, then look from a Monday.
+    week = 5
+    for d in calendar.days_in(week - 1) + calendar.days_in(week - 2):
+        season._carry_rates(d, season.goalies_by_day.get(d, pd.DataFrame()).iloc[:0])
+    day = calendar.days_in(week)[0]
+    before = season.future_frames(day, week)
+    assert before, "no future nights built"
+    for night, (frame, goalies) in before.items():
+        assert frame["player_id"].is_unique, "a player twice on one night"
+        assert (frame.groupby("game_id")["team_id"].nunique() == 2).all(), "a game with one side"
+        assert frame["game_date"].eq(night).all(), "a row not re-keyed to its night"
+
+    poisoned = {d: f.assign(**{c: f[c] * 100.0 for c in f.columns if c.startswith("lambda_")})
+                if d > pd.Timestamp(day) else f for d, f in season.proj_by_day.items()}
+    real = season.proj_by_day
+    season.proj_by_day = poisoned
+    after = season.future_frames(day, week)
+    season.proj_by_day = real
+    for night in before:
+        pd.testing.assert_frame_equal(before[night][0], after[night][0])
+
+    started = time.time()
+    draws = season.future_draws(day, week)
+    seconds = time.time() - started
+    return (f"{len(before)} future nights from {pd.Timestamp(day).date()}, "
+            f"{sum(len(f) for f, _ in before.values())} rows; unchanged when later rows are "
+            f"inflated 100x; drawn in {seconds:.1f}s at 100 sims")
+
+
+def check_playoff_objective() -> str:
+    """No forward window counts a night after the fantasy final; in the playoffs a bye week is
+    worth nothing and a later round no more than the chance of reaching it; an eliminated team
+    under `hold` makes no move."""
+    from dataclasses import replace
+
+    season, calendar = _small_season((2,), sims=0)
+    last = calendar.weeks[season.last_week - 1].end
+    late = calendar.days_in(season.last_week - 1)[0]
+    for team in season.calendar.schedule["team_id"].unique()[:8]:
+        days = calendar.team_days(int(team), late, 5)
+        assert all(d <= last for d in days), "a forward window ran past the fantasy final"
+
+    import view as view_module
+    playoff_week = season.regular_weeks + 1
+    day = calendar.days_in(playoff_week)[0]
+    kwargs = dict(day=day, week=playoff_week, config=season.config, calendar=calendar,
+                  projections=season.data["projections"].iloc[:0], goalie_projections=pd.DataFrame(),
+                  unavailable=set(), playing_tonight=set(), nhl_team={}, history=None, state=None,
+                  team_index=0, opponent_index=None,
+                  my_week_points=0.0, opponent_week_points=0.0, phase="playoffs",
+                  week_weight_mode="p_advance")
+    bye = view_module.SlateView(**kwargs, alive=True, on_bye=True)
+    playing = view_module.SlateView(**kwargs, alive=True, on_bye=False)
+    playing.p_advance = 0.6
+    out = view_module.SlateView(**kwargs, alive=False, on_bye=False)
+    next_week = calendar.days_in(playoff_week + 1)[0]
+    assert bye.night_weight(day) == 0.0 and bye.night_weight(next_week) == 1.0, "bye weights"
+    assert playing.night_weight(day) == 1.0 and playing.night_weight(next_week) == 0.6,         "a later round is not weighted by P(advance)"
+    assert out.night_weight(day) == 0.0, "an eliminated team's night still counted"
+
+    strategy = replace(_strategy(), playoff_eliminated="hold")
+    season, calendar = _small_season((5,), strategy=strategy, sims=0)
+    rate = {int(k): 1.0 for k in season.player_pool()}
+    season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
+    alive_by_week = {}
+    for t in season.state.transactions:
+        week = calendar.week_of(t["date"])
+        if week and week > season.regular_weeks:
+            alive_by_week.setdefault(week, set()).add(t["team"])
+    out_of_it = set(range(season.config.teams)) - set(season.seeds)
+    moved = {team for teams in alive_by_week.values() for team in teams} & out_of_it
+    assert not moved, f"teams out of the playoffs still transacted under hold: {sorted(moved)}"
+    return (f"windows stop at week {season.last_week}; bye 0 then 1, later round = P(advance), "
+            f"eliminated 0; {len(out_of_it)} non-qualifiers made no playoff move under hold")
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -881,7 +976,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("frozen rosters", check_frozen_rosters),
           ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("claims", check_claims), ("league rules", check_league_rules),
           ("settings", check_settings), ("playoffs", check_playoffs),
-          ("goalie draws", check_goalie_draws),
+          ("goalie draws", check_goalie_draws), ("week draws", check_week_draws),
+          ("playoff objective", check_playoff_objective),
           ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 

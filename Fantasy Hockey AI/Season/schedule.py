@@ -67,6 +67,10 @@ class Calendar:
                                 for week_period, week in zip(counts.index, self.weeks)}
         self._period_of_week = {w.number: p for p, w in zip(counts.index, self.weeks)}
         self._memo = {}
+        # The last matchup week that scores in the league being run (regular season plus playoffs).
+        # A forward window stops here: an NHL game after the fantasy final is worth nothing. The
+        # engine sets it from the league config; unset, windows run to the NHL calendar's end.
+        self.last_week = len(self.weeks)
 
     def __len__(self):
         return len(self.weeks)
@@ -122,16 +126,17 @@ class Calendar:
         The same window as `games_through`, returned as the nights themselves, because pricing a
         swap on the roster means solving the lineup on each of those nights.
         """
-        key = (team_id, pd.Timestamp(day), weeks_ahead)
+        key = (team_id, pd.Timestamp(day), weeks_ahead, self.last_week)
         if key not in self._memo:
             week = self.week_of(day)
-            if week is None:
+            cap = min(self.last_week, len(self.weeks))
+            if week is None or week > cap:
                 self._memo[key] = []
             else:
                 if weeks_ahead is None:
-                    end = self.weeks[-1].end
+                    end = self.weeks[cap - 1].end
                 else:
-                    end = self.weeks[min(week - 1 + weeks_ahead, len(self.weeks) - 1)].end
+                    end = self.weeks[min(week - 1 + weeks_ahead, cap - 1)].end
                 rows = self.schedule
                 dates = rows[(rows["team_id"] == team_id)
                              & (rows["game_date"] >= pd.Timestamp(day))

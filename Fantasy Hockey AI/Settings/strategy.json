@@ -25,12 +25,17 @@
     "horizon_weeks": 1,
     "drop_horizon_weeks": 3,
     "drop_rate_source": "per_game",
-    "z_clip": 3.0
+    "z_clip": 3.0,
+    "z_source": "closed_form"
   },
   "priors": {
     "prior_rate_shrink_games": 20,
     "goalie_start_share_prior": 0.5,
     "goalie_start_share_prior_games": 2,
     "opening_days": 7
+  },
+  "playoffs": {
+    "eliminated": "hold",
+    "future_week_weight": "p_advance"
   }
 }

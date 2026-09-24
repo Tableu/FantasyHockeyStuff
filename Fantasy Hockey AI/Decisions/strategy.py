@@ -29,10 +29,13 @@ class Strategy:
     drop_horizon_weeks: int | None            # rung 4: a forced activation drop's window...
     drop_rate_source: str                     # ...and the rate it is priced on
     z_clip: float                             # rung 4: the matchup z is clipped to +-this
+    z_source: str                             # rung 4: "closed_form" or "sampled" week totals
     prior_rate_shrink_games: float            # draft prior: games of league mean mixed in
     goalie_start_share_prior: float           # naive P(start): the share it shrinks toward...
     goalie_start_share_prior_games: float     # ...and how many games of it
     opening_days: int                         # draft board: days of rest-of-season read as "now"
+    playoff_eliminated: str                   # "hold" (stop transacting) or "continue"
+    playoff_week_weight: str                  # "p_advance" (weight later rounds) or "flat"
     description: str = ""
 
 
@@ -65,9 +68,9 @@ def _exactly(block, cls, label, convert):
 def from_dict(payload: dict, name: str = "") -> Strategy:
     """Parse a strategy file's contents. Every key is required; unknown keys are refused."""
     sections = {"description", "adddrop", "streaming", "rung3_streamer", "rung4_full_system",
-                "priors"}
+                "priors", "playoffs"}
     if set(payload) - sections or {"adddrop", "streaming", "rung3_streamer",
-                                   "rung4_full_system", "priors"} - set(payload):
+                                   "rung4_full_system", "priors", "playoffs"} - set(payload):
         raise ValueError(f"strategy {name}: sections must be {sorted(sections)}; "
                          f"got {sorted(payload)}")
     add = _exactly(payload["adddrop"], adddrop.AddDropParams, "adddrop",
@@ -79,12 +82,23 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
     for label, block, keys in (
             ("rung3_streamer", rung3, {"horizon_weeks"}),
             ("rung4_full_system", rung4, {"horizon_weeks", "drop_horizon_weeks",
-                                          "drop_rate_source", "z_clip"}),
+                                          "drop_rate_source", "z_clip", "z_source"}),
             ("priors", priors, {"prior_rate_shrink_games", "goalie_start_share_prior",
                                 "goalie_start_share_prior_games", "opening_days"})):
         if set(block) != keys:
             raise ValueError(f"strategy {name} {label}: needs exactly {sorted(keys)}; "
                              f"got {sorted(block)}")
+    playoffs = payload["playoffs"]
+    if set(playoffs) != {"eliminated", "future_week_weight"}:
+        raise ValueError(f"strategy {name} playoffs: needs exactly eliminated, future_week_weight; "
+                         f"got {sorted(playoffs)}")
+    if playoffs["eliminated"] not in ("hold", "continue"):
+        raise ValueError(f"strategy {name}: playoffs.eliminated {playoffs['eliminated']!r}")
+    if playoffs["future_week_weight"] not in ("p_advance", "flat"):
+        raise ValueError(f"strategy {name}: playoffs.future_week_weight "
+                         f"{playoffs['future_week_weight']!r}")
+    if rung4["z_source"] not in ("closed_form", "sampled"):
+        raise ValueError(f"strategy {name}: z_source {rung4['z_source']!r}; use closed_form or sampled")
     for source in (add.rate_source, rung4["drop_rate_source"]):
         if source not in ("ros", "per_game"):
             raise ValueError(f"strategy {name}: rate source {source!r}; use ros or per_game")
@@ -97,9 +111,12 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         drop_horizon_weeks=_horizon(rung4["drop_horizon_weeks"]),
         drop_rate_source=rung4["drop_rate_source"],
         z_clip=float(_number(rung4["z_clip"])),
+        z_source=rung4["z_source"],
         prior_rate_shrink_games=float(_number(priors["prior_rate_shrink_games"])),
         goalie_start_share_prior=float(_number(priors["goalie_start_share_prior"])),
         goalie_start_share_prior_games=float(_number(priors["goalie_start_share_prior_games"])),
         opening_days=int(priors["opening_days"]),
+        playoff_eliminated=playoffs["eliminated"],
+        playoff_week_weight=playoffs["future_week_weight"],
         description=payload.get("description", ""),
     )

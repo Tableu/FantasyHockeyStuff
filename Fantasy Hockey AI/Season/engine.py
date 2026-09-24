@@ -140,6 +140,8 @@ class Season:
         # The season's shape on this calendar: regular-season weeks, then the playoff weeks.
         self.regular_weeks = config.regular_season_weeks_in(calendar)
         self.last_week = self.regular_weeks + config.playoff_weeks
+        # Forward windows stop at the fantasy final, not the NHL calendar's end.
+        calendar.last_week = self.last_week
         self.playoff_results = []
         self.seeds = {}                     # team -> seed, for the teams that made the playoffs
         self.playoff_wins = defaultdict(int)
@@ -179,6 +181,13 @@ class Season:
         # error from roster quality -- a manager holding a weak roster can still be slotting it
         # perfectly, and a season total cannot tell the two apart.
         self.hindsight = defaultdict(float)
+        # Each NHL team's latest slate that is knowable at today's lockout -- its skater rows and its
+        # goalie rows from its most recent game day before today. The rest of the week is drawn
+        # from these, re-keyed to the games on the schedule, never from a future day's own rows,
+        # which are built from that day's lockout and are future information today.
+        self.last_slate = {}
+        self.last_goalie_slate = {}
+        self._future_cache = None
         self.results = []
 
     # ---------- indexing, once, because it is reused every night ----------
@@ -366,6 +375,83 @@ class Season:
         self._draw_cache = (day, out)
         return out
 
+    def _naive_start_share(self, player_id) -> float:
+        """The box-score start share, shrunk toward a tandem split -- knowable any day."""
+        prior_games = self.strategy.goalie_start_share_prior_games
+        games = self.goalie_games_to_date.get(player_id, 0.0)
+        starts = self.goalie_starts_to_date.get(player_id, 0.0)
+        return (starts + prior_games * self.strategy.goalie_start_share_prior) / (games + prior_games)
+
+    def future_frames(self, day, week) -> dict:
+        """{date: (skater frame, goalie frame)} for the rest of `week` after `day`, built only from
+        what today's lockout knows: each team's slate from today if it plays today, else its most
+        recent one, re-keyed to the scheduled game. A player appears once, under his latest club."""
+        if week is None:
+            return {}
+        today = self.proj_by_day.get(day)
+        today_goalies = self.goalies_by_day.get(day)
+        slates = dict(self.last_slate)
+        goalie_slates = dict(self.last_goalie_slate)
+        if today is not None:
+            slates.update({t: rows for t, rows in today.groupby("team_id")})
+        if today_goalies is not None:
+            goalie_slates.update({t: rows[["game_id", "team_id", "player_id"]]
+                                  for t, rows in today_goalies.groupby("team_id")})
+        schedule = self.calendar.schedule
+        out = {}
+        for night in self.calendar.days_in(week):
+            if night <= pd.Timestamp(day):
+                continue
+            games = schedule[schedule["game_date"] == night]
+            both = games.groupby("game_id")["team_id"].nunique()
+            games = games[games["game_id"].isin(both[both == 2].index)]
+            games = games[games["team_id"].isin(slates)]
+            known = games.groupby("game_id")["team_id"].nunique()
+            games = games[games["game_id"].isin(known[known == 2].index)]
+            if not len(games):
+                continue
+            frames, goalie_frames = [], []
+            for game_id, team_id in zip(games["game_id"], games["team_id"]):
+                rows = slates[team_id].assign(game_id=game_id, game_date=night, team_id=team_id)
+                frames.append(rows)
+                if team_id in goalie_slates:
+                    goalie_frames.append(goalie_slates[team_id].assign(game_id=game_id,
+                                                                       team_id=team_id))
+            frame = pd.concat(frames, ignore_index=True)
+            club = frame["player_id"].astype(int).map(self.latest_team)
+            frame = frame[club.isna() | (club == frame["team_id"])].drop_duplicates("player_id")
+            goalies = (pd.concat(goalie_frames, ignore_index=True) if goalie_frames
+                       else pd.DataFrame(columns=["game_id", "team_id", "player_id"]))
+            if len(goalies):
+                gclub = goalies["player_id"].astype(int).map(self.latest_team)
+                goalies = goalies[gclub.isna() | (gclub == goalies["team_id"])].drop_duplicates(
+                    "player_id")
+                goalies = goalies.assign(p_start=[self._naive_start_share(int(p))
+                                                  for p in goalies["player_id"]])
+            out[night] = (frame.reset_index(drop=True), goalies.reset_index(drop=True))
+        return out
+
+    def future_draws(self, day, week) -> dict:
+        """{date: {player_id: points per sim}} for the rest of the week, on the decision stream,
+        drawn once per day and shared by every manager, like tonight's."""
+        if not self.simulator:
+            return {}
+        if self._future_cache is not None and self._future_cache[0] == day:
+            return self._future_cache[1]
+        out = {}
+        for night, (frame, goalies) in self.future_frames(day, week).items():
+            draws = self.simulator.draw(frame, self.decision_sims)
+            points = self.scoreset.score_draws(draws)
+            night_points = {int(p): points[i] for i, p in enumerate(draws.keys["player_id"])}
+            if self.goalie_fit is not None and len(goalies):
+                g = simlayer.goalies_module.draw_goalies(draws, goalies, self.goalie_fit,
+                                                         self.simulator.rng)
+                gpoints = self.scoreset.score_draws(g, side="goalies")
+                night_points.update({int(p): gpoints[i] for i, p in enumerate(g.keys["player_id"])})
+            out[night] = night_points
+        self._future_cache = (day, out)
+        return out
+
     def _goalie_draws(self, day, skater_draws, goalie_projections) -> dict:
         """Tonight's goalie points on the skaters' sims: {player_id: array of sims}. Only games
         with both teams' skaters drawn -- a goalie line is built from the opponent's draw, and
@@ -410,6 +496,8 @@ class Season:
             opponent_week_points=self.weekly[week][opponent] if opponent is not None else 0.0,
             decision_points=self.decision_draws(day, goalie_projections),
             goalie_draw_column=self.GOALIE_DRAW_COLUMN if self.goalie_fit is not None else None,
+            future_draws=(lambda _d=day, _w=week: self.future_draws(_d, _w)),
+            **self._season_shape(team_index, week, opponent),
             rate_estimate=self.latest_rate,
             ros_estimate=self.latest_ros)
 
@@ -484,17 +572,28 @@ class Season:
                                    opponents.get(manager.team_index), history,
                                    goalie_projections)
                 manager.manage_ir(v)
-                manager.transactions(v)
+                if self._transacts(v):
+                    if v.weighted and v.alive and not v.on_bye and hasattr(manager, "p_win"):
+                        v.p_advance = manager.p_win(v)
+                    manager.transactions(v)
+                elif hasattr(manager, "manage_ir_step"):
+                    manager.manage_ir_step(v)          # the orchestrator runs IR inside its plan
                 # The league's rule, not a strategy: a healthy player may not sit on IR. An
                 # activation on a full roster forces a drop, and a manager has to make it today.
                 self.state.assert_ir_resolved(manager.team_index, self.injured)
             self.state.assert_legal()
 
+            # Every lineup is set before any is scored. Scoring each as it was set banked an
+            # earlier seat's points for tonight while a later seat was still choosing -- so the
+            # later seat read its opponent's REALIZED night before its own lock, and its matchup
+            # projection counted that night twice (paired forecasts of one matchup summed to 0.77).
+            lineups = []
             for manager in self.field:
                 v = self._view_for(manager.team_index, day, week,
                                    opponents.get(manager.team_index), history,
                                    goalie_projections)
-                lineup = manager.set_lineup(v)
+                lineups.append((manager, manager.set_lineup(v), v))
+            for manager, lineup, v in lineups:
                 self._resolve(manager.team_index, day, week, lineup, v)
 
             self._track_goalie_starts(day)
@@ -613,6 +712,13 @@ class Season:
         """Update the running rate estimate from tonight's slate, after the night has been set."""
         frame = self.proj_by_day.get(day)
         if frame is not None and len(frame):
+            for team_id, rows in frame.groupby("team_id"):
+                self.last_slate[team_id] = rows
+        goalie_frame = self.goalies_by_day.get(day)
+        if goalie_frame is not None and len(goalie_frame):
+            for team_id, rows in goalie_frame.groupby("team_id"):
+                self.last_goalie_slate[team_id] = rows[["game_id", "team_id", "player_id"]]
+        if frame is not None and len(frame):
             values = self.scoreset.score_columns(frame, prefix="lambda_")
             plays = frame["p_plays"].to_numpy("float64")
             for player_id, value in zip(frame["player_id"].astype(int), values * plays):
@@ -702,8 +808,40 @@ class Season:
                 "champion": manager.team_index == self.champion,
             })
         return {"teams": pd.DataFrame(rows), "matchups": pd.DataFrame(self.results),
+                "pwin": self._pwin_frame(),
                 "playoffs": pd.DataFrame(self.playoff_results),
                 "transactions": pd.DataFrame(self.state.transactions)}
+
+    def _season_shape(self, team_index, week, opponent) -> dict:
+        """Phase, alive and bye for this team this week -- what any platform shows."""
+        if week is None or week <= self.regular_weeks:
+            return {"phase": "regular", "alive": True, "on_bye": False,
+                    "week_weight_mode": self.strategy.playoff_week_weight}
+        alive = self._bracket is not None and team_index in self._bracket
+        return {"phase": "playoffs", "alive": alive, "on_bye": alive and opponent is None,
+                "week_weight_mode": self.strategy.playoff_week_weight}
+
+    def _transacts(self, view) -> bool:
+        """An eliminated or non-qualifying team stops trading under `playoffs.eliminated: hold`.
+        Its IR is still resolved -- a healthy player on IR breaks a league rule, not a strategy."""
+        return not (view.phase == "playoffs" and not view.alive
+                    and self.strategy.playoff_eliminated == "hold")
+
+    def _pwin_frame(self) -> pd.DataFrame:
+        """Each P(win) a manager computed, against how its week actually ended (1, 0, or 0.5)."""
+        outcome = {}
+        for r in self.results:
+            h, a = r["home_points"], r["away_points"]
+            outcome[(r["week"], r["home"])] = 1.0 if h > a else 0.0 if h < a else 0.5
+            outcome[(r["week"], r["away"])] = 1.0 if a > h else 0.0 if a < h else 0.5
+        rows = []
+        for manager in self.field:
+            for entry in getattr(manager, "pwin_log", []):
+                won = outcome.get((entry["week"], manager.team_index))
+                if won is not None:
+                    rows.append({"seat": manager.team_index, "rung": manager.rung, **entry,
+                                 "won": won})
+        return pd.DataFrame(rows)
 
     def _regular_season_date(self, day) -> bool:
         week = self.calendar.week_of(day)

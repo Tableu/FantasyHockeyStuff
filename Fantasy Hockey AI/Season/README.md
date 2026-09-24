@@ -284,6 +284,44 @@ What still holds: attention, streaming, the add/drop rule and the orchestrator's
 the noise in every combination. What no longer does: **rung 4 against rung 3 is inside the noise in
 all four** -- the earlier "clears only just, in the target format" rested on two draft patterns.
 
+## Two harness bugs, and the matchup z (2026-09-24)
+
+Both bugs were invisible in every ladder table and both are fixed; every number above that involves
+rungs 4 to 7 predates them, and the grid is being re-measured.
+
+- **A later seat read its opponent's night before its own lock.** The engine set and scored lineups
+  one manager at a time, so by the time a later seat chose, an earlier opponent's points for
+  tonight were already banked -- realized outcomes in a decision, and counted a second time by the
+  matchup projection. Found by the P(win) calibration log (`reports/*_pwin_*.parquet`): the two
+  managers' forecasts of the same matchup summed to **0.77**, not 1, and a forecast under 10% won 17%
+  of the time. Every lineup is now set before any is scored; the pair sums to 1.000, the Brier score
+  falls from 0.185 to 0.135, and the reliability table sits on the diagonal. The ladder moved little
+  (rung 7 -0.35 +/- 0.09 pts/wk: it had been drawing a small edge from reading early).
+- **The results depended on the process.** `valuation.swap_gain` summed a set of nights; a
+  Timestamp's hash is randomized per process, so the float sum was added in a different order each
+  run, and a swap exactly at its threshold flipped. It showed as "replication 1 differs" between
+  runs of the same code (including `docs/ladder-league_goalie-draws.md`, whose replication 1 does
+  not reproduce; its gaps are within 0.5 pts/wk of the clean rerun). The nights are sorted now; two
+  runs under different `PYTHONHASHSEED`s are identical seat for seat. **Test determinism with two
+  different hash seeds**, never two default runs.
+
+**The matchup z from sampled joint totals** (`strategy.rung4_full_system.z_source: sampled`,
+`--z-source sampled`): both rosters' remaining week drawn on the same sims -- tonight from tonight's
+draws, later nights from each NHL team's latest knowable slate (`engine.future_frames`, checked
+against 100x inflation of every later row) -- each night's lineup solved exactly, P(win) read off
+the draws. It fixes the closed form's shortcuts (a bench player's games counted; variances added,
+so no copula and no goalie-skater link; a normal shape). Measured on the 14-team points ladder:
+slightly better calibrated (Brier 0.1356 against 0.1383 on the same 12,150 manager-days), no rung
+moved beyond noise, twice the run time. `closed_form` stays the default.
+
+**The playoff objective.** Forward windows now stop at the fantasy final (`calendar.last_week`):
+rung 7's streaming-spot test had been counting NHL weeks 25-26, after the season ends, which moved
+the 14-team ladder by up to 1.2 pts/wk through the shared pool. In the playoffs a bye week's nights
+count 0, a later round's count P(reaching it), and a team out of the bracket stops trading
+(`strategy.playoffs`). Every regular season is identical with or without them, so the comparison
+is paired exactly; they move 2-3 of ~40 playoff games between rungs, within noise. Adopted as the
+principled default.
+
 ## Section 9 step 2: the draft by value over replacement
 
 `Decisions/draft.py` builds the board from draft-day knowledge only (`preseason_values`):

@@ -24,6 +24,7 @@ has to offer, so a live runner can hand the same managers a view built from real
 
 import logging
 import math
+import statistics
 
 import adddrop
 import orchestrator
@@ -47,6 +48,8 @@ class Manager:
     draft_board = "prior"
 
     def __init__(self, team_index, config, scoreset, strategy):
+        # Every P(win the week) this manager computed, for the calibration check (engine._pwin_frame).
+        self.pwin_log = []
         self.team_index = team_index
         self.config = config
         self.scoreset = scoreset
@@ -411,12 +414,41 @@ class FullSystem(Manager):
         theirs = self._week_projection(view, view.opponent_roster(), moments)
         d = (view.my_week_points + mine[0]) - (view.opponent_week_points + theirs[0])
         s = (mine[1] + theirs[1]) ** 0.5
-        if s <= 1e-9:
-            return 0.0
+        closed = 0.0 if s <= 1e-9 else d / s
+        entry = {"day": view.day, "week": view.week,
+                 "p_closed": statistics.NormalDist().cdf(closed) if s > 1e-9 else 0.5}
+        z = closed
+        if self.strategy.z_source == "sampled":
+            p = self._sampled_p_win(view)
+            if p is not None:
+                entry["p_sampled"] = p
+                z = statistics.NormalDist().inv_cdf(p)
+        if view.opponent_index is not None:
+            self.pwin_log.append(entry)
         # Clipped because the tails of the normal approximation are not to be trusted, and a z of
         # -8 would otherwise buy any amount of variance at any cost in mean.
         clip = self.strategy.z_clip
-        return float(max(-clip, min(clip, d / s)))
+        return float(max(-clip, min(clip, z)))
+
+    def p_win(self, view) -> float:
+        """P(win this week), from whichever z this manager reads -- the playoff weights use it as
+        the chance of reaching next week."""
+        view.p_start_column = self.p_start_column
+        moments = view.moments(self.scoreset, view.roster + view.opponent_roster())
+        return statistics.NormalDist().cdf(self._z(view, moments))
+
+    def _sampled_p_win(self, view):
+        """P(win the week) read off the Monte Carlo layer: both rosters' remaining week drawn on
+        the same sims, each night's lineup solved exactly, banked points added. None when the run
+        draws nothing. Kept away from 0 and 1 by half a draw, so its z stays finite."""
+        mine = view.week_totals(view.roster)
+        if mine is None:
+            return None
+        theirs = view.week_totals(view.opponent_roster())
+        diff = (view.my_week_points + mine) - (view.opponent_week_points + theirs)
+        n = len(diff)
+        p = float((diff > 0).mean() + 0.5 * (diff == 0).mean())
+        return min(max(p, 0.5 / n), 1.0 - 0.5 / n)
 
     def _week_projection(self, view, roster, moments):
         """(mean, variance) of what a roster still scores this week.

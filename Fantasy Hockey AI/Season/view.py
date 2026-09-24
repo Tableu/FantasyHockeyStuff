@@ -25,7 +25,10 @@ Knowing a player is out *tonight* is fair; knowing he is out for six weeks would
 
 import logging
 
+import numpy as np
 import pandas as pd
+
+from decisionlayer import slots as slots_module
 
 log = logging.getLogger("view")
 
@@ -58,7 +61,8 @@ class SlateView:
                  unavailable, playing_tonight, nhl_team, history, state, team_index,
                  opponent_index, my_week_points, opponent_week_points,
                  decision_points=None, rate_estimate=None, ros_estimate=None, injured=None,
-                 goalie_draw_column=None):
+                 goalie_draw_column=None, future_draws=None, phase="regular", alive=True,
+                 on_bye=False, week_weight_mode="flat"):
         self.day = pd.Timestamp(day)
         self.week = week
         self.config = config
@@ -86,6 +90,19 @@ class SlateView:
         # Which P(start) column the goalie draws in `decision_points` were made with, or None if
         # no goalie was drawn tonight.
         self.goalie_draw_column = goalie_draw_column
+        # A callable returning {date: {player_id: points per sim}} for the rest of the week, drawn
+        # from each team's latest knowable slate (engine.future_draws). Lazy: only a manager that
+        # reads sampled week totals pays for it.
+        self._future_draws = future_draws
+        # The season's shape, public on any platform: regular season or playoffs, whether this
+        # team is still in the bracket, and whether this week is its bye. `night_weight` turns
+        # these into what a night's points are worth to it (1 in the regular season).
+        self.phase = phase
+        self.alive = alive
+        self.on_bye = on_bye
+        self.week_weight_mode = week_weight_mode
+        # P(win this week), set by a manager that can compute it; an even match otherwise.
+        self.p_advance = 0.5
         # {player_id: most recently projected fantasy points per game}. Carried forward by the
         # engine so a transaction can value a player whose team is dark tonight. Never a
         # future projection -- see engine.latest_rate.
@@ -162,6 +179,33 @@ class SlateView:
 
     # ---------- the schedule, which costs nothing to know ----------
 
+    @property
+    def weighted(self) -> bool:
+        """Whether nights carry weights other than 1 today."""
+        return self.phase == "playoffs" and self.week_weight_mode == "p_advance"
+
+    def night_weight(self, night) -> float:
+        """What a night's points are worth to this team, from today.
+
+        1 in the regular season and under the flat mode. In the playoffs: this week counts in full,
+        or not at all on a bye; a later week counts only if the team gets there -- P(win this week)
+        for next week (1 after a bye), halved for each round after that, an unknown opponent at
+        even odds. An eliminated team's nights are worth nothing."""
+        if not self.weighted:
+            return 1.0
+        if not self.alive:
+            return 0.0
+        ahead = (self.calendar.week_of(night) or self.week) - self.week
+        if ahead <= 0:
+            return 0.0 if self.on_bye else 1.0
+        reach_next = 1.0 if self.on_bye else self.p_advance
+        return reach_next * 0.5 ** (ahead - 1)
+
+    def _weighted_count(self, nights) -> float:
+        if not self.weighted:
+            return len(nights)
+        return float(sum(self.night_weight(n) for n in nights))
+
     def games_remaining(self, player_id) -> int:
         """That player's team's games from today to the end of the matchup week.
 
@@ -171,14 +215,18 @@ class SlateView:
         team_id = self.nhl_team.get(player_id)
         if team_id is None:
             return 0
-        return self.calendar.games_remaining(team_id, self.day, self.week)
+        if not self.weighted:
+            return self.calendar.games_remaining(team_id, self.day, self.week)
+        return self._weighted_count(self.calendar.team_days(team_id, self.day, 0))
 
     def games_through(self, player_id, weeks_ahead=1) -> int:
         """His team's games from today through the end of the week `weeks_ahead` later."""
         team_id = self.nhl_team.get(player_id)
         if team_id is None:
             return 0
-        return self.calendar.games_through(team_id, self.day, weeks_ahead)
+        if not self.weighted:
+            return self.calendar.games_through(team_id, self.day, weeks_ahead)
+        return self._weighted_count(self.calendar.team_days(team_id, self.day, weeks_ahead))
 
     def nights_through(self, player_id, weeks_ahead=1) -> list:
         """The dates his team plays from today through the end of the week `weeks_ahead` later."""
@@ -226,6 +274,37 @@ class SlateView:
                 var = max(p * (sigma ** 2 + mu ** 2) - mean ** 2, 0.0)
                 out[player_id] = (mean, var ** 0.5)
         return out
+
+    def week_totals(self, roster, tonight=None):
+        """Per-sim points a roster still scores this week, or None if the run draws nothing.
+
+        Tonight from tonight's draws, the rest of the week from `future_draws`, all on the same
+        sims -- so two rosters' totals keep every link between them (a goalie and the skaters he
+        faces). Each night only a legal lineup scores: the best by expected points, solved exactly,
+        so a bench body adds nothing. `tonight` overrides tonight's lineup with a given one.
+        """
+        if not self.decision_points or self._future_draws is None:
+            return None
+        sims = len(next(iter(self.decision_points.values())))
+        slot_order, accepts = self.config.slot_order(), self.config.accepts
+        eligibility = self._state.eligibility
+        roster = list(roster)
+
+        def night_total(points, candidates, lineup=None):
+            drawn = {p: points[p] for p in candidates if p in points}
+            if not drawn:
+                return np.zeros(sims)
+            if lineup is None:
+                means = {p: float(v.mean()) for p, v in drawn.items()}
+                lineup = slots_module.assign(slot_order, means, eligibility, accepts)
+            started = [p for p in lineup.assigned.values() if p in drawn]
+            return np.sum([drawn[p] for p in started], axis=0) if started else np.zeros(sims)
+
+        total = night_total(self.decision_points,
+                            [p for p in roster if self.available(p)], tonight)
+        for points in self._future_draws().values():
+            total = total + night_total(points, roster)
+        return total
 
     # Which P(start) column this manager is allowed to read. Rung 3 gets the naive share; rung 4
     # gets the fitted model. Set by the manager, so the two cannot silently read the same thing.

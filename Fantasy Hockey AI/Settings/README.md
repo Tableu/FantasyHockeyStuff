@@ -140,6 +140,9 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `drop_horizon_weeks` | 3 | window a forced IR-activation drop is priced over (rungs 2-4) |
 | | `drop_rate_source` | `per_game` | the rate that drop is priced on |
 | | `z_clip` | 3.0 | the matchup z is clipped to +-this; the normal tails are not trusted |
+| | `z_source` | `closed_form` | how rung 4+ reads the week: `closed_form` (per-player moments) or `sampled` (both rosters' remaining week drawn on shared sims, P(win) read off the draws) |
+| `playoffs` | `eliminated` | `hold` | a team out of the playoffs stops transacting (`continue` keeps it trading); its IR is still resolved |
+| | `future_week_weight` | `p_advance` | in the playoffs a later round's nights count by the chance of reaching it (a bye week counts 0); `flat` counts every night in full |
 | `priors` | `prior_rate_shrink_games` | 20 | games of league mean mixed into last season's per-game rate |
 | | `goalie_start_share_prior` | 0.5 | the naive P(start) shrinks toward a tandem split... |
 | | `goalie_start_share_prior_games` | 2 | ...by this many games |
@@ -155,6 +158,11 @@ None is tuned: 2025-26 is the only clean holdout, so section 11 tunes on 2024-25
 - **`claim_premium = 0`** since 2026-09-23, when claims were made to resolve: a claim clears the
   same bar as an add and priority is treated as free. Unmeasured; a sweep over {0, 5} is planned.
 - **The streaming values** are the section 10 v1 settings; the ablations are in `Season/README.md`.
+- **`z_source = closed_form`**: the sampled week is slightly better calibrated (Brier 0.1356 against
+  0.1383 over 12,150 manager-days) but moved no ladder number and doubles a run's time.
+- **`playoffs`**: `hold` and `p_advance` are the principled settings, adopted 2026-09-24; against
+  `continue` / `flat` they move a few playoff rounds between rungs, within noise, and leave every
+  regular season identical.
 - **`goalie_start_share_prior`**: deliberately not "who started last game", which has an AUC of
   0.520 over all candidates.
 

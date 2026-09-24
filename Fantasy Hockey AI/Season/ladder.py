@@ -77,6 +77,12 @@ def parse_args():
                         help="Rung 7: stop rentals claiming players off waivers (on by default)")
     parser.add_argument("--stream-flat", action="store_true",
                         help="Rung 7: hold the rental bar at lam/2 all week instead of letting it fall")
+    parser.add_argument("--playoff-eliminated", choices=("hold", "continue"), default=None,
+                        help="Playoffs: whether an eliminated team keeps transacting")
+    parser.add_argument("--playoff-weight", choices=("p_advance", "flat"), default=None,
+                        help="Playoffs: weight later rounds by P(reaching them), or count them flat")
+    parser.add_argument("--z-source", choices=("closed_form", "sampled"), default=None,
+                        help="Rung 4+: the matchup z from closed-form moments or sampled week totals")
     parser.add_argument("--tag", default=None,
                         help="Suffix for the report and doc names, so an experiment does not "
                              "overwrite the committed ladder")
@@ -90,8 +96,15 @@ def load_strategy(args):
     from decisionlayer import load_strategy as load
 
     strategy = load(args.strategy)
-    return replace(strategy, adddrop=adddrop_params(args, strategy.adddrop),
-                   streaming=stream_params(args, strategy.streaming))
+    strategy = replace(strategy, adddrop=adddrop_params(args, strategy.adddrop),
+                       streaming=stream_params(args, strategy.streaming))
+    if args.z_source:
+        strategy = replace(strategy, z_source=args.z_source)
+    if args.playoff_eliminated:
+        strategy = replace(strategy, playoff_eliminated=args.playoff_eliminated)
+    if args.playoff_weight:
+        strategy = replace(strategy, playoff_week_weight=args.playoff_weight)
+    return strategy
 
 
 def adddrop_params(args, base):
@@ -251,6 +264,7 @@ def main():
 
     data["prior"] = {}
     data["vor"] = {}
+    pwin_frames = {}
     for name in weights:
         scoreset = simlayer.load_scoreset(name)
         data["prior"][scoreset.name] = prior_season(args.prior_season, scoreset, strategy)
@@ -264,6 +278,16 @@ def main():
                         args.verbose_weeks, args.decision_sims, strategy)
                 for r in range(args.replications)]
         table, teams = summarize(runs, scoreset.name)
+        pwin = pd.concat([r["pwin"].assign(replication=i) for i, r in enumerate(runs)
+                          if len(r.get("pwin", []))], ignore_index=True) if runs else pd.DataFrame()
+        if len(pwin):
+            pwin_frames[scoreset.name] = pwin
+            for column in ("p_closed", "p_sampled"):
+                if column in pwin:
+                    rows = pwin.dropna(subset=[column])
+                    brier = float(((rows[column] - rows["won"]) ** 2).mean())
+                    log.info("P(win) calibration, %s: Brier %.4f over %d manager-days", column,
+                             brier, len(rows))
         print(f"\n{scoreset.name}")
         print(table[["rung", "strategy", "win_rate", "points_per_week", "games_started_rate",
                      "decision_efficiency", "empty_slot_nights", "wasted_slot_nights",
@@ -272,9 +296,14 @@ def main():
                      "rentals", "rental_hit_rate", "rental_gain",
                      "playoff_rate", "title_rate"]]
               .to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+        games = [r["playoffs"].assign(replication=i) for i, r in enumerate(runs)
+                 if len(r.get("playoffs", []))]
         report["results"][scoreset.name] = {
             "by_rung": table.to_dict("records"),
             "by_seat": teams.to_dict("records"),
+            # Every playoff game, for paired game-level comparisons between arms.
+            "playoff_games": (pd.concat(games, ignore_index=True).to_dict("records")
+                              if games else []),
         }
 
     paths.ensure(paths.REPORTS_DIR)
@@ -284,6 +313,10 @@ def main():
     out = paths.ladder_report(args.season, stem)
     out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     log.info("-> %s", out)
+    for name, frame in pwin_frames.items():
+        path = out.with_name(f"{out.stem}_pwin_{name}.parquet")
+        frame.to_parquet(path, index=False)
+        log.info("-> %s", path)
     report_module.write(report, args.season, config.regular_season_weeks_in(calendar),
                         path=paths.ensure(paths.DOCS_DIR) / f"ladder-{stem}.md")
 
