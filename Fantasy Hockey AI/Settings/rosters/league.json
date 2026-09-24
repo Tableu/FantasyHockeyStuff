@@ -1,6 +1,6 @@
 {
   "name": "target-league",
-  "description": "14-team head-to-head weekly points, daily lock, 7 acquisitions a week. Active: 2C 2LW 2RW 1F 4D 1F/D 2G. The F and F/D slots are composite -- they accept any forward and any skater respectively.",
+  "description": "14-team head-to-head weekly points, daily lock, 7 acquisitions a week. 24-week regular season ending 3/14 (21 weeks in the 2025-26 replay, whose Olympic break leaves only 26 matchup weeks); a 6-team playoff (top 2 seeds bye), one week a round, ties to the higher season points total. Active: 2C 2LW 2RW 1F 4D 1F/D 2G. The F and F/D slots are composite -- they accept any forward and any skater respectively.",
   "teams": 14,
   "active_slots": {
     "C": 2,
@@ -19,7 +19,10 @@
   "ties": "split",
   "schedule": {
     "type": "round_robin",
-    "regular_season_weeks": 26,
+    "regular_season_weeks": 24,
+    "regular_season_weeks_by_season": {
+      "2025-26": 21
+    },
     "week_starts_on": "MON"
   },
   "draft": {
@@ -28,7 +31,8 @@
     "keepers": 0
   },
   "playoffs": {
-    "teams": 8,
+    "teams": 6,
+    "byes": 2,
     "rounds": 3,
     "weeks_per_round": 1,
     "seeding": "record",

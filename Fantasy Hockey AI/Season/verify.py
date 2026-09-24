@@ -668,7 +668,11 @@ def check_settings() -> str:
                           ("an auction draft", lambda c: c["draft"].update(type="auction")),
                           ("a missing schedule length", lambda c: c["schedule"].pop(
                               "regular_season_weeks")),
-                          ("a 6-team bracket", lambda c: c["playoffs"].update(teams=6)),
+                          ("both a length and an end date", lambda c: c["schedule"].update(
+                              regular_season_end="03-14")),
+                          ("miscounted byes", lambda c: c["playoffs"].update(byes=1)),
+                          ("a 4-team bracket over 3 rounds", lambda c: c["playoffs"].update(
+                              teams=4, byes=4)),
                           ("a loose playoff_teams", lambda c: c.update(playoff_teams=8))):
         config = copy.deepcopy(base)
         mutate(config)
@@ -679,8 +683,7 @@ def check_settings() -> str:
             pass
 
     config = league_module.LeagueConfig(**base)
-    assert config.tie_share() == 0.5 and config.regular_season_weeks == base["schedule"][
-        "regular_season_weeks"], "the committed league's tie rule or schedule moved"
+    assert config.tie_share() == 0.5 and config.bracket_order() == [1, 8, 4, 5, 2, 7, 3, 6],         "the committed league's tie rule or bracket moved"
     loss = league_module.LeagueConfig(**{**base, "ties": "loss"})
     assert loss.tie_share() == 0.0, "a tie under the loss rule still scored"
 
@@ -710,6 +713,47 @@ def check_settings() -> str:
             pass
     return (f"unsupported ties/draft/schedule/playoffs refused; tie = {config.tie_share():g} win "
             f"each; linear draft keeps order; strategy {_strategy().name!r} requires every value")
+
+
+def check_playoffs() -> str:
+    """The bracket after the regular season: the top seeds by record (season points breaking
+    ties), byes for the top seeds, a fixed bracket, one champion who won every round he played,
+    and regular-season metrics that stop at the regular season's last week."""
+    season, calendar = _small_season((2,), sims=0)
+    config = season.config
+    rate = {int(k): 1.0 for k in season.player_pool()}
+    report = season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
+    teams, games = report["teams"], report["playoffs"]
+    regular = config.regular_season_weeks_in(calendar)
+
+    record = sorted(range(config.teams), key=lambda t: (-season.state.teams[t].matchup_wins,
+                                                        -season._season_points(t), t))
+    seeds = {t: i + 1 for i, t in enumerate(record[:config.playoff_teams])}
+    assert season.seeds == seeds, f"seeding is not record then points: {season.seeds} vs {seeds}"
+    assert (teams["weeks"] == regular).all(), "a playoff week counted as a regular-season week"
+
+    byes = {t for t, s in seeds.items() if s <= config.playoffs["byes"]}
+    first = games[games["round"] == 1]
+    assert not byes & (set(first["team_a"]) | set(first["team_b"])), "a bye seed played round one"
+    assert sorted(map(sorted, zip(first["seed_a"], first["seed_b"]))) ==         sorted(map(sorted, [(4, 5), (3, 6)] if config.playoff_teams == 6 else
+                   zip(config.bracket_order()[::2], config.bracket_order()[1::2]))),         f"round one is not the fixed bracket: {first[['seed_a', 'seed_b']].values.tolist()}"
+    assert len(games) == config.playoff_teams - 1, f"{len(games)} playoff games, not one fewer than the field"
+    champion = season.champion
+    assert int(teams["champion"].sum()) == 1 and champion in seeds, "not exactly one champion"
+    for g in games.itertuples():
+        loser = g.team_b if g.winner == g.team_a else g.team_a
+        winner_points = g.points_a if g.winner == g.team_a else g.points_b
+        loser_points = g.points_b if g.winner == g.team_a else g.points_a
+        assert winner_points > loser_points or (winner_points == loser_points and
+            season._season_points(g.winner) >= season._season_points(loser)),             f"round {g.round}: the lower score advanced without the tiebreak"
+        later = games[(games["round"] > g.round)]
+        assert loser not in set(later["team_a"]) | set(later["team_b"]), "an eliminated team played on"
+    rounds_won = int(teams.loc[teams["seat"] == champion, "playoff_wins"].iloc[0])
+    played = config.playoff_rounds - (1 if seeds[champion] <= config.playoffs["byes"] else 0)
+    assert rounds_won == played, f"the champion won {rounds_won} of {played} rounds"
+    return (f"{regular} regular weeks + {config.playoff_weeks} playoff; seeds by record then points, "
+            f"byes to seeds 1-{config.playoffs['byes']}; {len(games)} games; champion seed "
+            f"{seeds[champion]} won {rounds_won} round(s)")
 
 
 def check_no_clobber() -> str:
@@ -759,7 +803,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
           ("frozen rosters", check_frozen_rosters),
           ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("claims", check_claims), ("league rules", check_league_rules),
-          ("settings", check_settings), ("no clobber", check_no_clobber),
+          ("settings", check_settings), ("playoffs", check_playoffs),
+          ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 
 

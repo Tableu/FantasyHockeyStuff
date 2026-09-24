@@ -134,6 +134,16 @@ class Season:
         self.log_every_week = log_every_week
         self.slot_order = config.slot_order()
         self.accepts = config.accepts
+        # The season's shape on this calendar: regular-season weeks, then the playoff weeks.
+        self.regular_weeks = config.regular_season_weeks_in(calendar)
+        self.last_week = self.regular_weeks + config.playoff_weeks
+        self.playoff_results = []
+        self.seeds = {}                     # team -> seed, for the teams that made the playoffs
+        self.playoff_wins = defaultdict(int)
+        self.champion = None
+        self._bracket = None                # bracket slots still alive, in bracket order
+        self._round_points = defaultdict(float)
+        self._regular_claims = None
 
         # Decision draws, on a SEPARATE random stream from anything that resolves a night. In
         # phase 1 outcomes are the real season so no seed can collide -- but rung 4 samples to
@@ -388,7 +398,7 @@ class Season:
                       boards=seat_boards, block=len({m.rung for m in self.field}))
         draftroom.verify_rosters_fieldable(self.state, self.config, self.eligibility)
 
-        schedule = matchup_schedule(self.config, self.config.regular_season_weeks)
+        schedule = matchup_schedule(self.config, self.regular_weeks)
         # The board is a season TOTAL and the rate is per game played. They are different
         # quantities and conflating them puts the prior ~80x too high (see Decisions/draft.py).
         prior_rate = {int(p): float(v) for p, v in prior_rate.items()}
@@ -401,11 +411,14 @@ class Season:
 
         for day in self.calendar.days:
             week = self.calendar.week_of(day)
-            if week is None or week > self.config.regular_season_weeks:
+            if week is None or week > self.last_week:
                 continue
             if week != current_week:
                 if current_week is not None:
-                    self._settle_week(current_week, schedule.get(current_week, []))
+                    self._settle(current_week, schedule)
+                if week > self.regular_weeks:
+                    # The bracket's pairs are known only once the previous round is settled.
+                    schedule[week] = self._playoff_pairs(week)
                 self.state.start_week(week)
                 current_week = week
                 # Refresh the naive rate once a week, from everything played so far. Weekly rather
@@ -453,8 +466,78 @@ class Season:
             seen.append(day)
 
         if current_week is not None:
-            self._settle_week(current_week, schedule.get(current_week, []))
+            self._settle(current_week, schedule)
         return self._report()
+
+    # ---------- the playoffs ----------
+
+    def _settle(self, week, schedule) -> None:
+        if week <= self.regular_weeks:
+            self._settle_week(week, schedule.get(week, []))
+            if week == self.regular_weeks:
+                # Claims are counted, not dated, so the regular season's count is kept here.
+                self._regular_claims = dict(self.state.claims_submitted)
+        else:
+            self._settle_playoff_week(week, schedule.get(week, []))
+
+    def _season_points(self, team) -> float:
+        return float(sum(self.state.teams[team].weekly_points.values()))
+
+    def _seed(self) -> list:
+        """Playoff teams by record, then regular-season points (the league's tiebreak), then seat
+        so the order is always total."""
+        order = sorted(range(self.config.teams),
+                       key=lambda t: (-self.state.teams[t].matchup_wins, -self._season_points(t), t))
+        qualified = order[:self.config.playoff_teams]
+        self.seeds = {team: i + 1 for i, team in enumerate(qualified)}
+        log.info("playoff seeds: %s", ", ".join(f"{s}. team {t}" for t, s in
+                                                  sorted(self.seeds.items(), key=lambda kv: kv[1])))
+        by_seed = {s: t for t, s in self.seeds.items()}
+        # Bracket slots in order; a seed past the field is an empty slot, a bye for its opponent.
+        return [by_seed.get(seed) for seed in self.config.bracket_order()]
+
+    def _playoff_round(self, week) -> tuple:
+        """(round number, whether this week is the round's last) for a playoff week."""
+        per = self.config.playoffs["weeks_per_round"]
+        offset = week - self.regular_weeks - 1
+        return offset // per + 1, offset % per == per - 1
+
+    def _playoff_pairs(self, week) -> list:
+        round_number, _ = self._playoff_round(week)
+        if round_number == 1 and self._bracket is None:
+            self._bracket = self._seed()
+        slots = self._bracket
+        return [(slots[i], slots[i + 1]) for i in range(0, len(slots), 2)
+                if slots[i] is not None and slots[i + 1] is not None]
+
+    def _settle_playoff_week(self, week, pairs) -> None:
+        """Add this week to the round's points; on the round's last week, advance the winners.
+        A tie goes to the team with more regular-season points, then to the better seed."""
+        for team in range(self.config.teams):
+            self._round_points[team] += self.weekly[week][team]
+        round_number, last = self._playoff_round(week)
+        if not last:
+            return
+        slots, advanced = self._bracket, []
+        for i in range(0, len(slots), 2):
+            a, b = slots[i], slots[i + 1]
+            if a is None or b is None:                      # a bye
+                advanced.append(a if b is None else b)
+                continue
+            pa, pb = self._round_points[a], self._round_points[b]
+            key = lambda t, p: (p, self._season_points(t), -self.seeds[t])
+            winner = a if key(a, pa) > key(b, pb) else b
+            self.playoff_wins[winner] += 1
+            self.playoff_results.append({"round": round_number, "week": week,
+                                         "seed_a": self.seeds[a], "seed_b": self.seeds[b],
+                                         "team_a": a, "team_b": b, "points_a": pa, "points_b": pb,
+                                         "winner": winner, "tie": pa == pb})
+            advanced.append(winner)
+        self._bracket = advanced
+        self._round_points = defaultdict(float)
+        if len(advanced) == 1:
+            self.champion = advanced[0]
+            log.info("champion: team %d (seed %d)", self.champion, self.seeds[self.champion])
 
     def _opponents_for(self, pairs) -> dict:
         out = {}
@@ -475,6 +558,8 @@ class Season:
             self.weekly[week][team_index] += self.outcomes.score(day, player_id)
             if (pd.Timestamp(day), int(player_id)) in self.outcomes.played:
                 productive += 1
+        if week > self.regular_weeks:
+            return          # playoff nights count toward the bracket only, not the season's metrics
         # The hindsight-optimal lineup: the same assignment problem, solved with what actually
         # happened as the values. Anything a manager leaves on the table shows up here.
         realized = {p: self.outcomes.score(day, p) for p in v.startable(v.roster)}
@@ -539,7 +624,10 @@ class Season:
         for manager in self.field:
             team = self.state.teams[manager.team_index]
             occupied, productive, offered = self.slot_fill[manager.team_index]
-            weeks = [w for w in self.weekly if self.weekly[w].get(manager.team_index) is not None]
+            weeks = [w for w in self.weekly if w <= self.regular_weeks
+                     and self.weekly[w].get(manager.team_index) is not None]
+            moves = [t for t in self.state.transactions if t["team"] == manager.team_index
+                     and self._regular_season_date(t["date"])]
             rows.append({
                 "seat": manager.team_index,
                 "rung": manager.rung,
@@ -559,20 +647,31 @@ class Season:
                 "decision_efficiency": (float(sum(team.weekly_points.values()))
                                         / self.hindsight[manager.team_index]
                                         if self.hindsight[manager.team_index] else 0.0),
-                "moves_spent": sum(1 for t in self.state.transactions
-                                   if t["team"] == manager.team_index),
+                "moves_spent": len(moves),
                 # Activations on a full roster, each of which forced a (free) drop.
-                "forced_drops": len(manager.ir_log),
+                "forced_drops": sum(1 for e in manager.ir_log
+                                    if self._regular_season_date(e["day"])),
                 # Waiver claims: entered, won, and lost for a recorded reason (state.failed_claims).
-                "claims_submitted": self.state.claims_submitted.get(manager.team_index, 0),
-                "claims_awarded": sum(1 for t in self.state.transactions
-                                      if t["team"] == manager.team_index and t["kind"] == "claim"),
+                "claims_submitted": (self._regular_claims if self._regular_claims is not None
+                                     else self.state.claims_submitted).get(manager.team_index, 0),
+                "claims_awarded": sum(1 for t in moves if t["kind"] == "claim"),
                 "claims_failed": sum(1 for f in self.state.failed_claims
-                                     if f["team"] == manager.team_index),
+                                     if f["team"] == manager.team_index
+                                     and self._regular_season_date(f["date"])),
                 **self._move_quality(manager.team_index),
+                # The playoffs: seed (None if missed), rounds won, and the title.
+                "seed": self.seeds.get(manager.team_index),
+                "made_playoffs": manager.team_index in self.seeds,
+                "playoff_wins": self.playoff_wins.get(manager.team_index, 0),
+                "champion": manager.team_index == self.champion,
             })
         return {"teams": pd.DataFrame(rows), "matchups": pd.DataFrame(self.results),
+                "playoffs": pd.DataFrame(self.playoff_results),
                 "transactions": pd.DataFrame(self.state.transactions)}
+
+    def _regular_season_date(self, day) -> bool:
+        week = self.calendar.week_of(day)
+        return week is not None and week <= self.regular_weeks
 
     # The window a move is judged over, in matchup weeks after the current one. Fixed and shared by
     # every rung, so hit rates compare -- it is an accounting convention, not any manager's horizon.
@@ -591,7 +690,7 @@ class Season:
             if move["team"] != team_index:
                 continue
             week = self.calendar.week_of(move["date"])
-            if week is None:
+            if week is None or week > self.regular_weeks:
                 continue
             # A rental (section 10's stream) is graded over its own week only. Grading it through
             # next week would charge it for the dropped streamer's post-week games -- games the

@@ -27,6 +27,7 @@
   },
   "playoffs": {
     "teams": 8,
+    "byes": 0,
     "rounds": 3,
     "weeks_per_round": 1,
     "seeding": "record",

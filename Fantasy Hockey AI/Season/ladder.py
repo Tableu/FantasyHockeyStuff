@@ -206,7 +206,10 @@ def summarize(per_replication, scoreset_name):
                     rentals=("rentals", "mean"),
                     rental_hit_rate=("rental_hit_rate", "mean"),
                     rental_gain=("rental_gain", "mean"),
-                    rental_drop_next_week=("rental_drop_next_week", "mean"))
+                    rental_drop_next_week=("rental_drop_next_week", "mean"),
+                    playoff_rate=("made_playoffs", "mean"),
+                    playoff_wins=("playoff_wins", "mean"),
+                    title_rate=("champion", "mean"))
                .reset_index())
     by_rung["win_rate"] = by_rung["matchup_wins"] / by_rung["weeks"]
     by_rung["points_per_week"] = by_rung["points"] / by_rung["weeks"]
@@ -266,7 +269,8 @@ def main():
                      "decision_efficiency", "empty_slot_nights", "wasted_slot_nights",
                      "moves_spent", "forced_drops", "claims_awarded", "claims_failed", "move_hit_rate",
                      "realized_gain_per_move",
-                     "rentals", "rental_hit_rate", "rental_gain"]]
+                     "rentals", "rental_hit_rate", "rental_gain",
+                     "playoff_rate", "title_rate"]]
               .to_string(index=False, float_format=lambda v: f"{v:.3f}"))
         report["results"][scoreset.name] = {
             "by_rung": table.to_dict("records"),
@@ -280,7 +284,7 @@ def main():
     out = paths.ladder_report(args.season, stem)
     out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     log.info("-> %s", out)
-    report_module.write(report, args.season, config.regular_season_weeks,
+    report_module.write(report, args.season, config.regular_season_weeks_in(calendar),
                         path=paths.ensure(paths.DOCS_DIR) / f"ladder-{stem}.md")
 
 

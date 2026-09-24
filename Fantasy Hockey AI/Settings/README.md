@@ -58,9 +58,10 @@ per-stat numbers only. `Season/` defaults to `points-league`.
   "moves_carry_over": false,
   "waiver_days": 2,
   "ties": "split",
-  "schedule": {"type": "round_robin", "regular_season_weeks": 26, "week_starts_on": "MON"},
+  "schedule": {"type": "round_robin", "regular_season_weeks": 24,
+               "regular_season_weeks_by_season": {"2025-26": 21}, "week_starts_on": "MON"},
   "draft": {"type": "snake", "order": "lottery", "keepers": 0},
-  "playoffs": {"teams": 8, "rounds": 3, "weeks_per_round": 1,
+  "playoffs": {"teams": 6, "byes": 2, "rounds": 3, "weeks_per_round": 1,
                "seeding": "record", "tiebreak": "points_for"},
   "eligibility_platform": "yahoo",
   "eligibility_season": "2026-27",
@@ -76,11 +77,20 @@ per-stat numbers only. `Season/` defaults to `points-league`.
 - **Rules:** `lineup_lock` `daily`, `waivers` `rolling`, `ir_eligible` `injured` are the values the
   harness implements. `move_cost` is what each action spends from `moves_per_week`.
 - **Ties:** `split` (half a win each) or `loss` (neither team gets a win).
-- **Schedule:** `round_robin` over `regular_season_weeks` matchup weeks starting `week_starts_on`.
+- **Schedule:** `round_robin` matchup weeks starting `week_starts_on`. Give the regular season's
+  length as `regular_season_weeks` or as `regular_season_end` (`"MM-DD"`: through the week
+  containing that date), not both. `regular_season_weeks_by_season` overrides the length for a
+  season whose calendar is short -- 2025-26 has only 26 matchup weeks with games (the Olympic
+  break), so the target league's 24 + 3 plays as 21 + 3 there. The regular season plus the
+  playoff weeks must fit the season's calendar, or the run is refused.
 - **Draft:** `snake` or `linear`, seat order drawn by `lottery`. Keepers are not modelled (`0`).
-- **Playoffs:** `teams` must equal `2 ** rounds` and fit in `teams`; `seeding` `record`,
-  `tiebreak` `points_for`. Validated but **not yet simulated** -- the replay scores the regular
-  season only.
+- **Playoffs:** simulated after the regular season. A fixed bracket of `2 ** rounds` slots, the top
+  `byes` seeds skipping round one (`byes` must equal `2 ** rounds - teams`): with 6 teams, round
+  one is 3v6 and 4v5, then 1 plays the 4/5 winner and 2 the 3/6 winner; never reseeded. Seeded by
+  record (`seeding: record`), ties broken by regular-season points (`tiebreak: points_for`); a
+  tied playoff matchup goes to the team with more regular-season points. Each round lasts
+  `weeks_per_round` weeks. The ladder reports `playoff_rate` and `title_rate` per rung; every
+  other metric (points per week, moves, slot fill) stays regular-season only.
 - `teams` must be even. A value the harness does not implement is refused at load, never ignored.
 - Position eligibility comes from the platform named in `eligibility_platform`.
 - `league.json` is the default when `--league` is omitted.

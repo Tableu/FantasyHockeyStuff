@@ -22,6 +22,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pandas as pd
+
 import paths
 
 SKATER_POSITIONS = ("C", "LW", "RW", "D")
@@ -57,6 +59,15 @@ SUPPORTED_SCHEDULE = {"type": {"round_robin"}}
 SUPPORTED_DRAFT = {"type": {"snake", "linear"}, "order": {"lottery"}}
 SUPPORTED_PLAYOFFS = {"seeding": {"record"}, "tiebreak": {"points_for"}}
 WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+
+
+def _month_day(league, value):
+    """"MM-DD" -> (month, day), checked against a leap year so 02-29 is allowed."""
+    try:
+        stamp = pd.Timestamp(f"2024-{value}")
+    except (ValueError, TypeError):
+        raise ValueError(f"{league}: regular_season_end must be MM-DD, got {value!r}") from None
+    return stamp.month, stamp.day
 
 
 def _check_block(league, label, block, supported, numeric):
@@ -95,13 +106,18 @@ class LeagueConfig:
     rules: dict
     # How a tied week is scored: "split" or "loss" (SUPPORTED_TIES).
     ties: str
-    # {"type": "round_robin", "regular_season_weeks": n, "week_starts_on": "MON"}.
+    # {"type": "round_robin", "week_starts_on": "MON", and ONE of "regular_season_weeks": n or
+    # "regular_season_end": "MM-DD"}. An end date runs the regular season through the matchup
+    # week containing that date in whichever season is replayed (`regular_season_weeks_in`).
+    # Optional "regular_season_weeks_by_season": {"2025-26": 21} overrides the length for a
+    # season whose calendar cannot hold the usual one (2025-26's Olympic break).
     schedule: dict
     # {"type": "snake" | "linear", "order": "lottery", "keepers": 0}. Keepers are not modelled, so
     # only 0 is accepted.
     draft: dict
-    # {"teams", "rounds", "weeks_per_round", "seeding", "tiebreak"}. Validated, not yet simulated:
-    # the replay scores the regular season only.
+    # {"teams", "byes", "rounds", "weeks_per_round", "seeding", "tiebreak"}: a fixed bracket of
+    # 2 ** rounds slots, the top `byes` seeds skipping round one. Seeded by record, ties broken by
+    # season points; a tied playoff matchup goes to the team with more regular-season points.
     playoffs: dict
     moves_carry_over: bool = False
     eligibility_platform: str = "yahoo"
@@ -115,9 +131,22 @@ class LeagueConfig:
         if self.ties not in SUPPORTED_TIES:
             raise ValueError(f"{self.name}: ties = {self.ties!r}; supported: "
                              f"{sorted(SUPPORTED_TIES)}")
+        overrides = self.schedule.get("regular_season_weeks_by_season", {})
+        if not isinstance(overrides, dict) or any(
+                isinstance(v, bool) or not isinstance(v, int) or v < 1 for v in overrides.values()):
+            raise ValueError(f"{self.name}: regular_season_weeks_by_season must map a season to "
+                             f"a whole number of weeks; got {overrides!r}")
+        length = {"regular_season_weeks", "regular_season_end"} & set(self.schedule)
+        if len(length) != 1:
+            raise ValueError(f"{self.name}: schedule needs exactly one of regular_season_weeks "
+                             f"or regular_season_end; got {sorted(self.schedule)}")
         _check_block(self.name, "schedule", {k: v for k, v in self.schedule.items()
-                                             if k != "week_starts_on"},
-                     SUPPORTED_SCHEDULE, {"regular_season_weeks": 1})
+                                             if k not in ("week_starts_on", "regular_season_end",
+                                                          "regular_season_weeks_by_season")},
+                     SUPPORTED_SCHEDULE,
+                     {"regular_season_weeks": 1} if "regular_season_weeks" in length else {})
+        if "regular_season_end" in length:
+            _month_day(self.name, self.schedule["regular_season_end"])
         if self.schedule.get("week_starts_on") not in WEEKDAYS:
             raise ValueError(f"{self.name}: schedule.week_starts_on must be one of "
                              f"{list(WEEKDAYS)}; got {self.schedule.get('week_starts_on')!r}")
@@ -125,13 +154,19 @@ class LeagueConfig:
         if self.draft["keepers"]:
             raise ValueError(f"{self.name}: keepers are not modelled; draft.keepers must be 0")
         _check_block(self.name, "playoffs", self.playoffs, SUPPORTED_PLAYOFFS,
-                     {"teams": 2, "rounds": 1, "weeks_per_round": 1})
+                     {"teams": 2, "byes": 0, "rounds": 1, "weeks_per_round": 1})
         if self.playoff_teams > self.teams:
             raise ValueError(f"{self.name}: {self.playoff_teams} playoff teams of {self.teams}")
-        # A bracket has to halve cleanly, or "8 teams over 3 rounds" hides a bye nobody chose.
-        if self.playoff_teams != 2 ** self.playoff_rounds:
-            raise ValueError(f"{self.name}: {self.playoff_teams} playoff teams do not fill "
-                             f"{self.playoff_rounds} rounds (expected {2 ** self.playoff_rounds})")
+        # The bracket has 2 ** rounds slots; the empty ones are byes for the top seeds. The byes
+        # are written out so a miscount is caught here rather than handed to a seed nobody chose.
+        slots = 2 ** self.playoff_rounds
+        if not slots // 2 < self.playoff_teams <= slots:
+            raise ValueError(f"{self.name}: {self.playoff_teams} playoff teams do not fit "
+                             f"{self.playoff_rounds} rounds (between {slots // 2 + 1} and {slots})")
+        if self.playoffs["byes"] != slots - self.playoff_teams:
+            raise ValueError(f"{self.name}: {self.playoff_teams} teams over {self.playoff_rounds} "
+                             f"rounds leave {slots - self.playoff_teams} bye(s), not "
+                             f"{self.playoffs['byes']}")
         undefined = set(self.active_slots) - set(self.slot_positions)
         if undefined:
             raise ValueError(f"{self.name}: active slot(s) {sorted(undefined)} have no entry in "
@@ -161,7 +196,36 @@ class LeagueConfig:
 
     @property
     def regular_season_weeks(self) -> int:
+        """The regular season's length when the file gives it in weeks. A league set by end date
+        has no fixed length -- it depends on the season replayed; use `regular_season_weeks_in`."""
+        if "regular_season_weeks" not in self.schedule or self.schedule.get(
+                "regular_season_weeks_by_season"):
+            raise ValueError(f"{self.name}: the regular season's length depends on the season "
+                             f"replayed (an end date or a per-season override) -- use "
+                             f"regular_season_weeks_in(calendar)")
         return self.schedule["regular_season_weeks"]
+
+    def regular_season_weeks_in(self, calendar) -> int:
+        """Matchup weeks in the regular season of the season `calendar` covers: the fixed count, or
+        every week through the one containing `regular_season_end` (a week that starts on or
+        before that date). The date is a month and day, placed in the season's second calendar
+        year when it falls before July."""
+        first = pd.Timestamp(calendar.days[0])
+        season = f"{first.year}-{str(first.year + 1)[2:]}"
+        overrides = self.schedule.get("regular_season_weeks_by_season", {})
+        if season in overrides:
+            weeks = overrides[season]
+        elif "regular_season_weeks" in self.schedule:
+            weeks = self.schedule["regular_season_weeks"]
+        else:
+            month, day = _month_day(self.name, self.schedule["regular_season_end"])
+            end = pd.Timestamp(first.year + (1 if month < 7 else 0), month, day)
+            weeks = sum(1 for w in calendar.weeks if w.start <= end)
+        if weeks + self.playoff_weeks > len(calendar.weeks):
+            raise ValueError(f"{self.name}: {weeks} regular-season weeks and {self.playoff_weeks} "
+                             f"playoff weeks do not fit the season's {len(calendar.weeks)} "
+                             f"matchup weeks")
+        return weeks
 
     @property
     def week_starts_on(self) -> str:
@@ -178,6 +242,17 @@ class LeagueConfig:
     @property
     def playoff_weeks(self) -> int:
         return self.playoffs["rounds"] * self.playoffs["weeks_per_round"]
+
+    def bracket_order(self) -> list:
+        """Seeds in bracket order, adjacent pairs meeting in round one and each pair's winner
+        meeting the next pair's: [1, 8, 4, 5, 2, 7, 3, 6] for three rounds. A seed beyond
+        `playoffs.teams` is a bye, so with 6 teams it is 3v6 and 4v5, then 1 plays the 4/5 winner
+        and 2 the 3/6 winner -- the fixed bracket the platforms use, never reseeded."""
+        order = [1]
+        for _ in range(self.playoff_rounds):
+            size = 2 * len(order)
+            order = [seed for s in order for seed in (s, size + 1 - s)]
+        return order
 
     def tie_share(self) -> float:
         """What each team gets for a tied week, in wins."""

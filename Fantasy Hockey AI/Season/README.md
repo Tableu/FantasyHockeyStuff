@@ -225,9 +225,11 @@ lam = 2, m = 0 (`docs/ladder-*_orch2.md`, 8 rotations, paired):
 Upgrades were not crowded out (19-28 a season against rung 5's 17-24). A first spot rule -- simply
 the roster's k cheapest -- scored the same within noise but rented away regulars (Fantilli on opening
 night), and the spot test was first measured over three weeks, where two fewer team games alone made
-an equal-rate player "below replacement". Both are fixed. **Known artifact:** the harness ends at
-week 26 with no playoffs, so in the final week nothing has post-week value and rentals drop stars;
-the league's playoff format is not recorded yet.
+an equal-rate player "below replacement". Both are fixed. **Known artifact (as measured):** the
+harness then ended at week 26 with no playoffs, so in the final week nothing had post-week value
+and rentals dropped stars. Since 2026-09-23 the playoffs are simulated (`Settings/README.md`), so
+the regular season's last week is followed by the bracket; the artifact now applies only to the
+final playoff week.
 
 **Sensitivity, not tuning** (`docs/ladder-league_abl-*.md`, 14-team, 4 rotations, each setting's
 rung 7 − rung 5 against the defaults', paired by replication):
@@ -313,6 +315,9 @@ Both formats at eight seat rotations, both scoresets, identical everything else:
 A  12 teams   2C 2LW 2RW 4D 2G          12 active, 4 bench, 22 weeks   rosters/league-12team-simple.json
 B  14 teams   2C 2LW 2RW 1F 4D 1F/D 2G  14 active, 4 bench, 26 weeks   rosters/league.json
 ```
+
+(Measured with 26 regular-season weeks and no playoffs. The target league now plays 24 + a
+6-team, 3-week bracket -- 21 + 3 in the 2025-26 replay; see `Settings/README.md`.)
 
 `F` accepts any forward and `F/D` any skater, so B has two **composite** slots. Points per week are
 not comparable across formats — 14 active slots outscore 12 by construction — so what follows is the
