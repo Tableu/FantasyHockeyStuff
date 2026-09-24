@@ -278,8 +278,10 @@ def main():
                         args.verbose_weeks, args.decision_sims, strategy)
                 for r in range(args.replications)]
         table, teams = summarize(runs, scoreset.name)
-        pwin = pd.concat([r["pwin"].assign(replication=i) for i, r in enumerate(runs)
-                          if len(r.get("pwin", []))], ignore_index=True) if runs else pd.DataFrame()
+        logged = [r["pwin"].assign(replication=i) for i, r in enumerate(runs)
+                  if len(r.get("pwin", []))]
+        # Rungs below 4 compute no P(win), so a field of them logs nothing.
+        pwin = pd.concat(logged, ignore_index=True) if logged else pd.DataFrame()
         if len(pwin):
             pwin_frames[scoreset.name] = pwin
             for column in ("p_closed", "p_sampled"):
