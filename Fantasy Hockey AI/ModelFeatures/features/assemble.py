@@ -30,7 +30,7 @@ LINEUP_PASSTHROUGH = ["lineup_age_days", "injured_at_lockout", "games_dressed_lo
 LINEUP_FEATURES = ["feat_dressed", "feat_line", "feat_pair", "feat_pp", "feat_pk",
                    "feat_starting_goalie"]
 LINEUP_LABELS = ["label_dressed", "label_line", "label_pair", "label_pp", "label_pk",
-                 "label_starting_goalie"]
+                 "label_starting_goalie", "label_in_spell"]
 
 
 def starting_goalies(lineup: pd.DataFrame) -> pd.DataFrame:

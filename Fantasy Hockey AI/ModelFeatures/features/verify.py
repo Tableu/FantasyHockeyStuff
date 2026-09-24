@@ -224,6 +224,34 @@ def dressed_agrees_with_played(table: pd.DataFrame) -> bool:
                    f"{contradictions} row(s) not dressed yet played ({share:.3%})")
 
 
+def injury_flag_knowable(table: pd.DataFrame) -> bool:
+    """`injured_at_lockout` flags only absences the lockout could know: a spell that had already
+    cost the player a game. His spell's first game is in `label_in_spell` but not in the flag.
+
+    The flag used to be the realized spell, so it was set on the first missed game too -- 885
+    rows in 2025-26, 100% right, and P(plays)' second-strongest feature. Checked on one copy of
+    each candidate row, in team-game order: an in-spell row must be flagged exactly when his
+    previous team game was also in the spell.
+    """
+    if "label_in_spell" not in table.columns:
+        return _report("injury flag knowable", False, "no label_in_spell column -- rebuild the lineup features")
+    rows = table
+    if "copy_index" in rows.columns:
+        rows = rows[rows["copy_index"] == 0]
+    rows = rows.sort_values(["team_id", "player_id", "game_date", "game_id"], kind="mergesort")
+    flag = rows["injured_at_lockout"].fillna(False).astype(bool)
+    spell = rows["label_in_spell"].fillna(False).astype(bool)
+    outside = int((flag & ~spell).sum())
+    previous = spell.groupby([rows["team_id"], rows["player_id"]]).shift(1).fillna(False).astype(bool)
+    first_games = spell & ~previous
+    wrong = int((spell & (flag != previous)).sum())
+    # A new spell starting the game after another ended looks "wrong" here but is not; allow a
+    # sliver for it rather than false-fail.
+    return _report("injury flag knowable", outside == 0 and wrong <= 0.001 * max(int(spell.sum()), 1),
+                   f"{int(flag.sum())} flagged, {int(first_games.sum())} spell first games unflagged; "
+                   f"{outside} flagged outside a spell, {wrong} in-spell rows flagged wrongly")
+
+
 def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFrame, season_id: int) -> bool:
     from features import extract
     has_prior = extract.prior_season_ids(cursor, [season_id])[season_id] is not None
@@ -242,6 +270,7 @@ def run(cursor, table: pd.DataFrame, base: pd.DataFrame, candidates: pd.DataFram
         copy_consistency(table),
         one_team_per_player_game(table),
         dressed_agrees_with_played(table),
+        injury_flag_knowable(table),
     ]
     passed = sum(1 for r in results if r)
     log.info("%d / %d checks passed", passed, len(results))

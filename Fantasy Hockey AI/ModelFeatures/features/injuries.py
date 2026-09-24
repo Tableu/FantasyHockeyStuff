@@ -16,11 +16,13 @@ from lineups import store
 
 
 def injured_players(spells: dict, team_id: int, game_date) -> set:
-    """The team's players inside an injury spell on that date."""
+    """The team's players KNOWN to be out at the lockout on that date: inside a spell that had
+    already cost them a game. Not `store.injured_on`, which is also true on a spell's first game
+    -- realized absence the lockout could not always see (see `store.injured_known_on`)."""
     return {
         player_id
         for (spell_team, player_id) in spells
-        if spell_team == team_id and store.injured_on(spells, team_id, player_id, game_date)
+        if spell_team == team_id and store.injured_known_on(spells, team_id, player_id, game_date)
     }
 
 

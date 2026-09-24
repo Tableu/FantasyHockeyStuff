@@ -86,7 +86,11 @@ def build_lineup_features(cursor, season_ids: list, variant: str, rates: dict | 
                 for p, pl in g.players.items():
                     if pl.dressed:
                         pool[p] = pl.position
+            # Realized absence (inside a spell today) decides who is a candidate and who cannot be
+            # a healthy extra; only the lockout-knowable subset becomes the feature.
             injured_today = {p for (t, p) in spells if t == team_id and store.injured_on(spells, team_id, p, target.game_date)}
+            injured_known = {p for p in injured_today
+                             if store.injured_known_on(spells, team_id, p, target.game_date)}
             candidates = set(pool) | injured_today | set(target.players)
             positions = dict(pool)
             positions.update({p: pl.position for p, pl in target.players.items()})
@@ -111,7 +115,8 @@ def build_lineup_features(cursor, season_ids: list, variant: str, rates: dict | 
                         "game_date": target.game_date, "team_id": team_id, "player_id": p,
                         "position": positions.get(p), "variant": variant, "copy_index": copy_index,
                         "lineup_age_days": (target.game_date - prev.game_date).days if variant == "A" else 0,
-                        "injured_at_lockout": p in injured_today,
+                        "injured_at_lockout": p in injured_known,
+                        "label_in_spell": p in injured_today,
                         "games_dressed_lookback": sum(1 for g in history if p in g.players and g.players[p].dressed),
                     }
                     row.update({f"feat_{k}": v for k, v in _lineup_columns(source, p, history).items()})

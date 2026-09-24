@@ -105,4 +105,16 @@ def load_player_positions(cursor) -> dict:
 
 
 def injured_on(spells: dict, team_id: int, player_id: int, on_date: date) -> bool:
+    """Inside a spell on that date: REALIZED absence. A spell's StartDate is the first game he
+    missed, so this is true on that first game too -- which a lockout cannot always know. Use it
+    for labels, never for a lockout-time feature (see `injured_known_on`)."""
     return any(start <= on_date <= end for start, end in spells.get((team_id, player_id), ()))
+
+
+def injured_known_on(spells: dict, team_id: int, player_id: int, on_date: date) -> bool:
+    """Known to be out at the lockout on that date: inside a spell that had ALREADY cost him a
+    game. The spell's first game is unknown -- 90% of those players dressed the game before
+    (2025-26: 885 rows), and whether the absence was announced before the lock is not in the
+    history. Conservative on purpose, like the lineup noise: a backtest should understate what
+    the live injury feed will know, not overstate it."""
+    return any(start < on_date <= end for start, end in spells.get((team_id, player_id), ()))
