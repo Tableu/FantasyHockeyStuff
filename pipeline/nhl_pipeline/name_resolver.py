@@ -137,6 +137,13 @@ def has_known_name(raw_name: str, alias_map: dict, player_index: dict) -> bool:
     return bool(candidates(raw_name, player_index))
 
 
+def _side(position_code) -> str:
+    """Forward, defence or goalie, across both spellings: Reference.Players' C/L/R/D/G and the
+    platforms' C/LW/RW/F/W/D/G."""
+    code = str(position_code).upper()
+    return "G" if code == "G" else "D" if code == "D" else "F"
+
+
 def resolve_player_id(
     cursor, alias_table: str, unresolved_table: str, source_id: int,
     raw_name: str, alias_map: dict, player_index: dict, position_codes: list | None = None,
@@ -150,12 +157,21 @@ def resolve_player_id(
     would wrongly collapse both records onto whichever one happened to resolve first, since
     the alias table has no way to key on which raw record within a name-sharing pair it came
     from."""
-    if raw_name in alias_map:
-        return alias_map[raw_name]
-
     found = candidates(raw_name, player_index)
 
-    if len(found) == 1:
+    if raw_name in alias_map:
+        aliased = alias_map[raw_name]
+        # An alias made while a name had one owner can outlive that. When a second player with the
+        # name exists and this record's own position puts it on the other side of the ice, the
+        # alias is not trusted for it: "Sebastian Aho" was aliased to Carolina's centre before the
+        # Islanders' defenceman was in Reference.Players, and every later Yahoo/Fantrax import then
+        # gave the centre the defenceman's D eligibility. Such a record falls through to the
+        # position tiebreak below; the alias itself is left alone for the records it does fit.
+        if not (position_codes and len(found) > 1 and aliased in found
+                and _side(found[aliased]) not in {_side(c) for c in position_codes}):
+            return aliased
+
+    if len(found) == 1 and raw_name not in alias_map:
         player_id = next(iter(found))
         db.upsert(
             cursor, alias_table,
