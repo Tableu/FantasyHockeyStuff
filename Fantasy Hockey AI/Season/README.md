@@ -65,7 +65,17 @@ python ladder.py --league league-12team-simple --replications 8 \
 python ladder.py --rung 2 --rung 4 --rung 5 --rung 6 --replications 8 --tag adddrop     --weights points-league --weights banger-league      # section 9: add/drop against hold
 python ladder.py ... --horizon-weeks season --margin 0 --rate-source per_game --tag sens-x
 python compare.py --a league-12team-simple --b league   # what a format change does
-python verify.py         # the eighteen checks, from provenance to the draft lottery
+python verify.py         # every check, from provenance to the playoff objective
+```
+
+Replications run in parallel processes (`--workers`, default one per replication up to 6; `--workers
+1` runs them one after another in this process). Every replication seeds its own streams, so the
+result is identical either way. An 8-draft, 5-rung, one-scoring 14-team ladder takes about 1.5
+minutes (it was about 17 before the 2026-09-24 performance pass: cached schedule lookups, a
+vectorized lineup solver, memoized lineup values, one projection frame per night, and the
+parallel replications -- each checked seat for seat against the pre-pass code under two hash seeds).
+
+```
 ```
 
 ## What the ladder measured

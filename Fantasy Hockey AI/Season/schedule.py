@@ -71,6 +71,7 @@ class Calendar:
         # A forward window stops here: an NHL game after the fantasy final is worth nothing. The
         # engine sets it from the league config; unset, windows run to the NHL calendar's end.
         self.last_week = len(self.weeks)
+        self._remaining = {}
 
     def __len__(self):
         return len(self.weeks)
@@ -99,14 +100,21 @@ class Calendar:
         acquired on Tuesday pays out over however many games his team has left before Sunday
         and not one game more.
         """
+        key = (team_id, day, week)
+        cached = self._remaining.get(key)
+        if cached is not None:
+            return cached
         week = week if week is not None else self.week_of(day)
         if week is None:
+            self._remaining[key] = 0
             return 0
         end = self.weeks[week - 1].end
         rows = self.schedule
-        return int(rows[(rows["team_id"] == team_id)
-                        & (rows["game_date"] >= pd.Timestamp(day))
-                        & (rows["game_date"] <= end)]["game_id"].nunique())
+        count = int(rows[(rows["team_id"] == team_id)
+                         & (rows["game_date"] >= pd.Timestamp(day))
+                         & (rows["game_date"] <= end)]["game_id"].nunique())
+        self._remaining[key] = count
+        return count
 
     def games_through(self, team_id: int, day, weeks_ahead=1) -> int:
         """A team's games from `day` to the end of the matchup week `weeks_ahead` later.
@@ -126,7 +134,12 @@ class Calendar:
         The same window as `games_through`, returned as the nights themselves, because pricing a
         swap on the roster means solving the lineup on each of those nights.
         """
-        key = (team_id, pd.Timestamp(day), weeks_ahead, self.last_week)
+        # Keyed on `day` as given (callers pass a Timestamp); an equal date of another type only
+        # misses the cache. The list is returned as cached, not copied: every caller reads it.
+        key = (team_id, day, weeks_ahead, self.last_week)
+        cached = self._memo.get(key)
+        if cached is not None:
+            return cached
         if key not in self._memo:
             week = self.week_of(day)
             cap = min(self.last_week, len(self.weeks))
@@ -142,7 +155,7 @@ class Calendar:
                              & (rows["game_date"] >= pd.Timestamp(day))
                              & (rows["game_date"] <= end)].drop_duplicates("game_id")["game_date"]
                 self._memo[key] = sorted(dates)
-        return list(self._memo[key])
+        return self._memo[key]
 
     def gaps(self, min_days=7) -> list:
         """Stretches of `min_days` or more with no games, so the hole is reported not hidden."""

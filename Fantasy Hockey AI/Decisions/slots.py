@@ -26,6 +26,7 @@ free half, and the reason `candidates_for` takes the slate rather than the roste
 """
 
 import logging
+from collections import Counter
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -49,6 +50,35 @@ def fills(slot, eligible, accepts=None) -> bool:
     if accepts is None:
         return slot in eligible
     return bool(accepts.get(slot, frozenset({slot})) & eligible)
+
+
+# Which slots an eligibility set can fill, as a boolean row over a slot order. The slot order and
+# the slot-to-positions map are fixed for a league, and there are only a few dozen distinct
+# eligibility sets, so each row is computed once instead of `fills` being called for every
+# player-slot pair on every solve (110M calls a replication before this cache).
+_SLOT_KEYS = {}            # id(accepts) -> (accepts, its content key); the reference pins the id
+_ROWS = {}                 # (slots, accepts key, eligible) -> boolean row
+_MATCHING = {}             # (slots, accepts key, multiset of eligibility sets) -> matching size
+
+
+def _accepts_key(accepts):
+    if accepts is None:
+        return None
+    cached = _SLOT_KEYS.get(id(accepts))
+    if cached is not None and cached[0] is accepts:
+        return cached[1]
+    key = tuple(sorted((slot, frozenset(positions)) for slot, positions in accepts.items()))
+    _SLOT_KEYS[id(accepts)] = (accepts, key)
+    return key
+
+
+def _row(slots_key, accepts, accepts_key, eligible):
+    key = (slots_key, accepts_key, eligible)
+    row = _ROWS.get(key)
+    if row is None:
+        row = np.array([fills(slot, eligible, accepts) for slot in slots_key], dtype=bool)
+        _ROWS[key] = row
+    return row
 
 
 class Lineup:
@@ -83,13 +113,13 @@ def assign(slots: list, values: dict, eligibility: dict, accepts=None) -> Lineup
     if not players or not slots:
         return Lineup({}, list(players), list(range(len(slots))))
 
-    cost = np.full((len(players), len(slots)), FORBIDDEN, dtype="float64")
-    for i, player_id in enumerate(players):
-        eligible = eligibility.get(player_id, frozenset())
-        value = float(values[player_id])
-        for j, slot in enumerate(slots):
-            if fills(slot, eligible, accepts):
-                cost[i, j] = -value
+    # The same matrix the per-pair loop built -- -value where the player may fill the slot,
+    # FORBIDDEN elsewhere -- assembled from cached eligibility rows.
+    slots_key, accepts_key = tuple(slots), _accepts_key(accepts)
+    mask = np.array([_row(slots_key, accepts, accepts_key, eligibility.get(p, frozenset()))
+                     for p in players])
+    value = np.array([float(values[p]) for p in players], dtype="float64")
+    cost = np.where(mask, -value[:, None], FORBIDDEN)
 
     rows, columns = linear_sum_assignment(cost)
 
@@ -159,8 +189,14 @@ def matching_size(players, slots: list, eligibility: dict, accepts=None) -> int:
     defined, because a centre can fill C, F or F/D. The only sound question is how large a legal
     lineup the roster admits, which is exactly the size of the maximum matching.
     """
-    lineup = assign(slots, {p: 1.0 for p in players}, eligibility, accepts)
-    return lineup.filled
+    # A matching's size depends only on the multiset of eligibility sets, so it is cached on that.
+    key = (tuple(slots), _accepts_key(accepts),
+           frozenset(Counter(eligibility.get(p, frozenset()) for p in players).items()))
+    size = _MATCHING.get(key)
+    if size is None:
+        size = assign(slots, {p: 1.0 for p in players}, eligibility, accepts).filled
+        _MATCHING[key] = size
+    return size
 
 
 def verify_optimal(slot_positions: dict, trials=400, seed=17) -> dict:

@@ -83,6 +83,9 @@ def parse_args():
                         help="Playoffs: weight later rounds by P(reaching them), or count them flat")
     parser.add_argument("--z-source", choices=("closed_form", "sampled"), default=None,
                         help="Rung 4+: the matchup z from closed-form moments or sampled week totals")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="Processes to run replications in (default: one per replication, at "
+                             "most 6). 1 runs them in this process, one after another")
     parser.add_argument("--tag", default=None,
                         help="Suffix for the report and doc names, so an experiment does not "
                              "overwrite the committed ladder")
@@ -196,6 +199,46 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
                               for s, b in boards.items()})
 
 
+# One replication per task, in a pool of processes. Each worker receives the season's inputs once,
+# at start-up, and every replication seeds its own streams, so the result is the same as running
+# them one after another -- `verify.py` holds the ladder to that under two hash seeds.
+_WORKER = {}
+
+
+def _init_worker(payload):
+    _WORKER.update(payload)
+
+
+def _run_replication(replication):
+    w = _WORKER
+    return run_one(w["config"], w["calendar"], w["data"], w["eligibility"], w["scoreset"],
+                   w["rungs"], replication, w["verbose_weeks"], w["decision_sims"], w["strategy"])
+
+
+def run_replications(args, config, calendar, data, eligibility, scoreset, rungs, strategy):
+    workers = args.workers or min(args.replications, 6)
+    if workers <= 1 or args.replications <= 1:
+        return [run_one(config, calendar, data, eligibility, scoreset, rungs, r,
+                        args.verbose_weeks, args.decision_sims, strategy)
+                for r in range(args.replications)]
+    import sys
+    from concurrent.futures import ProcessPoolExecutor
+
+    # A spawned worker starts from this process's sys.path, where simlayer has put Simulation/
+    # first -- so its `import paths` would find Simulation's paths module, not this folder's.
+    # Season first, as it is when a run starts; simlayer puts Simulation back in front of the
+    # rest once `paths` is imported, exactly as here.
+    if sys.path[0] != str(paths.PROJECT_ROOT):
+        sys.path.insert(0, str(paths.PROJECT_ROOT))
+    payload = {"config": config, "calendar": calendar, "data": data, "eligibility": eligibility,
+               "scoreset": scoreset, "rungs": rungs, "verbose_weeks": args.verbose_weeks,
+               "decision_sims": args.decision_sims, "strategy": strategy}
+    log.info("running %d replications in %d processes", args.replications, workers)
+    with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker,
+                             initargs=(payload,)) as pool:
+        return list(pool.map(_run_replication, range(args.replications)))
+
+
 def summarize(per_replication, scoreset_name):
     """Collapse seats into rungs. Three clones a rung, so a rung's number is their mean."""
     teams = pd.concat([r["teams"].assign(replication=i)
@@ -274,9 +317,8 @@ def main():
         log.info("=== %s === skaters score %s | goalies score %s (unpriced: %s)",
                  scoreset.name, scoreset.scored("skaters"), scoreset.scored("goalies"),
                  scoreset.missing("goalies") or "none")
-        runs = [run_one(config, calendar, data, eligibility, scoreset, rungs, r,
-                        args.verbose_weeks, args.decision_sims, strategy)
-                for r in range(args.replications)]
+        runs = run_replications(args, config, calendar, data, eligibility, scoreset, rungs,
+                                strategy)
         table, teams = summarize(runs, scoreset.name)
         logged = [r["pwin"].assign(replication=i) for i, r in enumerate(runs)
                   if len(r.get("pwin", []))]

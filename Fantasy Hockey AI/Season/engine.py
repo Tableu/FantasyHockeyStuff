@@ -475,16 +475,27 @@ class Season:
         points = self.scoreset.score_draws(goalie, side="goalies")
         return {int(p): points[i] for i, p in enumerate(goalie.keys["player_id"])}
 
-    def _view_for(self, team_index, day, week, opponent, history, goalie_projections):
+    def _slate_for(self, day):
+        """Tonight's projection frame (outcomes stripped) and who plays -- the same for every
+        manager, so built once a day rather than once a view."""
+        cached = getattr(self, "_slate_cache", None)
+        if cached is not None and cached[0] == day:
+            return cached[1], cached[2]
         projections = self.proj_by_day.get(day, self.data["projections"].iloc[:0])
         keep = [c for c in projections.columns if not c.startswith("target_")]
         playing = set(projections["player_id"].astype(int))
         goalie_frame = self.goalies_by_day.get(day)
         if goalie_frame is not None:
             playing |= set(goalie_frame["player_id"].astype(int))
+        frame = projections[keep]
+        self._slate_cache = (day, frame, playing)
+        return frame, playing
+
+    def _view_for(self, team_index, day, week, opponent, history, goalie_projections):
+        projections, playing = self._slate_for(day)
         return view_module.SlateView(
             day=day, week=week, config=self.config, calendar=self.calendar,
-            projections=projections[keep],
+            projections=projections,
             goalie_projections=goalie_projections,
             unavailable=self.unavailable_by_day.get(day, set()),
             injured=self.injured,

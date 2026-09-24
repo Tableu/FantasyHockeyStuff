@@ -68,6 +68,9 @@ class RosterNights:
         self.accepts = accepts
         self.roster = list(roster)
         self._nights = {}
+        # Candidate swaps revisit the same night and the same players constantly. Keyed on the
+        # players IN ORDER, so a hit is the very computation it replaces, bit for bit.
+        self._memo = {}
         self.playing = {}                  # night -> players on the roster who play that night
         for player_id in self.roster:
             for night in self.nights(player_id):
@@ -76,6 +79,15 @@ class RosterNights:
                      for night, players in self.playing.items()}
 
     def _value(self, players, night) -> float:
+        key = (night, tuple(players))
+        cached = self._memo.get(key)
+        if cached is not None:
+            return cached
+        value = self._solve(players, night)
+        self._memo[key] = value
+        return value
+
+    def _solve(self, players, night) -> float:
         today = night == self.view.day
         startable = {p: self.values[p] for p in players
                      if not (today and p in self.view.unavailable)}
