@@ -1,7 +1,7 @@
 """The Crome aggregate workbook -- one file carrying many sources' raw projections, one sheet each.
 
-`ProjectionSheets/2025-26/Crome Aggregate Projections 2025-26.xlsx` is last season's copy of a
-community blending sheet. Its own tabs blend and rank; the ones read here are the per-source tabs
+`ProjectionSheets/<season>/Crome Aggregate Projections <season>.xlsx` is a past season's copy of a
+community blending sheet (2024-25 and 2025-26 so far; `WORKBOOKS` says which sheets each carries). Its own tabs blend and rank; the ones read here are the per-source tabs
 it imports into, which all share one layout, the one Crome's importer writes:
 
     row 1    A: "363 PLAYERS\\n363 ON MASTER"   B: "346 MATCHED\\n17 FIXED\\n0 NO MATCH"
@@ -25,11 +25,9 @@ from pathlib import Path
 
 import openpyxl
 
-FILENAME = "Crome Aggregate Projections 2025-26.xlsx"
-
-# sheet -> (SourceName, the name Crome's SourceCheck tab dates it under, description, overrides).
-# SourceName matches the 2026-27 source where there is one, so the two seasons line up by name.
-SHEETS = {
+# sheet -> (SourceName, the name Crome's SourceCheck tab dates it under, overrides).
+# SourceName matches the 2026-27 source where there is one, so the seasons line up by name.
+SHEETS_2025_26 = {
     "Apples & Ginos - Blake": ("Apples & Ginos - Blake", "Apples & Ginos - Blake", {}),
     "Apples & Ginos - Nate": ("Apples & Ginos - Nate", "Apples & Ginos - Nate", {}),
     "Bangers Fantasy Hockey": ("Bangers Fantasy Hockey", "Bangers Fantasy Hockey", {}),
@@ -43,6 +41,21 @@ SHEETS = {
     # Dom's sheet, pasted into the workbook's first free import slot. Its "#ERROR!" header sits
     # where Dom's layout has plus-minus (between HIT and PIM, as in the 2026-27 file).
     "Import 1": ("Dom", "Import 1", {"extra_headers": {"#ERROR!": "PlusMinus"}}),
+}
+
+# 2024-25: one Apples & Ginos sheet (not yet split by author), HashtagHockey, and no Dom. ESPN and
+# Fleaflicker are position lists and MISC3 a bare name list -- no projections, so not sources.
+SHEETS_2024_25 = {
+    "Apples & Ginos": ("Apples & Ginos", "Apples & Ginos", {}),
+    "Bangers Fantasy Hockey": ("Bangers Fantasy Hockey", "Bangers Fantasy Hockey", {}),
+    "Dailyfaceoff": ("Dailyfaceoff", "Dailyfaceoff", {"goalie_gp_from_gs": True}),
+    "DatsyukToZetterberg": ("DtZ", "DatsyukToZetterberg", {}),
+    "HashtagHockey": ("HashtagHockey", "HashtagHockey", {}),
+    "KUBOTA": ("Kubota Hockey", "KUBOTA", {}),
+    "LineupExperts": ("Lineup Experts", "LineupExperts", {"team_pos": "TEAM-POS"}),
+    "Scott Cullen": ("Scott Cullen", "Scott Cullen", {}),
+    "Steve Laidlaw": ("Steve Laidlaw", "Steve Laidlaw", {}),
+    "Yahoo  Fantrax": ("Yahoo / Fantrax", "Yahoo / Fantrax", {}),
 }
 
 SKATER_HEADERS = {
@@ -89,8 +102,13 @@ def _positions(raw) -> list:
     return codes
 
 
-def open_workbook(sheets_dir: Path):
-    return openpyxl.load_workbook(sheets_dir / FILENAME, read_only=True, data_only=True)
+def filename(season: str) -> str:
+    return f"Crome Aggregate Projections {season}.xlsx"
+
+
+def open_workbook(sheets_dir: Path, season: str):
+    """`sheets_dir` is the season's own folder, ProjectionSheets/<season>/."""
+    return openpyxl.load_workbook(sheets_dir / filename(season), read_only=True, data_only=True)
 
 
 def summary(workbook, sheet: str) -> dict:
@@ -126,9 +144,9 @@ def published_dates(workbook) -> dict:
     return out
 
 
-def rows(workbook, sheet: str):
+def rows(workbook, sheet: str, season: str):
     """Yield {"raw_name", "crome_name", "team_raw", "position_codes", "is_goalie", "stats"}."""
-    _, _, overrides = SHEETS[sheet]
+    _, _, overrides = WORKBOOKS[season]["sheets"][sheet]
     ws = workbook[sheet]
     it = ws.iter_rows(values_only=True)
     header = next(it)
@@ -254,6 +272,11 @@ CONFIRMED_ALIASES = {
     "Benoit-Olivier Groulx": 995, "Joe Labate": 828,
     "John St. Ivany": 110, "Georgi Merkulov": 896, "Boko Imama": 899, "Nicolas Daws": 816,
     "Axel Sandin Pellikka": 221,
+    # From the 2024-25 workbook (2026-09-24), each the only player the spelling can mean:
+    "Pat Maroon": 3889, "Ivan Fedetov": 1611, "Max Lajoie": 1847, "Matthew Samoskevich": 644,
+    "Samuel Walker": 1974, "Vasili Ponomaryov": 2044, "Nicklaus Perbix": 287,
+    # Crome's own tag for the defenceman, as distinct from Carolina's centre (plain "Sebastian Aho").
+    "Sebastian Aho (D)": 4102,
 }
 
 # Names two real players share, each settled by evidence for the sources where it failed:
@@ -263,14 +286,49 @@ CONFIRMED_ALIASES = {
 # "Matt Murray" is Seattle's goalie (he played 16 games for them), not Nashville's; "Colin White"
 # is the Sharks' 1997 centre (3 games for them), not the retired 1977 defenceman. NEVER a blanket alias: the platforms' alias table is shared across seasons, and a
 # blanket "Matt Murray" would misroute the other goalie in the next live 2026-27 import. So:
-SOURCE_ALIASES = {        # stored, but only for that one 2025-26 projection source
+SOURCE_ALIASES_2025_26 = {   # stored, but only for that one 2025-26 projection source
     ("Steve Laidlaw", "Elias Pettersson"): 55,
     ("Steve Laidlaw", "Sebastian Aho"): 240,
     ("Yahoo / Fantrax", "Matt Murray"): 806,
     ("Yahoo / Fantrax", "Colin White"): 4063,
     ("Lineup Experts", "Colin White"): 4063,
 }
-PLATFORM_RUN_ALIASES = {  # used during the platform import only, never written as an alias
+PLATFORM_RUN_ALIASES_2025_26 = {  # used during the platform import only, never written as an alias
     "Matt Murray": 806,
     "Colin White": 4063,
+}
+
+# A shared name can point at a different player in another season, so each season's settlements
+# are its own, from that season's evidence.
+# 2024-25, where a sheet had no team or position column to separate them: the stat lines settle it.
+# Pettersson at 34-36 goals is Vancouver's centre (55), not the 2004 defenceman; plain Aho at 36-37
+# goals is Carolina's centre (240) -- every sheet lists the defenceman as "Sebastian Aho (D)"; Lineup
+# Experts' Colin White (48 GP) is the active 1997 centre, its Daniil Tarasov carries goalie stats
+# (Columbus's goalie, not the 1991 winger), and its Ryan Johnson (0 G, 64 blocks) is Buffalo's
+# defenceman; Yahoo / Fantrax's Matt Murray is listed at Toronto, where 806 played that season.
+SOURCE_ALIASES_2024_25 = {
+    ("Kubota Hockey", "Elias Pettersson"): 55,
+    ("Lineup Experts", "Elias Pettersson"): 55,
+    ("Steve Laidlaw", "Elias Pettersson"): 55,
+    ("Kubota Hockey", "Sebastian Aho"): 240,
+    ("Lineup Experts", "Sebastian Aho"): 240,
+    ("Steve Laidlaw", "Sebastian Aho"): 240,
+    ("Lineup Experts", "Colin White"): 4063,
+    ("Lineup Experts", "Daniil Tarasov"): 640,
+    ("Lineup Experts", "Ryan Johnson"): 727,
+    ("Yahoo / Fantrax", "Matt Murray"): 806,
+}
+PLATFORM_RUN_ALIASES_2024_25 = {}
+
+# Rows that name nobody in Reference.Players, so any match would be someone else. Lineup Experts'
+# "Jack Hughes (LAK)" is the Kings' prospect (drafted 2022, no NHL games), and resolved to the
+# Devils' centre -- whose own row on the same sheet it then overwrote.
+SKIP_ROWS_2024_25 = {("Lineup Experts", "Jack Hughes (LAK)")}
+
+WORKBOOKS = {
+    "2025-26": {"sheets": SHEETS_2025_26, "source_aliases": SOURCE_ALIASES_2025_26,
+                "platform_run_aliases": PLATFORM_RUN_ALIASES_2025_26, "skip_rows": set()},
+    "2024-25": {"sheets": SHEETS_2024_25, "source_aliases": SOURCE_ALIASES_2024_25,
+                "platform_run_aliases": PLATFORM_RUN_ALIASES_2024_25,
+                "skip_rows": SKIP_ROWS_2024_25},
 }

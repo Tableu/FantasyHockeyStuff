@@ -1,16 +1,17 @@
 #!/usr/bin/env python
-"""2025-26 platform data from the Crome workbook: Fantasy.PlayerPositions (Yahoo, Fantrax, ESPN,
-Fleaflicker) and Fantasy.PlayerADP (Yahoo, Fantrax) for SeasonID 2025-26 only.
+"""Past seasons' platform data from the Crome workbook: Fantasy.PlayerPositions (Yahoo, Fantrax,
+ESPN, Fleaflicker) and Fantasy.PlayerADP (Yahoo, Fantrax), one workbook season at a time.
 
-    python import_fantasy_crome.py             # write
-    python import_fantasy_crome.py --dry-run   # the same run, rolled back
+    python import_fantasy_crome.py                       # 2025-26
+    python import_fantasy_crome.py --season 2024-25
+    python import_fantasy_crome.py --dry-run             # the same run, rolled back
 
 The live platform importers (import_fantasy_yahoo.py and friends) write the current season from
-the platforms' own APIs; those APIs no longer serve 2025-26, so its snapshot comes from the
-workbook, which captured it before that season (ADP as of 12 Sep 2025 for Yahoo, 4 Sep for
-Fantrax). Like them, each run replaces its platform's rows for the season -- and only for this
-season: every delete and upsert is keyed by 2025-26's SeasonID, and the script refuses to run
-against any other, so the 2026-27 rows cannot be touched.
+the platforms' own APIs; those APIs no longer serve past seasons, so their snapshots come from the
+workbook, which captured each before its season (2025-26: ADP as of 12 Sep 2025 for Yahoo, 4 Sep
+for Fantrax). Like them, each run replaces its platform's rows for the season -- and only for that
+season: every delete and upsert is keyed by the workbook season's SeasonID, and the script checks
+it names that season before writing, so the live 2026-27 rows cannot be touched.
 
 Names go through the platforms' shared alias table (Fantasy.PlayerNameAliases), raw name first,
 then Crome's fixed spelling, then a position tiebreak; the rest are queued in
@@ -27,7 +28,8 @@ from nhl_pipeline.projections.sources import crome_workbook
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("import_fantasy_crome")
 
-SEASON_CFG = {"SeasonID_NHL": 20252026, "DisplayName": "2025-26"}
+SEASONS = {"2025-26": {"SeasonID_NHL": 20252026, "DisplayName": "2025-26"},
+           "2024-25": {"SeasonID_NHL": 20242025, "DisplayName": "2024-25"}}
 ALIAS_TABLE = "Fantasy.PlayerNameAliases"
 UNRESOLVED_TABLE = "Fantasy.UnresolvedPlayerNames"
 
@@ -49,18 +51,20 @@ def resolve(cursor, platform_id, raw, fixed, codes, alias_map, player_index):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Import 2025-26 positions and ADP from the Crome workbook")
+    parser = argparse.ArgumentParser(description="Import past positions and ADP from the Crome workbook")
+    parser.add_argument("--season", choices=sorted(SEASONS), default="2025-26")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     conn = db.connect()
     cursor = conn.cursor()
-    season_id = ensure_season(cursor, SEASON_CFG)
+    season_id = ensure_season(cursor, SEASONS[args.season])
     cursor.execute("SELECT DisplayName FROM Reference.Seasons WHERE SeasonID = ?", season_id)
-    if cursor.fetchone()[0] != "2025-26":
-        raise SystemExit(f"SeasonID {season_id} is not 2025-26; refusing to write")
+    if cursor.fetchone()[0] != args.season:
+        raise SystemExit(f"SeasonID {season_id} is not {args.season}; refusing to write")
 
-    workbook = crome_workbook.open_workbook(config.PROJECT_ROOT / "ProjectionSheets" / "2025-26")
+    workbook = crome_workbook.open_workbook(
+        config.PROJECT_ROOT / "ProjectionSheets" / args.season, args.season)
     player_index = name_resolver.load_player_index(cursor)
     platforms = {name: db.upsert_get_id(cursor, "Fantasy.Platforms", "FantasyPlatformID",
                                         {"PlatformName": name}, None)
@@ -71,9 +75,9 @@ def main():
             cursor.execute(f"DELETE FROM {UNRESOLVED_TABLE} WHERE SourceID = ? AND RawName = ?", pid, raw)
     aliases = {name: name_resolver.load_alias_map(cursor, ALIAS_TABLE, pid) for name, pid in platforms.items()}
     # Names two players share, settled for this workbook by team: in memory for this run only, so
-    # nothing ambiguous reaches the shared alias table (see crome_workbook.PLATFORM_RUN_ALIASES).
+    # nothing ambiguous reaches the shared alias table (see crome_workbook.WORKBOOKS).
     for alias_map in aliases.values():
-        for raw, player_id in crome_workbook.PLATFORM_RUN_ALIASES.items():
+        for raw, player_id in crome_workbook.WORKBOOKS[args.season]["platform_run_aliases"].items():
             alias_map.setdefault(raw, player_id)
 
     report = {}
@@ -121,7 +125,7 @@ def main():
         log.info("Dry run: rolled back, nothing written.")
     else:
         conn.commit()
-        log.info("Committed 2025-26 positions and ADP.")
+        log.info("Committed %s positions and ADP.", args.season)
 
 
 if __name__ == "__main__":

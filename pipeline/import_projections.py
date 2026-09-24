@@ -11,12 +11,14 @@ re-running this script.
 Usage:
     python import_projections.py                        # the 2026-27 sheets in ProjectionSheets/
     python import_projections.py --season 2025-26       # the Crome workbook in ProjectionSheets/2025-26/
+    python import_projections.py --season 2024-25       # ... and in ProjectionSheets/2024-25/
     python import_projections.py --season 2025-26 --dry-run   # the same run, rolled back
 
-2025-26 is last season's Crome aggregate workbook, one sheet per source
-(nhl_pipeline/projections/sources/crome_workbook.py). Its sources are new (source, season) rows
-beside the 2026-27 ones -- nothing written for 2025-26 touches a 2026-27 row -- and each is seeded
-with its 2026-27 namesake's name aliases and dated from the workbook's SourceCheck tab.
+2024-25 and 2025-26 are past seasons' Crome aggregate workbooks, one sheet per source
+(nhl_pipeline/projections/sources/crome_workbook.py). Their sources are new (source, season) rows
+beside the other seasons' -- nothing written for one season touches another's row -- and each is
+seeded with the next season's namesake's name aliases and dated from the workbook's SourceCheck
+tab (or its ChangeLog).
 """
 
 import argparse
@@ -56,33 +58,41 @@ SOURCES = [
 ]
 
 
-WORKBOOK_SEASON_CFG = {"SeasonID_NHL": 20252026, "DisplayName": "2025-26"}
+# Crome workbook seasons, and the season each one's sources take their name aliases from.
+WORKBOOK_SEASONS = {
+    "2025-26": ({"SeasonID_NHL": 20252026, "DisplayName": "2025-26"}, PROJECTIONS_SEASON_CFG),
+    "2024-25": ({"SeasonID_NHL": 20242025, "DisplayName": "2024-25"},
+                {"SeasonID_NHL": 20252026, "DisplayName": "2025-26"}),
+}
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Import fantasy projection sources")
-    parser.add_argument("--season", choices=("2026-27", "2025-26"), default="2026-27")
+    parser.add_argument("--season", choices=("2026-27", "2025-26", "2024-25"), default="2026-27")
     parser.add_argument("--dry-run", action="store_true",
                         help="Run every read and resolution, then roll back instead of committing")
     return parser.parse_args()
 
 
-def import_workbook(conn, cursor, dry_run: bool):
+def import_workbook(conn, cursor, season: str, dry_run: bool):
     from nhl_pipeline.projections.sources import crome_workbook
 
-    season_id = ensure_season(cursor, WORKBOOK_SEASON_CFG)
-    later_id = ensure_season(cursor, PROJECTIONS_SEASON_CFG)
-    workbook = crome_workbook.open_workbook(SHEETS_DIR / "2025-26")
+    season_cfg, seed_cfg = WORKBOOK_SEASONS[season]
+    season_id = ensure_season(cursor, season_cfg)
+    later_id = ensure_season(cursor, seed_cfg)
+    book = crome_workbook.WORKBOOKS[season]
+    workbook = crome_workbook.open_workbook(SHEETS_DIR / season, season)
     published = crome_workbook.published_dates(workbook)
     totals = []
-    for sheet, (source_name, dated_as, _) in crome_workbook.SHEETS.items():
+    for sheet, (source_name, dated_as, _) in book["sheets"].items():
         counts = importer.import_workbook_rows(
-            cursor, source_name, season_id, crome_workbook.rows(workbook, sheet),
-            description=f"Crome Aggregate Projections 2025-26, '{sheet}' tab",
+            cursor, source_name, season_id, crome_workbook.rows(workbook, sheet, season),
+            description=f"Crome Aggregate Projections {season}, '{sheet}' tab",
             published_on=published.get(dated_as), seed_from_season_id=later_id,
             confirmed_aliases={**crome_workbook.CONFIRMED_ALIASES,
-                               **{raw: pid for (src, raw), pid in crome_workbook.SOURCE_ALIASES.items()
-                                  if src == source_name}})
+                               **{raw: pid for (src, raw), pid in book["source_aliases"].items()
+                                  if src == source_name}},
+            skip_names={raw for src, raw in book["skip_rows"] if src == source_name})
         sheet_summary = crome_workbook.summary(workbook, sheet)
         totals.append((source_name, sheet_summary, counts, published.get(dated_as)))
         if not dry_run:
@@ -108,8 +118,8 @@ def main():
     conn = db.connect()
     cursor = conn.cursor()
 
-    if args.season == "2025-26":
-        import_workbook(conn, cursor, args.dry_run)
+    if args.season in WORKBOOK_SEASONS:
+        import_workbook(conn, cursor, args.season, args.dry_run)
         log.info("Done.")
         return
 

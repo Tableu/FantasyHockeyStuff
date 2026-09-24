@@ -81,13 +81,18 @@ def seed_aliases(cursor, source_id: int, source_name: str, from_season_id: int, 
 
 def import_workbook_rows(cursor, source_name: str, season_id: int, rows, description: str | None = None,
                          published_on=None, seed_from_season_id: int | None = None,
-                         confirmed_aliases: dict | None = None) -> dict:
+                         confirmed_aliases: dict | None = None, skip_names=()) -> dict:
     """Like import_rows, for a sheet that also carries a second spelling of each name -- the
     Crome workbook's column A, a name someone already matched by hand. Resolution, first hit wins:
     the source's raw name (alias, then a unique match); then the fixed name, a unique match of
     which is saved as an alias for the raw one so the fix persists; then the raw name's position
     tiebreak; otherwise it is queued in UnresolvedPlayerNames, as always. Nothing is aliased on a
-    guess: a name matching more than one player stays unresolved."""
+    guess: a name matching more than one player stays unresolved.
+
+    `skip_names` are rows settled as nobody in Reference.Players (a prospect sharing a star's name);
+    they are not imported, and any alias or queue entry an earlier run made for them is removed.
+    Two rows landing on one player is an error, not an overwrite: the later row would silently
+    replace the earlier one's projection."""
     source_id = get_or_create_source(cursor, source_name, season_id, description)
     if published_on is not None:
         cursor.execute("UPDATE Projections.Sources SET PublishedOn = ? WHERE SourceID = ?",
@@ -99,14 +104,20 @@ def import_workbook_rows(cursor, source_name: str, season_id: int, rows, descrip
     for raw, player_id in (confirmed_aliases or {}).items():
         db.upsert(cursor, ALIAS_TABLE, {"SourceID": source_id, "RawName": raw}, {"PlayerID": player_id})
         cursor.execute(f"DELETE FROM {UNRESOLVED_TABLE} WHERE SourceID = ? AND RawName = ?", source_id, raw)
+    for raw in skip_names:
+        cursor.execute(f"DELETE FROM {ALIAS_TABLE} WHERE SourceID = ? AND RawName = ?", source_id, raw)
+        cursor.execute(f"DELETE FROM {UNRESOLVED_TABLE} WHERE SourceID = ? AND RawName = ?", source_id, raw)
     player_index = name_resolver.load_player_index(cursor)
     alias_map = name_resolver.load_alias_map(cursor, ALIAS_TABLE, source_id)
     team_index, team_name_pairs = team_resolver.load_team_index(cursor)
+    landed = {}                         # (table, PlayerID) -> the raw name that took it
 
     counts = {"skaters": 0, "goalies": 0, "by_raw": 0, "by_crome": 0, "unresolved": 0,
               "no_team": 0, "seeded_aliases": seeded, "unresolved_names": []}
     for row in rows:
         raw = row["raw_name"]
+        if raw in skip_names:
+            continue
         player_id = None
         if raw not in alias_map and len(name_resolver.candidates(raw, player_index)) != 1:
             fixed = row.get("crome_name")
@@ -133,6 +144,10 @@ def import_workbook_rows(cursor, source_name: str, season_id: int, rows, descrip
         if team_id is None and row.get("team_raw"):
             counts["no_team"] += 1
         table = "Projections.GoalieProjections" if row["is_goalie"] else "Projections.SkaterProjections"
+        if (table, player_id) in landed:
+            raise ValueError(f"{source_name}: {raw!r} and {landed[(table, player_id)]!r} both resolve to "
+                             f"PlayerID {player_id}; settle one (an alias, or a skipped row) and re-run")
+        landed[(table, player_id)] = raw
         db.upsert(cursor, table, {"SourceID": source_id, "PlayerID": player_id},
                   {"TeamID": team_id, **row["stats"]})
         counts["goalies" if row["is_goalie"] else "skaters"] += 1
