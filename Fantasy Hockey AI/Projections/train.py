@@ -61,8 +61,9 @@ def parse_args():
                              "describing the last model that was actually scored.")
     parser.add_argument("--features-dir", type=Path, default=None)
     parser.add_argument("--models-dir", type=Path, default=None,
-                        help="Where the boosters go. Default: models/ for a deployment build "
-                             "(--no-holdout), models/holdout_<season>_<variant>/ for a scored one")
+                        help="Where the boosters go. Default models/<season>/skaters/<variant>/, where "
+                             "<season> is the one the build predicts: the holdout, or for a "
+                             "deployment build (--no-holdout) the season after the last trained")
     parser.add_argument("--walk-forward", action="store_true",
                         help="Refit monthly across the holdout season instead of once")
     parser.add_argument("--folds", type=int, default=OOF_FOLDS,
@@ -252,11 +253,11 @@ def run(args):
     chain = pd.DataFrame(index=table.index)
     records, boosters = [], {}
 
-    # A scored build never writes models/. Every run used to save the same eleven files there,
-    # whatever its variant or holdout, so a variant-A build, a variant-B build and the deployment
-    # build silently replaced one another -- and a section 11 build holding out 2024-25 would
-    # have replaced the boosters predict.py ships.
-    models_dir = args.models_dir or models_dir_for(holdout_season, args.variant)
+    # Every run used to save the same eleven files into models/, whatever its variant or holdout,
+    # so a variant-A build, a variant-B build and the deployment build silently replaced one
+    # another. Each build now has its own folder, named for the season it predicts.
+    models_dir = args.models_dir or paths.models_dir(
+        paths.target_season(train_seasons, holdout_season), "skaters", args.variant)
     paths.ensure(models_dir)
     paths.ensure(paths.REPORTS_DIR)
     log.info("boosters -> %s", models_dir)
@@ -295,13 +296,6 @@ def run(args):
     }, indent=2), encoding="utf-8")
     log.info("wrote %s", summary_path.name)
     return chain, table, split
-
-
-def models_dir_for(holdout_season, variant):
-    """models/ for the deployment build; models/holdout_<season>_<variant>/ for a scored one."""
-    if holdout_season is None:
-        return paths.MODELS_DIR
-    return paths.MODELS_DIR / f"holdout_{holdout_season}_{variant}"
 
 
 def required_targets(wanted):

@@ -284,8 +284,12 @@ def run(args):
     predictions = (pd.DataFrame(index=test_rows.index) if test_rows is not None else None)
     importances = {}
     boosters = {}
-    models = paths.ensure(paths.MODELS_DIR) if (args.save or deployment) else None
+    # Filed by the season the build predicts: the test season, or for a deployment build the
+    # season after the last one trained on.
     prefix = model_prefix(args.horizon)
+    models = (paths.ensure(paths.models_dir(
+        paths.target_season(args.train, None if deployment else args.test), prefix))
+        if (args.save or deployment) else None)
     for factor in baselines.FACTORS:
         booster = train_factor(fit_rows, valid_rows, factor, columns, args.rounds,
                                args.early_stopping)

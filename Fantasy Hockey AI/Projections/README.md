@@ -315,9 +315,26 @@ whole. Nothing is shuffled across time. That is the *scored* build, and every nu
 file comes from it.
 
 `--no-holdout` is the **deployment** build: every available season goes into the fit, nothing
-is held back, and no metrics come out. That is what currently sits in `models/` — trained on
-all three seasons, for projecting 2026-27. The distinction matters, and `docs/model-cards-B.md`
-states it at the top: the shipped boosters are not the ones the accuracy tables describe.
+is held back, and no metrics come out. It sits in `models/2026-27/skaters/B/` — trained on all three
+seasons, for projecting 2026-27. The distinction matters, and `docs/model-cards-B.md` states it at
+the top: the shipped boosters are not the ones the accuracy tables describe.
+
+**`models/` is filed by the season a build predicts, then by model family** (`paths.models_dir`):
+
+```
+models/2025-26/skaters/A/       the scored per-game skater chain, holding out 2025-26
+models/2025-26/goalie_start/    goalie P(start), holding out 2025-26
+models/2026-27/skaters/B/       the deployment skater chain, trained through 2025-26
+models/2026-27/ros_season/      the deployment rest-of-season build
+models/2024-25/...              section 11's tuning builds, when they exist
+```
+
+A deployment build predicts the season after the last one it trained on, so it can never share a
+folder with a scored build. A family a season lacks is a missing folder -- today 2025-26 has no
+saved rest-of-season boosters (that holdout build only wrote its predictions file) and 2026-27 has
+no deployment P(start). `predict.py --season S` reads `models/S/skaters/B/` by default
+(`--model-season`, `--model-variant` override it); `ros_predict.py --season S` reads
+`models/S/ros_<horizon>/`; `goalie_starts.py --season S` reads and writes `models/S/goalie_start/`.
 
 Withholding the most recent season from a model you intend to *use* costs real accuracy.
 Measured by training on one season at a time and scoring 2025-26:

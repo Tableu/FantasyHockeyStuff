@@ -62,10 +62,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_fit(horizon):
-    """The boosters and the shrinkage they were trained alongside, for this horizon."""
+def load_fit(horizon, season):
+    """The boosters and the shrinkage they were trained alongside, for this horizon, from the
+    folder of the season being projected (models/<season>/ros_<horizon>/)."""
     prefix = ros_train.model_prefix(horizon)
-    sidecar = paths.MODELS_DIR / f"{prefix}_fit.json"
+    sidecar = paths.models_dir(season, prefix) / f"{prefix}_fit.json"
     if not sidecar.exists():
         raise FileNotFoundError(
             f"{sidecar} is missing -- run ros_train.py --horizon {horizon} --save")
@@ -76,12 +77,12 @@ def load_fit(horizon):
     return payload, fitted
 
 
-def load_boosters(horizon):
+def load_boosters(horizon, season):
     import lightgbm as lgb
     prefix = ros_train.model_prefix(horizon)
     boosters = {}
     for factor in baselines.FACTORS:
-        path = paths.MODELS_DIR / f"{prefix}_{factor}.txt"
+        path = paths.models_dir(season, prefix) / f"{prefix}_{factor}.txt"
         if not path.exists():
             raise FileNotFoundError(
                 f"{path} is missing -- run ros_train.py --horizon {horizon} --save")
@@ -129,7 +130,7 @@ def run(args):
              else table["game_date"].max())
     horizon_days = ros.parse_horizon(args.horizon)
 
-    payload, fitted = load_fit(args.horizon)
+    payload, fitted = load_fit(args.horizon, args.season)
     describe_provenance(payload)
     if args.season in (payload.get("trained_on") or []):
         log.warning("%s is one of the seasons these models trained on, so anything measured "
@@ -154,7 +155,7 @@ def run(args):
     if args.baseline:
         factors = baselines.predict(state, fitted, "shrunk")
     else:
-        boosters = load_boosters(args.horizon)
+        boosters = load_boosters(args.horizon, args.season)
         columns = payload["feature_columns"]
         missing = [c for c in columns if c not in state.columns]
         for column in missing:

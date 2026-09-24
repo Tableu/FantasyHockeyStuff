@@ -8,7 +8,7 @@ Four tables make a simulated season, and each arrives from a sibling folder by p
     availability         who was unavailable, and stayed unavailable (injured_at_lockout)
 
 The one that needs guarding is the first. `Projections/reports/lambdas_<season>_<variant>.
-parquet` is produced by whatever boosters are sitting in `Projections/models/` when it is run,
+parquet` is produced by whichever boosters `predict.py` is pointed at (the deployment build by default),
 and right now those are the **deployment** build, trained on all three seasons including the
 one this simulator replays. Handing that table to the full-system manager and a naive
 season-to-date rate to the streamer does not compare a modelling stack against a streaming

@@ -81,8 +81,7 @@ def parse_args():
                         help="The held-out season: scored by --train, predicted by --predict")
     parser.add_argument("--train-seasons", default=",".join(TRAIN_SEASONS))
     parser.add_argument("--models-dir", type=Path, default=None,
-                        help="Default models/holdout_<season>/ -- never models/ itself, which "
-                             "holds the deployment boosters")
+                        help="Default models/<season>/goalie_start/, for the season held out")
     parser.add_argument("--save", action="store_true", help="Write the booster and sidecar")
     parser.add_argument("--rounds", type=int, default=400)
     return parser.parse_args()
@@ -263,7 +262,7 @@ def normalize(table: pd.DataFrame, column="p_start_raw", out="p_start") -> pd.Da
 def models_dir_for(season, override=None) -> Path:
     """Where a P(start) booster held out of `season` lives. It used to be models/ whatever the
     seasons, so a second build silently replaced the first."""
-    return override or (paths.MODELS_DIR / f"holdout_{season}")
+    return override or paths.models_dir(season, "goalie_start")
 
 
 def train(rounds=400, save=False, train_seasons=None, season=HOLDOUT_SEASON,

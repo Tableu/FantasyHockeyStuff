@@ -366,7 +366,7 @@ goals-and-assists-only format −3.02, where a goalie is a liability rather than
 
 **The projections are out of sample.** `inputs.py` reads `predictions_A.parquet`, the holdout
 build's scored season, and refuses `lambdas_2025-26_A.parquet` — which is produced by whatever
-boosters sit in `Projections/models/`, currently the deployment build trained on all three seasons
+boosters `Projections/predict.py` is pointed at, by default the deployment build trained on all three seasons
 and therefore in-sample on the season being replayed. Handing that to rung 4 and a box-score rate
 to rung 3 would compare a manager who has seen the results against one who has not.
 

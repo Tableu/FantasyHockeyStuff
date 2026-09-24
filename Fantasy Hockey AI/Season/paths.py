@@ -95,7 +95,7 @@ def holdout_predictions(season: str, variant: str = "A") -> Path:
     """The projections the backtest runs on.
 
     Deliberately NOT `lambdas_<season>_<variant>.parquet`. That table is whatever is in
-    `Projections/models/` at the time, which is currently the deployment build trained on all
+    `Projections/predict.py` was pointed at, by default the deployment build trained on all
     three seasons -- in-sample on the season being simulated. This file is the holdout build's
     scored season, which is the only honest input for a strategy comparison. `inputs.py`
     asserts it. Keyed by the season held out: the unkeyed name made `load_projections("2024-25")`

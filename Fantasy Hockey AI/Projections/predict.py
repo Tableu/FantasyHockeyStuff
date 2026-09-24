@@ -53,12 +53,22 @@ def parse_args():
     parser.add_argument("--variant", choices=("A", "B"), default="A",
                         help="Which lineup variant's table to read (default A: live-shaped)")
     parser.add_argument("--features-dir", type=Path, default=None)
+    parser.add_argument("--model-season", default=None,
+                        help="Which season's boosters to use (models/<season>/skaters/). Default: the "
+                             "season being projected; required with --features")
+    parser.add_argument("--model-variant", choices=("A", "B"), default="B",
+                        help="Which lineup variant the boosters were trained on (default B, the "
+                             "deployment build)")
     parser.add_argument("--out", type=Path, default=None)
     return parser.parse_args()
 
 
+# The booster folder this run reads, set by main() from --model-season / --model-variant.
+MODEL_DIR = None
+
+
 def load_model(name):
-    path = paths.MODELS_DIR / f"{name}.txt"
+    path = MODEL_DIR / f"{name}.txt"
     if not path.exists():
         raise FileNotFoundError(f"{path} is missing -- run train.py --all")
     return lgb.Booster(model_file=str(path))
@@ -66,7 +76,7 @@ def load_model(name):
 
 def sidecar(name) -> dict:
     """The record train.py saved beside a booster: feature list and offset intercept."""
-    path = paths.MODELS_DIR / f"{name}.json"
+    path = MODEL_DIR / f"{name}.json"
     if not path.exists():
         raise FileNotFoundError(f"{path} is missing -- run train.py --all")
     return json.loads(path.read_text(encoding="utf-8"))
@@ -75,7 +85,7 @@ def sidecar(name) -> dict:
 def training_columns():
     """The exact feature list the models were fit on, from any model's sidecar."""
     for target in targets_module.PIPELINE:
-        if (paths.MODELS_DIR / f"{target.name}.json").exists():
+        if (MODEL_DIR / f"{target.name}.json").exists():
             return sidecar(target.name)["feature_columns"]
     raise FileNotFoundError("no trained model sidecar found -- run train.py --all")
 
@@ -131,7 +141,13 @@ def project(table: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
+    global MODEL_DIR
     args = parse_args()
+    model_season = args.model_season or args.season
+    if model_season is None:
+        raise SystemExit("--features needs --model-season: which season's boosters to project with")
+    MODEL_DIR = paths.models_dir(model_season, "skaters", args.model_variant)
+    log.info("boosters from %s", MODEL_DIR)
     if args.features:
         table = pd.read_parquet(args.features)
         label = args.features.stem
