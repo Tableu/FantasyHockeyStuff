@@ -83,6 +83,10 @@ def parse_args():
     parser.add_argument("--models-dir", type=Path, default=None,
                         help="Default models/<season>/goalie_start/, for the season held out")
     parser.add_argument("--save", action="store_true", help="Write the booster and sidecar")
+    parser.add_argument("--no-holdout", action="store_true",
+                        help="Train on every --train-seasons season with nothing held back and "
+                             "save to models/<next season>/goalie_start/ -- the deployment build. "
+                             "No metrics come out of it; the last scored build supplies them")
     parser.add_argument("--rounds", type=int, default=400)
     return parser.parse_args()
 
@@ -341,6 +345,40 @@ def train(rounds=400, save=False, train_seasons=None, season=HOLDOUT_SEASON,
     return sidecar
 
 
+def train_deployment(rounds=400, train_seasons=None, models_dir=None) -> dict:
+    """The build to ship: every season in the fit, nothing scored, filed under the season after
+    the last one trained on (`paths.target_season`). Same features and parameters as `train`, so
+    the scored build's metrics describe it."""
+    train_seasons = list(train_seasons or TRAIN_SEASONS)
+    models_dir = models_dir or paths.models_dir(paths.target_season(train_seasons), "goalie_start")
+    fit = build(train_seasons)
+    booster = lgb.train(PARAMS, lgb.Dataset(_matrix(fit), label=fit["is_starter"].astype(int)),
+                        num_boost_round=rounds)
+    gain = booster.feature_importance("gain")
+    top = sorted(zip(FEATURES, gain / max(gain.sum(), 1e-9)), key=lambda kv: -kv[1])[:8]
+    scored = max(train_seasons)
+    sidecar = {
+        "target": "is_starter",
+        "trained_on": train_seasons,
+        "deployment_build": True,
+        # A deployment build has no metrics of its own; quote the last scored build's, and say so.
+        "scored_on": None,
+        "metrics_from": f"goalie_start_metrics_{scored}.json",
+        "rows": int(len(fit)),
+        "rounds": rounds,
+        "top_features": [{"feature": k, "gain_share": round(v, 4)} for k, v in top],
+        "params": PARAMS,
+        "feature_columns": FEATURES,
+    }
+    paths.ensure(models_dir)
+    booster.save_model(str(models_dir / "goalie_start.txt"))
+    (models_dir / "goalie_start.json").write_text(json.dumps(sidecar, indent=2, default=str),
+                                                  encoding="utf-8")
+    log.info("deployment build on %s saved -> %s", ", ".join(train_seasons),
+             models_dir / "goalie_start.txt")
+    return sidecar
+
+
 def predict(season: str, models_dir=None) -> pd.DataFrame:
     models_dir = models_dir_for(season, models_dir)
     booster = lgb.Booster(model_file=str(models_dir / "goalie_start.txt"))
@@ -362,13 +400,20 @@ def predict(season: str, models_dir=None) -> pd.DataFrame:
 def main():
     args = parse_args()
     train_seasons = [s.strip() for s in args.train_seasons.split(",") if s.strip()]
+    if args.no_holdout:
+        if args.train or args.predict:
+            raise SystemExit("--no-holdout is its own build: it scores nothing and there is no "
+                             "unseen season to predict")
+        train_deployment(rounds=args.rounds, train_seasons=train_seasons,
+                         models_dir=args.models_dir)
+        return
     if args.train:
         train(rounds=args.rounds, save=args.save, train_seasons=train_seasons,
               season=args.season, models_dir=args.models_dir)
     if args.predict:
         predict(args.season, args.models_dir)
     if not args.train and not args.predict:
-        raise SystemExit("nothing to do: pass --train and/or --predict")
+        raise SystemExit("nothing to do: pass --train and/or --predict, or --no-holdout")
 
 
 if __name__ == "__main__":

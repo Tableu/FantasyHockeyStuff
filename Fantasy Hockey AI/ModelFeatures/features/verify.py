@@ -242,14 +242,24 @@ def injury_flag_knowable(table: pd.DataFrame) -> bool:
     flag = rows["injured_at_lockout"].fillna(False).astype(bool)
     spell = rows["label_in_spell"].fillna(False).astype(bool)
     outside = int((flag & ~spell).sum())
-    previous = spell.groupby([rows["team_id"], rows["player_id"]]).shift(1).fillna(False).astype(bool)
-    first_games = spell & ~previous
-    wrong = int((spell & (flag != previous)).sum())
-    # A new spell starting the game after another ended looks "wrong" here but is not; allow a
-    # sliver for it rather than false-fail.
-    return _report("injury flag knowable", outside == 0 and wrong <= 0.001 * max(int(spell.sum()), 1),
-                   f"{int(flag.sum())} flagged, {int(first_games.sum())} spell first games unflagged; "
-                   f"{outside} flagged outside a spell, {wrong} in-spell rows flagged wrongly")
+    groups = [rows["team_id"], rows["player_id"]]
+    previous = spell.groupby(groups).shift(1).fillna(False).astype(bool)
+    # A player's first row of the season has no previous game to look at. If he is in a spell
+    # there, it began before the opener (a pre-season injury), which the lockout does know.
+    opener = rows.groupby(groups).cumcount() == 0
+    first_games = spell & ~previous & ~opener
+    # The leak this check exists for: a spell's first game flagged. Must be zero.
+    leaked = int((spell & flag & ~previous & ~opener).sum())
+    # The other direction under-flags, which is conservative: a new spell starting the game after
+    # another ended (the Olympic break, a second injury) is rightly unflagged but looks like a miss
+    # here, because the check sees one continuous run. Allowed as a sliver.
+    missed = int((spell & ~flag & previous).sum())
+    ok = outside == 0 and leaked == 0 and missed <= 0.005 * max(int(spell.sum()), 1)
+    return _report("injury flag knowable", ok,
+                   f"{int(flag.sum())} flagged, {int(first_games.sum())} spell first games unflagged, "
+                   f"{int((spell & flag & opener).sum())} out since before the opener; {outside} "
+                   f"flagged outside a spell, {leaked} first games flagged, {missed} back-to-back "
+                   f"spell starts unflagged")
 
 
 def age(table: pd.DataFrame) -> bool:

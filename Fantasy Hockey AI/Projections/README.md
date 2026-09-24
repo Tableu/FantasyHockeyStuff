@@ -223,6 +223,7 @@ parquet. There is no `pyodbc` in `requirements.txt`, and that is the point.
 pip install -r requirements.txt
 python train.py --all                 # fit on 2023-24+2024-25, hold 2025-26 out (scored)
 python train.py --all --no-holdout     --train-seasons 2023-24,2024-25,2025-26   # the deployment build: nothing held back
+python goalie_starts.py --no-holdout --train-seasons 2023-24,2024-25,2025-26   # the deployment P(start)
 python calibrate.py                   # fit the dispersion section 5 needs
 python evaluate.py --cross-features A # score the holdout, and bound the live-feed risk
 python evaluate.py --recalibrate      # ... with drift.py's rolling level correction
@@ -330,9 +331,10 @@ models/2024-25/...              section 11's tuning builds, when they exist
 ```
 
 A deployment build predicts the season after the last one it trained on, so it can never share a
-folder with a scored build. A family a season lacks is a missing folder -- today 2025-26 has no
-saved rest-of-season boosters (that holdout build only wrote its predictions file) and 2026-27 has
-no deployment P(start). `predict.py --season S` reads `models/S/skaters/B/` by default
+folder with a scored build. A family a season lacks is a missing folder; today both 2025-26
+(scored) and 2026-27 (deployment) have the skater chain, `ros_season/` and `goalie_start/`. The
+2025-26 rest-of-season boosters come from the scored build with `--save`; the 2026-27 P(start) from
+`goalie_starts.py --no-holdout --train-seasons 2023-24,2024-25,2025-26`. `predict.py --season S` reads `models/S/skaters/B/` by default
 (`--model-season`, `--model-variant` override it); `ros_predict.py --season S` reads
 `models/S/ros_<horizon>/`; `goalie_starts.py --season S` reads and writes `models/S/goalie_start/`.
 
