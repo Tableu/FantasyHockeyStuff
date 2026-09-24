@@ -249,7 +249,41 @@ rung 7 − rung 5 against the defaults', paired by replication):
 Defaults unchanged; reserve and lam go to section 11's search, on 2024-25. One reading is not yet
 explained: lam = 0 made *fewer* rentals than the default under banger scoring (76 against 98).
 
-## Re-measured (2026-09-23) -- these supersede every table above
+## Re-measured (2026-09-24) -- supersedes every table below
+
+The whole grid again (`docs/ladder-*_*-r12.md`), on commit 553c904, after everything since the
+2026-09-23 table: the knowable injury flag and age, the league's real season (21 + 3 weeks in the
+14-team replay, a 22-week season and an 8-team bracket in the 12-team one), the goalie-line leak
+fix, goalie draws, waiver claims on (every earlier grid run had claims off), horizons capped at the
+fantasy final, the playoff objective, and the two harness fixes (lineups set before any is scored;
+hash-order independence). 8 replications = 8 drafts, paired; bold is more than two standard errors
+from zero; old -> new:
+
+| comparison | 14-team points | 14-team banger | 12-team points | 12-team banger |
+|---|---|---|---|---|
+| attention (2 − 1) | **+25.4 → +25.9** ± 4.1 | **+50.4 → +50.3** ± 5.5 | **+24.9 → +24.5** ± 1.8 | **+48.8 → +48.4** ± 3.4 |
+| naive streaming (3 − 2) | **+19.9 → +15.7** ± 3.7 | **+45.9 → +44.6** ± 5.2 | **+20.6 → +19.7** ± 1.5 | **+43.7 → +44.3** ± 3.0 |
+| the stack, rung 4 (4 − 3) | +6.1 → **+8.9** ± 3.4 | −1.0 → −3.1 ± 3.5 | +1.4 → +2.2 ± 1.6 (16 drafts) | −4.4 → **−6.6** ± 2.2 (16 drafts) |
+| add/drop vs hold (5 − 6) | **+34.2 → +31.3** ± 2.7 | **+51.2 → +48.7** ± 5.4 | **+29.2 → +27.6** ± 1.4 | **+39.9 → +41.9** ± 2.4 |
+| add/drop vs rung 4 (5 − 4) | **+15.8 → +14.0** ± 2.2 | **+12.1 → +14.5** ± 2.5 | **+15.9 → +15.6** ± 1.8 | **+6.2 → +11.6** ± 1.6 |
+| streaming on top (7 − 5) | **+12.1 → +15.3** ± 2.8 | **+27.8 → +24.6** ± 3.8 | **+13.3 → +12.7** ± 1.7 | **+29.2 → +30.8** ± 1.8 |
+| orchestrator vs hold (7 − 6) | **+36.5 → +34.9** ± 4.0 | **+65.5 → +63.2** ± 6.9 | **+33.4 → +32.4** ± 1.4 | **+64.4 → +63.9** ± 1.6 |
+| VOR draft, rung 2 held (12 − 2) | **−6.7** → −1.3 ± 0.7 | **−7.7 → −5.3** ± 0.8 | **+4.1 → +3.1** ± 0.9 | **−6.3 → −5.0** ± 0.8 |
+| VOR draft, rung 7 held (17 − 7) | **+2.5** → +2.2 ± 1.4 | **+4.0 → +4.3** ± 1.4 | **+4.9 → +9.1** ± 1.0 | +0.2 → **+4.2** ± 1.2 |
+
+**What survived everything:** attention, streaming, the add/drop rule and the orchestrator's rentals
+clear the noise in all four combinations, at sizes close to the day before. **What moved:** rung 4
+now clears rung 3 in the target format (+8.9) and loses to it clearly in 12-team banger (−6.6 at 16
+drafts); the one sign flip (12-team points 4 − 3) was noise, confirmed at 16 drafts. The VOR draft
+now helps the orchestrator in every combination and no longer measurably hurts a manager who never
+uses the wire in the 14-team points format (−1.3 ± 0.7), though it still does under banger.
+
+**The playoffs separate the rungs more than points do.** Playoff rate, 14-team points: rungs 1-2
+4-32%, rung 4 57-75%, rung 5 86%, rung 7 79% (the field changes the number: each run seats a
+different mix). In every run the rungs that never transact make the bracket 0-11% of the time and
+rung 7 79-100%.
+
+## Re-measured (2026-09-23) -- superseded by the table above
 
 Three fixes landed before these numbers, so everything above predates at least one of them:
 
