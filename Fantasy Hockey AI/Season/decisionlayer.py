@@ -35,8 +35,20 @@ import estimators     # noqa: E402
 import managers       # noqa: E402
 import orchestrator   # noqa: E402
 import slots          # noqa: E402
+import strategy       # noqa: E402
 import streaming      # noqa: E402
 import valuation      # noqa: E402
 
 __all__ = ["adddrop", "draft", "estimators", "managers", "orchestrator", "slots",
-           "streaming", "valuation"]
+           "strategy", "streaming", "valuation"]
+
+
+def load_strategy(name=None):
+    """The strategy parameters from Settings/ (a name there, or a path). Decisions/ does
+    no file I/O, so the file is read here and handed over parsed."""
+    import json
+
+    path = paths.strategy_config(name) if name else paths.STRATEGY_CONFIG
+    if not path.exists():
+        raise FileNotFoundError(f"no strategy settings at {path}")
+    return strategy.from_dict(json.loads(path.read_text(encoding="utf-8")), name=path.stem)

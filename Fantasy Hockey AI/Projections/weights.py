@@ -5,9 +5,9 @@ The models in this folder project **stats**, never points. Nothing here, and not
 supplies, so the same fitted models serve any number of leagues:
 
     python evaluate.py --weights points-league
-    python evaluate.py --weights ../LeagueSettings/scoring/banger-league.json
+    python evaluate.py --weights ../Settings/scoring/banger-league.json
 
-`LeagueSettings/scoring/` holds the scoring files, shared by every folder. None of them is a default and nothing loads one
+`Settings/scoring/` holds the scoring files, shared by every folder. None of them is a default and nothing loads one
 automatically -- if no weights are given, only per-category metrics are reported.
 
 A scoring file is JSON:
@@ -101,5 +101,5 @@ def load(path) -> ScoreSet:
 
 
 def available() -> list[Path]:
-    """The scoring files in `LeagueSettings/scoring/`, for `--list-scoresets`."""
+    """The scoring files in `Settings/scoring/`, for `--list-scoresets`."""
     return sorted(paths.SCORESETS_DIR.glob("*.json")) if paths.SCORESETS_DIR.exists() else []

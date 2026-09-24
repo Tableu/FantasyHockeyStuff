@@ -43,7 +43,7 @@ def seat_order(config, replication=0, block=1) -> list:
 
 def run(state, config, board: pd.Series, eligibility: dict, replication=0,
         boards: dict | None = None, block=1) -> None:
-    """Snake draft until every roster is full.
+    """Draft until every roster is full: snake or linear, as the league's `draft.type` says.
 
     A single shared board means every team wants the same player, so the snake order is the only
     thing separating the seats -- which is the point: it isolates draft position as the one
@@ -63,7 +63,9 @@ def run(state, config, board: pd.Series, eligibility: dict, replication=0,
     forced_picks = 0
 
     for round_number in range(rounds):
-        seats = order if round_number % 2 == 0 else list(reversed(order))
+        # A snake reverses every other round; a linear draft keeps the same order each round.
+        snake = config.draft["type"] == "snake"
+        seats = order if (round_number % 2 == 0 or not snake) else list(reversed(order))
         for seat in seats:
             team = state.teams[seat]
             picks_left = rounds - len(team.roster)

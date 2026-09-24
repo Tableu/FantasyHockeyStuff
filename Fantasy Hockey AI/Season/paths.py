@@ -6,8 +6,8 @@ Section 6 starts from files three siblings produced and opens no database of its
                                    per-player availability flag, the goalie start lines
     ModelFeatures/data/lineups/    the goalie candidate set and who actually started
     Projections/reports/           the projections, out of sample on the simulated season
-    LeagueSettings/scoring/        what a goal is worth
-    LeagueSettings/rosters/        the format: slots, bench, IR, moves, playoffs
+    Settings/scoring/        what a goal is worth
+    Settings/rosters/        the format: slots, bench, IR, moves, playoffs
 
 It is the first folder in the stack that also imports *code* from a sibling -- `Simulation`'s
 sampler, scoring and copula -- because drawing a night is a computation, not a file. That one
@@ -32,7 +32,7 @@ PROJECTIONS_REPORTS = PROJECTIONS_DIR / "reports"
 # module was imported first -- which, with this folder on sys.path, is this one. So this constant
 # has to keep pointing where Simulation/paths.py points. `simlayer.assert_scoreset_dirs_agree`
 # checks it rather than trusting it.
-SETTINGS_DIR = SIBLINGS / "LeagueSettings"
+SETTINGS_DIR = SIBLINGS / "Settings"
 SCORESETS_DIR = SETTINGS_DIR / "scoring"
 ROSTERS_DIR = SETTINGS_DIR / "rosters"
 FEATURES_DIR = SIBLINGS / "ModelFeatures" / "data" / "features"
@@ -42,6 +42,11 @@ REPORTS_DIR = PROJECT_ROOT / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
 
 LEAGUE_CONFIG = ROSTERS_DIR / "league.json"
+
+# The strategy parameters (horizons, margins, streaming, priors): what a manager chooses, as
+# against scoring/ and rosters/, what the league imposes. A --strategy name is looked up here.
+STRATEGY_DIR = SETTINGS_DIR
+STRATEGY_CONFIG = STRATEGY_DIR / "strategy.json"
 
 # The Monte Carlo layer's two fitted files, read by `simlayer.py` so that nothing here has to
 # import Simulation's own `paths` module -- which it cannot, because this one shadows it.
@@ -116,6 +121,11 @@ def ros_predictions(season: str, horizon: str = "season") -> Path:
 def scoreset(name: str) -> Path:
     path = Path(name)
     return path if path.exists() else SCORESETS_DIR / f"{path.stem}.json"
+
+
+def strategy_config(name: str) -> Path:
+    path = Path(name)
+    return path if path.exists() else STRATEGY_DIR / f"{path.stem}.json"
 
 
 def league_config(name: str) -> Path:

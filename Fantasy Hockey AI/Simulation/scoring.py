@@ -2,7 +2,7 @@
 
 The projection layer is scoring-agnostic and so is the sampler: what a goal is worth is
 data, supplied as a JSON file, and one set of draws can be scored under several leagues at
-once. `LeagueSettings/scoring/` holds the scoring files; none is a default and nothing loads one
+once. `Settings/scoring/` holds the scoring files; none is a default and nothing loads one
 automatically.
 
 The file format is the one `Projections/weights.py` reads, and deliberately so -- the same

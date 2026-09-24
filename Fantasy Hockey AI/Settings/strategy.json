@@ -1,0 +1,36 @@
+{
+  "description": "How the managers decide: every tunable choice a manager makes, separate from the league's rules (scoring/, rosters/). Read by Season (decisionlayer.load_strategy) and handed to Decisions/, which never reads a file itself. Values are the shipped defaults; section 11 tunes them. 'inf' is accepted wherever a number is.",
+  "adddrop": {
+    "horizon_weeks": 3,
+    "margin": 1.0,
+    "rate_source": "ros",
+    "claim_premium": 0.0,
+    "shortlist": 10,
+    "drop_shortlist": 4
+  },
+  "streaming": {
+    "spots": 2,
+    "reserve": 2,
+    "lam": 2.0,
+    "margin": 0.0,
+    "gate": false,
+    "flat": false,
+    "claim": true,
+    "shortlist": 12
+  },
+  "rung3_streamer": {
+    "horizon_weeks": 1
+  },
+  "rung4_full_system": {
+    "horizon_weeks": 1,
+    "drop_horizon_weeks": 3,
+    "drop_rate_source": "per_game",
+    "z_clip": 3.0
+  },
+  "priors": {
+    "prior_rate_shrink_games": 20,
+    "goalie_start_share_prior": 0.5,
+    "goalie_start_share_prior_games": 2,
+    "opening_days": 7
+  }
+}

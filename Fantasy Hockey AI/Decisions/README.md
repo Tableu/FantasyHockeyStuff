@@ -36,9 +36,11 @@ draft.py        draft boards, the prior rates (per game played, and per team gam
 estimators.py   NaiveHistory: rung 3's box-score projection
 valuation.py    a player's and a swap's forward value; a swap is priced on the roster by
                 re-solving the lineup on every night it touches; known() -- unknown is not zero
-adddrop.py      section 9's add/drop rule and AddDropParams (default H=3, m=1, rest-of-season)
+adddrop.py      section 9's add/drop rule and AddDropParams (values in Settings/)
 streaming.py    section 10's rentals: k streaming spots, a drop cost of what cannot be bought
                 back, a bar that falls as the week's moves expire, a reserve kept for upgrades
+strategy.py     Strategy: every rung's parameters, parsed from Settings/strategy.json
+                (Season reads the file; nothing here does). No defaults -- a missing key is an error
 orchestrator.py DailyPlan: the section 10 day as a fixed, logged sequence -- matchup, IR,
                 upgrade, stream, lineup -- delegating every decision to the module that owns it
 ```

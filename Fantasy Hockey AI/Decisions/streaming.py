@@ -49,14 +49,15 @@ log = logging.getLogger("streaming")
 
 @dataclass(frozen=True)
 class StreamParams:
-    spots: int = 2              # k streaming spots; 0 turns streaming off (rung 7 == rung 5)
-    reserve: int = 2            # moves held back for upgrades on the week's first day, -> 0
-    lam: float = 2.0            # points: the shadow price of a move at the start of the week
-    margin: float = 0.0         # sds of the week's gain a stream must also clear
-    gate: bool = False          # scale the gain by phi(z)/phi(0) of the matchup z
-    flat: bool = False          # hold the bar at lam/2 all week (the falling bar's average)
-    claim: bool = True          # may claim a rental off waivers (priced from his clear date)
-    shortlist: int = 12         # free agents priced on the roster per pass
+    # No defaults: the values are settings, in Settings/strategy.json. See `strategy.py`.
+    spots: int                  # k streaming spots; 0 turns streaming off (rung 7 == rung 5)
+    reserve: int                # moves held back for upgrades on the week's first day, -> 0
+    lam: float                  # points: the shadow price of a move at the start of the week
+    margin: float               # sds of the week's gain a stream must also clear
+    gate: bool                  # scale the gain by phi(z)/phi(0) of the matchup z
+    flat: bool                  # hold the bar at lam/2 all week (the falling bar's average)
+    claim: bool                 # may claim a rental off waivers (priced from his clear date)
+    shortlist: int              # free agents priced on the roster per pass
 
     def describe(self) -> str:
         return (f"k={self.spots} r={self.reserve} lam={self.lam:g} ms={self.margin:g}"

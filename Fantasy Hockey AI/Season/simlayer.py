@@ -22,7 +22,7 @@ every other layer in this stack consumes the one below it.
 
 **On `scoring`:** it does `import paths` and asks for `paths.SCORESETS_DIR`, which resolves to
 *this* folder's paths module. It works because `Season/paths.py` and `Simulation/paths.py` both
-point `SCORESETS_DIR` at the shared `LeagueSettings/scoring/` folder. That agreement is
+point `SCORESETS_DIR` at the shared `Settings/scoring/` folder. That agreement is
 load-bearing, so it is written down here and asserted below rather than left to be discovered
 when one of the two changes.
 """
@@ -52,8 +52,8 @@ def assert_scoreset_dirs_agree() -> None:
     silently be looked for in the wrong place -- so fail loudly instead.
     """
     text = _sim_paths.read_text(encoding="utf-8")
-    if 'SCORESETS_DIR = PROJECT_ROOT.parent / "LeagueSettings" / "scoring"' not in text:
-        raise RuntimeError(f"{_sim_paths} no longer points SCORESETS_DIR at LeagueSettings/scoring; "
+    if 'SCORESETS_DIR = PROJECT_ROOT.parent / "Settings" / "scoring"' not in text:
+        raise RuntimeError(f"{_sim_paths} no longer points SCORESETS_DIR at Settings/scoring; "
                            f"Simulation/scoring.py resolves it against Season/paths.py under the "
                            f"flat-module convention, so the two have to agree. See simlayer.py.")
     if not paths.SCORESETS_DIR.exists():

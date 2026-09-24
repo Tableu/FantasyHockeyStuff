@@ -162,7 +162,7 @@ def main():
     out.to_parquet(destination, index=False)
     log.info("wrote %s: %d rows x %d columns", destination.name, len(out), out.shape[1])
     log.info("stat projections only -- apply a scoring system with weights.py if you want "
-             "points (by name from LeagueSettings/scoring/, or a path)")
+             "points (by name from Settings/scoring/, or a path)")
 
 
 if __name__ == "__main__":

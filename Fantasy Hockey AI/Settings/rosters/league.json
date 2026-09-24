@@ -1,0 +1,79 @@
+{
+  "name": "target-league",
+  "description": "14-team head-to-head weekly points, daily lock, 7 acquisitions a week. Active: 2C 2LW 2RW 1F 4D 1F/D 2G. The F and F/D slots are composite -- they accept any forward and any skater respectively.",
+  "teams": 14,
+  "active_slots": {
+    "C": 2,
+    "LW": 2,
+    "RW": 2,
+    "F": 1,
+    "D": 4,
+    "F/D": 1,
+    "G": 2
+  },
+  "bench": 4,
+  "ir": 2,
+  "moves_per_week": 7,
+  "moves_carry_over": false,
+  "waiver_days": 2,
+  "ties": "split",
+  "schedule": {
+    "type": "round_robin",
+    "regular_season_weeks": 26,
+    "week_starts_on": "MON"
+  },
+  "draft": {
+    "type": "snake",
+    "order": "lottery",
+    "keepers": 0
+  },
+  "playoffs": {
+    "teams": 8,
+    "rounds": 3,
+    "weeks_per_round": 1,
+    "seeding": "record",
+    "tiebreak": "points_for"
+  },
+  "eligibility_platform": "yahoo",
+  "eligibility_season": "2026-27",
+  "slot_positions": {
+    "C": [
+      "C"
+    ],
+    "LW": [
+      "LW"
+    ],
+    "RW": [
+      "RW"
+    ],
+    "D": [
+      "D"
+    ],
+    "G": [
+      "G"
+    ],
+    "F": [
+      "C",
+      "LW",
+      "RW"
+    ],
+    "F/D": [
+      "C",
+      "LW",
+      "RW",
+      "D"
+    ]
+  },
+  "rules": {
+    "lineup_lock": "daily",
+    "waivers": "rolling",
+    "ir_eligible": "injured",
+    "move_cost": {
+      "add": 1,
+      "claim": 1,
+      "drop": 0,
+      "ir_stash": 0,
+      "ir_activate": 0
+    }
+  }
+}

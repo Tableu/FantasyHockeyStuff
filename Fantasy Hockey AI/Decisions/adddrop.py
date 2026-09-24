@@ -37,16 +37,14 @@ log = logging.getLogger("adddrop")
 
 @dataclass(frozen=True)
 class AddDropParams:
-    # Weeks past the current one both sides are priced over. 3, as section 9's plan set it: on the
-    # 2025-26 sensitivity check (Season/docs/ladder-league_sens-*.md) H=1, 3 and the rest of the
-    # season all cleared hold, with 3 and season within noise of each other and ahead of 1. That is
-    # a sensitivity reading on the only clean holdout, not a tuned value -- section 11 tunes it.
-    horizon_weeks: int | None = 3
-    margin: float = 1.0               # sds of the gain a move must clear; inf never moves
-    rate_source: str = "ros"          # "ros" (rest-of-season, holdout) or "per_game"
-    claim_premium: float = 0.0        # extra points a waiver claim must clear; inf never claims
-    shortlist: int = 10               # free agents priced on the roster per pass
-    drop_shortlist: int = 4           # cheapest fieldable drops tried against each
+    # No defaults: the values are settings, in Settings/strategy.json (its README says why
+    # each is what it is). See `strategy.py`.
+    horizon_weeks: int | None         # weeks past the current one both sides are priced over
+    margin: float                     # sds of the gain a move must clear; inf never moves
+    rate_source: str                  # "ros" (rest-of-season, holdout) or "per_game"
+    claim_premium: float              # extra points a waiver claim must clear; inf never claims
+    shortlist: int                    # free agents priced on the roster per pass
+    drop_shortlist: int               # cheapest fieldable drops tried against each
 
     def describe(self) -> str:
         return (f"H={self.horizon_weeks} m={self.margin:g} rate={self.rate_source} "

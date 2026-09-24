@@ -38,6 +38,7 @@ import engine as engine_module
 import inputs
 import league as league_module
 import schedule as schedule_module
+import decisionlayer
 import simlayer
 from decisionlayer import draft as draft_module
 from decisionlayer import managers as managers_module
@@ -54,6 +55,7 @@ def parse_args():
     parser.add_argument("--replications", type=int, default=4)
     parser.add_argument("--decision-sims", type=int, default=120)
     parser.add_argument("--league", default=None)
+    parser.add_argument("--strategy", default=None, help="Strategy settings (default strategy.json)")
     return parser.parse_args()
 
 
@@ -139,15 +141,18 @@ def run(args):
     calendar = schedule_module.from_candidates(
         data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
 
+    strategy = decisionlayer.load_strategy(args.strategy)
+    shrink = strategy.prior_rate_shrink_games
     prior_actuals = inputs.load_actuals(args.prior_season)
     prior_goalies = inputs.load_goalie_starts(args.prior_season)
     board = {int(k): float(v) for k, v in
              draft_module.prior_season_board(prior_actuals, prior_goalies, scoreset).items()}
     rate = {int(k): float(v) for k, v in
-            draft_module.prior_season_rate(prior_actuals, prior_goalies, scoreset).items()}
+            draft_module.prior_season_rate(prior_actuals, prior_goalies, scoreset,
+                                            shrink).items()}
     forward = {int(k): float(v) for k, v in
                draft_module.prior_season_team_game_rate(prior_actuals, prior_goalies,
-                                                        scoreset).items()}
+                                                        scoreset, shrink).items()}
 
     # The oracle's cheat sheet, built from the same Outcomes the engine resolves nights with.
     outcomes = engine_module.Outcomes(data["actuals"], data["goalie_starts"], scoreset)
@@ -159,7 +164,7 @@ def run(args):
 
     rows = []
     for replication in range(args.replications):
-        field = managers_module.build_field(config, scoreset, rungs=(90, 3, 4, 99),
+        field = managers_module.build_field(config, scoreset, strategy, rungs=(90, 3, 4, 99),
                                             replication=replication)
         season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                      replication=replication, decision_sims=args.decision_sims)

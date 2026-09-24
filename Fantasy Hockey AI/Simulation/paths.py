@@ -14,7 +14,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 PROJECTIONS_DIR = PROJECT_ROOT.parent / "Projections"
 PROJECTIONS_REPORTS = PROJECTIONS_DIR / "reports"
-SCORESETS_DIR = PROJECT_ROOT.parent / "LeagueSettings" / "scoring"
+SCORESETS_DIR = PROJECT_ROOT.parent / "Settings" / "scoring"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
 

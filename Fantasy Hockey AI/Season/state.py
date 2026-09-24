@@ -5,16 +5,17 @@ roster-construction lever, the open free-agent pool is where most transactions h
 weekly move counter has to be carried from the first version -- without it every streaming
 comparison measures an illegal manager.
 
-The move accounting is the part worth reading twice, because three of the four transaction kinds
-are free:
+The move accounting is the part worth reading twice. What each action costs is a league setting
+(`rules.move_cost` in Settings/rosters/*.json); in the target league:
 
-    add (free agent or waiver claim)   costs 1 of the week's 7
+    add                                costs 1 of the week's 7
+    waiver claim                       costs 1
     drop                               free
     IR stash                           free
     IR activate                        free
 
 So a full roster's add-plus-drop costs one move, not two, and stashing is unconditionally worth
-doing. Unused moves expire on the week boundary; they do not carry over.
+doing. Every action checks its cost against the budget before it changes anything. Unused moves expire on the week boundary; they do not carry over.
 
 Waivers are modelled because twelve managers share one pool and they interfere. A dropped player
 is claimable only through the priority queue for `waiver_days`, resolved at the start of a game
@@ -138,33 +139,45 @@ class LeagueState:
         if self.on_waivers(player_id, today):
             raise IllegalMove(f"{player_id} is on waivers until "
                               f"{self.waived[player_id].date()}; use claim()")
-        if team.moves_left <= 0:
-            raise IllegalMove(f"team {team_index} has no moves left this week")
-        self._acquire(team_index, player_id, today, drop, reason)
+        cost = self._move_cost("add", drop)
+        if team.moves_left < cost:
+            raise IllegalMove(f"team {team_index} has {team.moves_left} move(s) left and this "
+                              f"add costs {cost}")
+        self._acquire(team_index, player_id, today, drop, reason, cost)
 
-    def _acquire(self, team_index: int, player_id, today, drop, reason) -> None:
+    def _move_cost(self, action: str, drop=None) -> int:
+        """What an action spends from the weekly budget, with its accompanying drop if any."""
+        return self.config.move_cost(action) + (self.config.move_cost("drop") if drop is not None
+                                                else 0)
+
+    def _acquire(self, team_index: int, player_id, today, drop, reason, cost) -> None:
         """Take a player from the pool for one move: the part `add` and a waiver award share.
         A claim award skips `add`'s on-waivers refusal -- awarding a player from waivers is the
         one thing that refusal must not block."""
         team = self.teams[team_index]
         if drop is not None:
-            self.drop(team_index, drop, today)
+            self.drop(team_index, drop, today, charge=False)     # its cost is inside `cost`
         if len(team.roster) >= self.config.roster_size:
             raise IllegalMove(f"team {team_index} must drop before adding")
 
         self.pool.discard(player_id)
         team.roster.append(player_id)
         self.owner[player_id] = team_index
-        team.moves_used += 1
+        team.moves_used += cost
         self.waived.pop(player_id, None)
         team.assert_legal()
         self.transactions.append({"date": pd.Timestamp(today), "week": self.week,
                                   "team": team_index, "kind": reason,
                                   "player_id": player_id, "dropped": drop})
 
-    def drop(self, team_index: int, player_id, today) -> None:
-        """Release a player. Free, and he lands on waivers for the configured window."""
+    def drop(self, team_index: int, player_id, today, charge=True) -> None:
+        """Release a player; he lands on waivers for the configured window. Costs
+        rules.move_cost["drop"] (0 in the target league) unless part of an add or activation,
+        which charges it with the whole transaction."""
         team = self.teams[team_index]
+        cost = self.config.move_cost("drop") if charge else 0
+        if team.moves_left < cost:
+            raise IllegalMove(f"team {team_index} has no moves left to drop with")
         if player_id in team.roster:
             team.roster.remove(player_id)
         elif player_id in team.ir:
@@ -174,6 +187,7 @@ class LeagueState:
         self.owner.pop(player_id, None)
         self.pool.add(player_id)
         self.waived[player_id] = pd.Timestamp(today) + pd.Timedelta(days=self.config.waiver_days)
+        team.moves_used += cost
         team.assert_legal()
 
     def stash(self, team_index: int, player_id, ir_eligible: set) -> None:
@@ -185,8 +199,12 @@ class LeagueState:
             raise IllegalMove(f"{player_id} is not IR-eligible today")
         if len(team.ir) >= self.config.ir:
             raise IllegalMove(f"team {team_index} has no IR slot free")
+        cost = self.config.move_cost("ir_stash")
+        if team.moves_left < cost:
+            raise IllegalMove(f"team {team_index} has no moves left to stash with")
         team.roster.remove(player_id)
         team.ir.append(player_id)
+        team.moves_used += cost
         team.assert_legal()
 
     def activate(self, team_index: int, player_id, drop=None, stash=None, ir_eligible=None,
@@ -196,29 +214,38 @@ class LeagueState:
 
         `drop` may be the returning player himself (he is released straight off IR). `stash`
         swaps him with a rostered player who is IR-eligible, atomically, so a full IR does not
-        block it. Neither spends a move, and neither is logged as a transaction: a forced drop is
-        graded by the IR log, not by the move metrics.
+        block it. The activation (and its drop) costs rules.move_cost -- nothing in the target
+        league -- and is not logged as a transaction: a forced drop is graded by the IR log, not
+        by the move metrics.
         """
         team = self.teams[team_index]
         if player_id not in team.ir:
             raise IllegalMove(f"team {team_index} does not hold {player_id} on IR")
-        if drop is not None:
-            self.drop(team_index, drop, today)
-            if drop == player_id:
-                return
+        if drop == player_id:
+            self.drop(team_index, drop, today)      # released straight off IR: just a drop
+            return
+        cost = self._move_cost("ir_activate", drop)
+        # Every check before anything changes, so a refused activation spends nothing.
+        if team.moves_left < cost:
+            raise IllegalMove(f"team {team_index} has no moves left to activate with")
         if stash is not None:
             if stash not in team.roster:
                 raise IllegalMove(f"team {team_index} cannot stash {stash}: not on its roster")
             if ir_eligible is None or stash not in ir_eligible:
                 raise IllegalMove(f"{stash} is not IR-eligible today")
+        elif drop is None and len(team.roster) >= self.config.roster_size:
+            raise IllegalMove(f"team {team_index} must drop before activating {player_id}")
+
+        team.moves_used += cost
+        if drop is not None:
+            self.drop(team_index, drop, today, charge=False)
+        if stash is not None:
             team.ir.remove(player_id)
             team.roster.remove(stash)
             team.ir.append(stash)
             team.roster.append(player_id)
             team.assert_legal()
             return
-        if len(team.roster) >= self.config.roster_size:
-            raise IllegalMove(f"team {team_index} must drop before activating {player_id}")
         team.ir.remove(player_id)
         team.roster.append(player_id)
         team.assert_legal()
@@ -240,7 +267,7 @@ class LeagueState:
         `drop` is who goes if the claim is awarded, chosen when the claim is priced. If he has
         left the roster by then, the award asks the manager again rather than failing silently.
         """
-        if self.teams[team_index].moves_left <= 0:
+        if self.teams[team_index].moves_left < self._move_cost("claim", drop):
             raise IllegalMove(f"team {team_index} has no moves left to claim with")
         if player_id not in self.waived or player_id not in self.pool:
             raise IllegalMove(f"{player_id} is not on waivers; add() him instead")
@@ -279,9 +306,10 @@ class LeagueState:
             for team_index in claimants:
                 reason = self._claim_blocker(team_index, player_id, today, redrop)
                 if reason is None:
+                    drop = self.claim_drops.get((team_index, player_id))
                     try:
-                        self._acquire(team_index, player_id, today,
-                                      self.claim_drops.get((team_index, player_id)), "claim")
+                        self._acquire(team_index, player_id, today, drop, "claim",
+                                      self._move_cost("claim", drop))
                     except IllegalMove as error:
                         reason = str(error)
                 if reason is not None:
@@ -301,7 +329,7 @@ class LeagueState:
         team = self.teams[team_index]
         if player_id not in self.pool:
             return "no longer in the pool"
-        if team.moves_left <= 0:
+        if team.moves_left < self._move_cost("claim", self.claim_drops.get((team_index, player_id))):
             return "no moves left this week"
         drop = self.claim_drops.get((team_index, player_id))
         if drop is not None and not team.holds(drop):

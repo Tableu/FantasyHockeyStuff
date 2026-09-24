@@ -7,7 +7,7 @@ each player-game, the lambda table the Monte Carlo layer (section 5) turns into 
 **These models project stats, not fantasy points.** Nothing here knows what a goal is worth.
 A scoring system is data you supply — `weights.py` loads a JSON file and applies it — so one
 fitted stack serves any number of leagues, and two formats can be compared against one fixed
-set of models. `../LeagueSettings/scoring/` holds the scoring files; none of them is a default and nothing loads one
+set of models. `../Settings/scoring/` holds the scoring files; none of them is a default and nothing loads one
 automatically.
 
 ## Rest-of-season (section 4)

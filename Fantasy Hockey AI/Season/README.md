@@ -143,7 +143,8 @@ over `H` weeks, and moves only when the gain clears `m` standard deviations of i
 player with no rate yet is never a drop candidate: unknown is not zero. Rung 6 is the same manager at
 `m = ∞` -- it never moves -- and is the comparison section 9 asks for.
 
-The shipped default is **H = 3, m = 1, rest-of-season rate, no waiver claims**
+The shipped default (now in `Settings/strategy.json`) was, when this was measured,
+**H = 3, m = 1, rest-of-season rate, no waiver claims**
 (`docs/ladder-league_adddrop.md`, `docs/ladder-league-12team-simple_adddrop.md`, 8 rotations):
 
 | format | rung 5 − hold | rung 5 − rung 2 | rung 5 − rung 4 | moves |

@@ -10,7 +10,7 @@ gitignored. Boosters are filed by the season they PREDICT (`models_dir`): the bu
 2025-26 lives in models/2025-26/, and a deployment build trained through 2025-26 -- the one shipped
 for next season -- in models/2026-27/. Inside a season, one folder per model family: skaters/<A|B>/
 (the per-game chain), goalie_start/, and ros_<horizon>/ (rest-of-season); DOCS_DIR holds the committed model cards. SCORESETS_DIR is the shared
-`LeagueSettings/scoring/` folder, whose files `weights.py` can load by name.
+`Settings/scoring/` folder, whose files `weights.py` can load by name.
 """
 
 from pathlib import Path
@@ -20,7 +20,7 @@ FEATURES_DIR = PROJECT_ROOT.parent / "ModelFeatures" / "data" / "features"
 MODELS_DIR = PROJECT_ROOT / "models"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
-SCORESETS_DIR = PROJECT_ROOT.parent / "LeagueSettings" / "scoring"
+SCORESETS_DIR = PROJECT_ROOT.parent / "Settings" / "scoring"
 
 
 def ensure(directory: Path) -> Path:

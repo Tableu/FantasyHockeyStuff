@@ -46,10 +46,13 @@ class Manager:
     # event; the board is the manager's opinion.
     draft_board = "prior"
 
-    def __init__(self, team_index, config, scoreset):
+    def __init__(self, team_index, config, scoreset, strategy):
         self.team_index = team_index
         self.config = config
         self.scoreset = scoreset
+        # The strategy parameters (`strategy.Strategy`, loaded from Settings/ by Season).
+        # Shared by every seat in a field; a rung reads the part that is its own.
+        self.strategy = strategy
         self.slot_order = config.slot_order()
         # Which positions each slot will take. A composite slot (`F`, `F/D`) accepts several, so
         # this cannot be inferred from the slot code.
@@ -213,8 +216,8 @@ class AutodraftForget(Manager):
     name = "autodraft-forget"
     rung = 1
 
-    def __init__(self, team_index, config, scoreset):
-        super().__init__(team_index, config, scoreset)
+    def __init__(self, team_index, config, scoreset, strategy):
+        super().__init__(team_index, config, scoreset, strategy)
         self._frozen = None
 
     def set_lineup(self, view):
@@ -272,12 +275,9 @@ class ScheduleStreamer(Manager):
     # How far ahead a swap is priced. `None` means the rest of the season. Both sides of the swap
     # use it, because both sides are permanent -- the roster spot is kept either way. Swept against
     # the season rather than assumed; see the table in the README.
-    horizon_weeks = 1
-
-    def __init__(self, team_index, config, scoreset, horizon_weeks=None):
-        super().__init__(team_index, config, scoreset)
-        if horizon_weeks is not None:
-            self.horizon_weeks = horizon_weeks
+    @property
+    def horizon_weeks(self):
+        return self.strategy.streamer_horizon_weeks
 
     def set_lineup(self, view):
         view.p_start_column = self.p_start_column
@@ -392,7 +392,9 @@ class FullSystem(Manager):
     p_start_column = "p_start_model"
 
     # How far ahead an acquisition is priced, in matchup weeks. Matched to rung 3 on purpose.
-    horizon_weeks = 1
+    @property
+    def horizon_weeks(self):
+        return self.strategy.full_system_horizon_weeks
 
     # Per-game sd/mean for a skater, measured over 465 candidates on three slates: median 0.912,
     # mean 0.990. Used only where a player has no draw tonight (see `_week_projection`).
@@ -413,7 +415,8 @@ class FullSystem(Manager):
             return 0.0
         # Clipped because the tails of the normal approximation are not to be trusted, and a z of
         # -8 would otherwise buy any amount of variance at any cost in mean.
-        return float(max(-3.0, min(3.0, d / s)))
+        clip = self.strategy.z_clip
+        return float(max(-clip, min(clip, d / s)))
 
     def _week_projection(self, view, roster, moments):
         """(mean, variance) of what a roster still scores this week.
@@ -511,10 +514,11 @@ class FullSystem(Manager):
                 log.debug("team %d could not upgrade to %s: %s", self.team_index, incoming, error)
                 continue
 
-    # How a forced activation drop is priced: section 9's defaults. Rung 5 and up use their own
-    # add/drop parameters instead, so both of a manager's drop decisions read the same numbers.
+    # How a forced activation drop is priced (strategy: rung4_full_system). Rung 5 and up use
+    # their own add/drop parameters instead, so both of a manager's drop decisions read the same
+    # numbers.
     def _drop_pricing(self):
-        return 3, "per_game"
+        return self.strategy.drop_horizon_weeks, self.strategy.drop_rate_source
 
     def activation_drop(self, view, returning):
         """Price the forced drop on the roster: the player whose removal costs the fewest lineup
@@ -547,14 +551,15 @@ class FullSystemAddDrop(FullSystem):
 
     name = "full-system-adddrop"
     rung = 5
-    params = adddrop.AddDropParams()
 
-    def __init__(self, team_index, config, scoreset, params=None):
-        super().__init__(team_index, config, scoreset)
-        if params is not None:
-            self.params = params
-            self.name = f"full-system-adddrop[{params.describe()}]"
+    def __init__(self, team_index, config, scoreset, strategy):
+        super().__init__(team_index, config, scoreset, strategy)
+        self.name = f"full-system-adddrop[{self.params.describe()}]"
         self.move_log = []
+
+    @property
+    def params(self) -> adddrop.AddDropParams:
+        return self.strategy.adddrop
 
     def _drop_pricing(self):
         return self.params.horizon_weeks, self.params.rate_source
@@ -598,12 +603,13 @@ class Orchestrated(FullSystemAddDrop):
 
     name = "orchestrated"
     rung = 7
-    stream_params = streaming.StreamParams()
 
-    def __init__(self, team_index, config, scoreset, params=None, stream_params=None):
-        super().__init__(team_index, config, scoreset, params=params)
-        if stream_params is not None:
-            self.stream_params = stream_params
+    @property
+    def stream_params(self) -> streaming.StreamParams:
+        return self.strategy.streaming
+
+    def __init__(self, team_index, config, scoreset, strategy):
+        super().__init__(team_index, config, scoreset, strategy)
         self.name = f"orchestrated[{self.params.describe()} {self.stream_params.describe()}]"
         self.plan = orchestrator.DailyPlan(self, self.stream_params)
 
@@ -631,9 +637,11 @@ LADDER[7] = Orchestrated
 VOR_TWIN = 10
 
 
-def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_horizon=None,
-                replication=0, adddrop_params=None, stream_params=None):
+def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, replication=0):
     """One manager per seat, rungs interleaved so seats are not blocked by strategy.
+
+    `strategy` (a `strategy.Strategy`) carries every rung's parameters; vary one with
+    `dataclasses.replace` rather than by seating a differently built manager.
 
     Interleaving matters: three consecutive seats all drafting for the same rung would give that
     rung all three of the same snake positions.
@@ -650,16 +658,7 @@ def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_hori
     for seat in range(config.teams):
         seated = rungs[(seat + replication) % len(rungs)]
         rung = seated - VOR_TWIN if seated not in LADDER else seated
-        if rung == 3 and streamer_horizon is not None:
-            field.append(ScheduleStreamer(seat, config, scoreset,
-                                          horizon_weeks=streamer_horizon))
-        elif rung == 5 and adddrop_params is not None:
-            field.append(FullSystemAddDrop(seat, config, scoreset, params=adddrop_params))
-        elif rung == 7:
-            field.append(Orchestrated(seat, config, scoreset, params=adddrop_params,
-                                      stream_params=stream_params))
-        else:
-            field.append(LADDER[rung](seat, config, scoreset))
+        field.append(LADDER[rung](seat, config, scoreset, strategy))
         if seated != rung:
             twin = field[-1]
             twin.rung, twin.draft_board, twin.name = seated, "vor", f"{twin.name}[vor draft]"

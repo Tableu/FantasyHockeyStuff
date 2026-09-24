@@ -23,6 +23,7 @@ season-level result rather than as an error:
     vor board       a draft board that read past draft day, or a VOR draft that leaves a roster short
     draft lottery   replications that repeat one draft, or give a rung more early picks
     claims          a waiver claim resolved early, awarded out of priority, or failing silently
+    league rules    an unsupported league rule accepted, or a move cost charged wrongly
     no clobber      a scored projection build overwriting the deployment boosters in models/
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
@@ -37,6 +38,7 @@ import sys
 import numpy as np
 import pandas as pd
 
+import decisionlayer
 import engine as engine_module
 import inputs
 import league as league_module
@@ -52,6 +54,11 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 log = logging.getLogger("verify")
 
 SEASON = "2025-26"
+
+
+def _strategy():
+    """The committed strategy file -- what every ladder run reads unless told otherwise."""
+    return decisionlayer.load_strategy()
 
 
 def check_provenance() -> str:
@@ -126,7 +133,7 @@ def check_draws(day_limit=6) -> str:
     calendar = schedule_module.from_candidates(
         data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
 
-    field = managers_module.build_field(config, scoreset, rungs=(4,))
+    field = managers_module.build_field(config, scoreset, _strategy(), rungs=(4,))
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                   decision_sims=150)
     day = calendar.days[40]
@@ -142,7 +149,7 @@ def check_draws(day_limit=6) -> str:
 
     # Same slate, a different seed: the sampled means must move, or nothing is being sampled.
     other = engine_module.Season(config, calendar, data, eligibility, scoreset,
-                                 managers_module.build_field(config, scoreset, rungs=(4,)),
+                                 managers_module.build_field(config, scoreset, _strategy(), rungs=(4,)),
                                  decision_sims=150, decision_seed=1234567)
     theirs = other.decision_draws(day)
     shared = sorted(set(draws) & set(theirs))[:400]
@@ -195,7 +202,7 @@ def check_invariants(steps=20000, seed=17) -> str:
 
 
 def check_assignment() -> str:
-    result = slots_module.verify_optimal(league_module.SLOT_POSITIONS, trials=300)
+    result = slots_module.verify_optimal(league_module.load().accepts, trials=300)
     assert result["solver_optimal"]
     return (f"{result['trials']} instances optimal against brute force; greedy wrong on "
             f"{result['greedy_suboptimal_instances']}, mean loss "
@@ -213,7 +220,7 @@ def check_calendar() -> str:
             f"{len(summary['gaps'])} break(s) found, every game in exactly one week")
 
 
-def _small_season(rungs, params=None, sims=0):
+def _small_season(rungs, strategy=None, sims=0):
     config = league_module.load()
     scoreset = simlayer.load_scoreset("points-league")
     data = inputs.load_season(SEASON)
@@ -223,7 +230,7 @@ def _small_season(rungs, params=None, sims=0):
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
         data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
-    field = managers_module.build_field(config, scoreset, rungs=rungs, adddrop_params=params)
+    field = managers_module.build_field(config, scoreset, strategy or _strategy(), rungs=rungs)
     return engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                 decision_sims=sims), calendar
 
@@ -315,10 +322,9 @@ def check_hold() -> str:
     """At an infinite margin the add/drop rule is a manager that never moves."""
     from dataclasses import replace
 
-    from decisionlayer import adddrop
-
-    params = replace(adddrop.AddDropParams(), margin=float("inf"))
-    season, _ = _small_season((5,), params=params)
+    strategy = _strategy()
+    strategy = replace(strategy, adddrop=replace(strategy.adddrop, margin=float("inf")))
+    season, _ = _small_season((5,), strategy=strategy)
     rate = {int(k): 1.0 for k in season.player_pool()}
     season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
     moves = len(season.state.transactions)
@@ -390,14 +396,10 @@ def check_streaming() -> str:
     or pushes a week past its budget."""
     from dataclasses import replace
 
-    from decisionlayer import adddrop, streaming
-
     def run(rungs, spots):
-        season, _ = _small_season(rungs, params=adddrop.AddDropParams(), sims=0)
-        for m in season.field:
-            if m.rung == 7:
-                m.stream_params = replace(streaming.StreamParams(), spots=spots)
-                m.plan.stream_params = m.stream_params
+        strategy = _strategy()
+        strategy = replace(strategy, streaming=replace(strategy.streaming, spots=spots))
+        season, _ = _small_season(rungs, strategy=strategy, sims=0)
         rate = {int(k): 1.0 for k in season.player_pool()}
         report = season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
         return season, report["teams"][["seat", "points", "moves_spent", "forced_drops"]]
@@ -437,7 +439,7 @@ def check_frozen_rosters() -> str:
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
         data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
-    field = managers_module.build_field(config, scoreset, rungs=(2, 5, 7))
+    field = managers_module.build_field(config, scoreset, _strategy(), rungs=(2, 5, 7))
     stuck, checked = [], [0]
     for manager in field:
         if manager.rung < 3:
@@ -477,8 +479,9 @@ def check_vor_board() -> str:
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     assert eligibility[240] == frozenset({"C"}), "a forward/defence name collision was kept"
-    data["prior"] = {scoreset.name: ladder.prior_season("2024-25", scoreset)}
-    board = ladder.vor_board(data, "2024-25", scoreset, config, eligibility)
+    strategy = _strategy()
+    data["prior"] = {scoreset.name: ladder.prior_season("2024-25", scoreset, strategy)}
+    board = ladder.vor_board(data, "2024-25", scoreset, config, eligibility, strategy)
 
     # Draft-day knowledge only: inflating every rest-of-season row after opening week must not
     # move the board at all.
@@ -486,11 +489,13 @@ def check_vor_board() -> str:
     cut = later["game_date"].min() + pd.Timedelta(days=7)
     for column in [c for c in later.columns if c.startswith("proj_")]:
         later.loc[later["game_date"] >= cut, column] *= 100.0
-    poisoned = ladder.vor_board({**data, "ros": later}, "2024-25", scoreset, config, eligibility)
+    poisoned = ladder.vor_board({**data, "ros": later}, "2024-25", scoreset, config, eligibility,
+                               strategy)
     assert board.equals(poisoned), "the VOR board read rest-of-season rows from after draft day"
 
     values = draft_module.preseason_values(data["ros"], data["prior"][scoreset.name][0],
-                                           inputs.load_goalie_starts("2024-25"), scoreset)
+                                           inputs.load_goalie_starts("2024-25"), scoreset,
+                                           opening_days=strategy.opening_days)
     levels = draft_module.replacement_levels(values[[p in eligibility for p in values.index]],
                                              config, eligibility)
     assert all(v > 0 for v in levels.values()), f"a position has no replacement level: {levels}"
@@ -519,7 +524,8 @@ def check_draft_lottery(replications=8) -> str:
     for rungs in ((2, 12), (2, 5, 6, 7)):
         drafts, picks = set(), collections.Counter()
         for rep in range(replications):
-            field = managers_module.build_field(config, scoreset, rungs=rungs, replication=rep)
+            field = managers_module.build_field(config, scoreset, _strategy(), rungs=rungs,
+                                                replication=rep)
             order = draftroom.seat_order(config, rep, len(rungs))
             drafts.add(tuple(field[s].rung for s in order))
             for k in range(3):
@@ -601,6 +607,111 @@ def check_claims() -> str:
             f"team, {len(s.failed_claims)} recorded failure(s); stale drop re-chosen")
 
 
+def check_league_rules() -> str:
+    """The league's rules come from its settings file: an unsupported rule is refused at load, and
+    move costs are charged as configured -- checked before anything changes, so a refused action
+    spends nothing."""
+    import copy
+    import json
+
+    base = json.loads(paths.league_config("league").read_text(encoding="utf-8"))
+    for label, mutate in (("FAAB waivers", lambda c: c["rules"].update(waivers="faab")),
+                          ("an undefined slot", lambda c: c["slot_positions"].pop("F")),
+                          ("a goalie/skater slot", lambda c: c["slot_positions"].update({"F/D": ["C", "G"]}))):
+        config = copy.deepcopy(base)
+        mutate(config)
+        try:
+            league_module.LeagueConfig(**config)
+            raise AssertionError(f"a league with {label} was accepted")
+        except ValueError:
+            pass
+
+    config = copy.deepcopy(base)
+    config["rules"]["move_cost"].update(drop=1, ir_stash=1)
+    config = league_module.LeagueConfig(**config)
+    pool = list(range(1, 200))
+    eligibility = {p: frozenset({"C"}) for p in pool}
+    s = state_module.LeagueState(config, pool, eligibility)
+    for p in pool[:config.roster_size]:
+        s.draft(0, p)
+    s.start_week(1)
+    day = pd.Timestamp("2026-01-05")
+    team = s.teams[0]
+    s.add(0, pool[100], day, drop=pool[0])
+    assert team.moves_used == 2, f"an add with a drop costing 1 spent {team.moves_used}, not 2"
+    s.stash(0, pool[1], {pool[1]})
+    assert team.moves_used == 3, "a stash costing 1 was not charged"
+    team.moves_used = config.moves_per_week
+    roster_before = list(team.roster)
+    try:
+        s.add(0, pool[101], day, drop=pool[2])
+        raise AssertionError("an add was allowed with no moves left")
+    except state_module.IllegalMove:
+        pass
+    assert team.roster == roster_before, "a refused add still changed the roster"
+    return "unsupported rules refused at load; configured costs charged (add+drop 2, stash 1); a refused add spends nothing"
+
+
+def check_settings() -> str:
+    """Ties, draft, schedule and playoffs are league settings, and strategy parameters are their own
+    file: an unsupported or missing value is refused at load, a tie is scored by the league's rule,
+    a linear draft keeps its order, and a strategy file missing a parameter is an error rather
+    than a default."""
+    import copy
+    import json
+
+    import draftroom
+
+    base = json.loads(paths.league_config("league").read_text(encoding="utf-8"))
+    for label, mutate in (("an unknown tie rule", lambda c: c.update(ties="coin")),
+                          ("keepers", lambda c: c["draft"].update(keepers=2)),
+                          ("an auction draft", lambda c: c["draft"].update(type="auction")),
+                          ("a missing schedule length", lambda c: c["schedule"].pop(
+                              "regular_season_weeks")),
+                          ("a 6-team bracket", lambda c: c["playoffs"].update(teams=6)),
+                          ("a loose playoff_teams", lambda c: c.update(playoff_teams=8))):
+        config = copy.deepcopy(base)
+        mutate(config)
+        try:
+            league_module.LeagueConfig(**config)
+            raise AssertionError(f"a league with {label} was accepted")
+        except (ValueError, TypeError):
+            pass
+
+    config = league_module.LeagueConfig(**base)
+    assert config.tie_share() == 0.5 and config.regular_season_weeks == base["schedule"][
+        "regular_season_weeks"], "the committed league's tie rule or schedule moved"
+    loss = league_module.LeagueConfig(**{**base, "ties": "loss"})
+    assert loss.tie_share() == 0.0, "a tie under the loss rule still scored"
+
+    linear = league_module.LeagueConfig(**{**copy.deepcopy(base),
+                                           "draft": {**base["draft"], "type": "linear"}})
+    pool = list(range(1, 400))
+    eligibility = {p: frozenset({["C", "LW", "RW", "D", "G"][p % 5]}) for p in pool}
+    board = pd.Series({p: float(-p) for p in pool})
+    rounds = {}
+    for label, league in (("snake", config), ("linear", linear)):
+        state = state_module.LeagueState(league, pool, eligibility)
+        draftroom.run(state, league, board, eligibility)
+        # Second-round pick of the first-round first picker: his second-best player.
+        first = min(range(league.teams), key=lambda t: min(state.teams[t].roster))
+        rounds[label] = sorted(state.teams[first].roster)[1]
+    assert rounds["linear"] < rounds["snake"], \
+        f"the linear draft did not keep the first seat first in round two: {rounds}"
+
+    payload = json.loads(paths.STRATEGY_CONFIG.read_text(encoding="utf-8"))
+    for section, key in (("adddrop", "margin"), ("streaming", "spots"), ("priors", "opening_days")):
+        broken = copy.deepcopy(payload)
+        broken[section].pop(key)
+        try:
+            decisionlayer.strategy.from_dict(broken, name="broken")
+            raise AssertionError(f"a strategy missing {section}.{key} was accepted")
+        except ValueError:
+            pass
+    return (f"unsupported ties/draft/schedule/playoffs refused; tie = {config.tie_share():g} win "
+            f"each; linear draft keeps order; strategy {_strategy().name!r} requires every value")
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -647,7 +758,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
           ("frozen rosters", check_frozen_rosters),
-          ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("claims", check_claims), ("no clobber", check_no_clobber),
+          ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("claims", check_claims), ("league rules", check_league_rules),
+          ("settings", check_settings), ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 
 

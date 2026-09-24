@@ -124,6 +124,12 @@ class Season:
         self.eligibility = eligibility
         self.scoreset = scoreset
         self.field = field
+        # One strategy for the whole field: the naive goalie start share below is part of the
+        # view every seat shares, so its prior cannot differ by seat.
+        strategies = {m.strategy for m in field}
+        if len(strategies) != 1:
+            raise ValueError(f"the field carries {len(strategies)} different strategies")
+        self.strategy = field[0].strategy
         self.replication = replication
         self.log_every_week = log_every_week
         self.slot_order = config.slot_order()
@@ -304,7 +310,9 @@ class Season:
             starts = self.goalie_starts_to_date.get(player_id, 0.0)
             # Shrunk toward a tandem even split. Deliberately NOT "who started last game", which
             # carries an AUC of 0.520 over all candidates and inverts among the healthy ones.
-            naive = (starts + 2.0 * 0.5) / (games + 2.0)
+            prior_games = self.strategy.goalie_start_share_prior_games
+            naive = ((starts + prior_games * self.strategy.goalie_start_share_prior)
+                     / (games + prior_games))
             rows.append({"player_id": player_id,
                          "p_start_naive": naive,
                          "p_start_model": float(modelled.get(player_id, naive)),
@@ -514,8 +522,9 @@ class Season:
             elif theirs > mine:
                 self.state.teams[away].matchup_wins += 1.0
             else:
-                self.state.teams[home].matchup_wins += 0.5
-                self.state.teams[away].matchup_wins += 0.5
+                share = self.config.tie_share()          # the league's tie rule
+                self.state.teams[home].matchup_wins += share
+                self.state.teams[away].matchup_wins += share
             self.results.append({"week": week, "home": home, "away": away,
                                  "home_points": mine, "away_points": theirs})
         for team in self.state.teams:

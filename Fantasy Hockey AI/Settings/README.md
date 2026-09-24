@@ -1,0 +1,152 @@
+# Settings
+
+The league's rules and the managers' strategy, as files you edit. Nothing in `Projections/`,
+`Simulation/`, `Season/` or `Decisions/` hard-codes what a goal is worth, how many slots a team
+has, or how far ahead a manager looks -- they all read from here.
+
+```
+scoring/        what each stat is worth                 read by Projections, Simulation, Season  (--weights)
+rosters/        slots, rules, schedule, draft, playoffs read by Season                           (--league)
+strategy.json   how the managers decide                 read by Season, handed to Decisions      (--strategy)
+```
+
+The first two are what the league imposes; `strategy.json` is what a manager chooses.
+
+To set up your league, copy the closest file in each folder, edit it, and pass its name:
+
+```
+python evaluate.py --weights my-league          # Projections/
+python simulate.py --weights my-league          # Simulation/
+python ladder.py   --weights my-league --league my-league   # Season/
+```
+
+A bare name is looked up here (`my-league` -> `scoring/my-league.json`); a path to a file
+anywhere else works too. Unknown keys fail on load rather than being silently ignored.
+
+## scoring/
+
+```json
+{
+  "name": "points-league",
+  "description": "...",
+  "skaters": {"goals": 4.0, "assists": 2.5, "ppp": 1.0, "shp": 1.25,
+              "hits": 0.4, "blocks": 0.4, "shots": 0.25, "pim": 0.2},
+  "goalies": {"wins": 3.0, "losses": -1.5, "ot_losses": 1.0, "shutouts": 2.5,
+              "saves": 0.25, "goals_against": -1.0}
+}
+```
+
+- **Skater keys:** `goals assists shots hits blocks pim ppp shp`. `ppp` and `shp` are counted
+  per point (a power-play goal earns `goals` + `ppp`).
+- **Goalie keys:** `wins losses ot_losses shutouts saves goals_against`. Give a cost as a
+  negative weight.
+- A stat you leave out scores 0. `banger-league.json` prices no `losses`, for example.
+
+`Projections/` and `Simulation/` have no default scoring file: without `--weights` they report
+per-stat numbers only. `Season/` defaults to `points-league`.
+
+## rosters/
+
+```json
+{
+  "name": "target-league",
+  "teams": 14,
+  "active_slots": {"C": 2, "LW": 2, "RW": 2, "F": 1, "D": 4, "F/D": 1, "G": 2},
+  "bench": 4,
+  "ir": 2,
+  "moves_per_week": 7,
+  "moves_carry_over": false,
+  "waiver_days": 2,
+  "ties": "split",
+  "schedule": {"type": "round_robin", "regular_season_weeks": 26, "week_starts_on": "MON"},
+  "draft": {"type": "snake", "order": "lottery", "keepers": 0},
+  "playoffs": {"teams": 8, "rounds": 3, "weeks_per_round": 1,
+               "seeding": "record", "tiebreak": "points_for"},
+  "eligibility_platform": "yahoo",
+  "eligibility_season": "2026-27",
+  "slot_positions": {"C": ["C"], "LW": ["LW"], "RW": ["RW"], "D": ["D"], "G": ["G"],
+                     "F": ["C", "LW", "RW"], "F/D": ["C", "LW", "RW", "D"]},
+  "rules": {"lineup_lock": "daily", "waivers": "rolling", "ir_eligible": "injured",
+            "move_cost": {"add": 1, "claim": 1, "drop": 0, "ir_stash": 0, "ir_activate": 0}}
+}
+```
+
+- **Slots:** every slot in `active_slots` needs an entry in `slot_positions` naming the positions
+  (`C LW RW D G`) it accepts. A composite slot lists several; a slot may not mix `G` with skaters.
+- **Rules:** `lineup_lock` `daily`, `waivers` `rolling`, `ir_eligible` `injured` are the values the
+  harness implements. `move_cost` is what each action spends from `moves_per_week`.
+- **Ties:** `split` (half a win each) or `loss` (neither team gets a win).
+- **Schedule:** `round_robin` over `regular_season_weeks` matchup weeks starting `week_starts_on`.
+- **Draft:** `snake` or `linear`, seat order drawn by `lottery`. Keepers are not modelled (`0`).
+- **Playoffs:** `teams` must equal `2 ** rounds` and fit in `teams`; `seeding` `record`,
+  `tiebreak` `points_for`. Validated but **not yet simulated** -- the replay scores the regular
+  season only.
+- `teams` must be even. A value the harness does not implement is refused at load, never ignored.
+- Position eligibility comes from the platform named in `eligibility_platform`.
+- `league.json` is the default when `--league` is omitted.
+
+`Season/` names its ladder reports and docs after the roster file (`ladder_2025-26_<file>.json`),
+so give each format its own file rather than editing one in place between runs.
+
+## strategy.json
+
+What a manager *chooses*: horizons, margins, the streaming layer, the priors. Section 11 tunes
+these, so none of them lives in code any more. `strategy.json` is the shipped strategy, read by
+`Season/` unless `--strategy` names another file here.
+
+```
+python ladder.py --strategy my-strategy          # a name here, or a path
+python ladder.py --margin 0.5 --streams 3        # single values, over the file's
+```
+
+`Season/decisionlayer.py` (`load_strategy`) reads the file; `Decisions/strategy.py` parses it into
+a `Strategy` and `managers.build_field` hands it to every seat. **Every key is required** and
+unknown keys are refused: a value the file forgets is an error, never a default quietly inherited
+from code. Write `"inf"` for an unbounded number and `"season"` for a horizon of the rest of the
+season.
+
+Changing a strategy needs no model rebuild -- the projections do not know how they are used.
+
+### Sections
+
+| section | key | value | meaning |
+|---|---|---|---|
+| `adddrop` (rung 5+) | `horizon_weeks` | 3 | weeks past the current one both sides of a swap are priced over |
+| | `margin` | 1.0 | sds of its own gain a move must clear; `"inf"` never moves (rung 6) |
+| | `rate_source` | `ros` | `ros` (rest-of-season projection) or `per_game` |
+| | `claim_premium` | 0.0 | extra points a waiver claim must clear; `"inf"` never claims |
+| | `shortlist` | 10 | free agents priced on the roster per pass |
+| | `drop_shortlist` | 4 | cheapest fieldable drops tried against each |
+| `streaming` (rung 7) | `spots` | 2 | streaming spots; 0 makes rung 7 identical to rung 5 |
+| | `reserve` | 2 | moves held for upgrades on a week's first day, falling to 0 |
+| | `lam` | 2.0 | points a rental must clear early in the week, falling to 0 |
+| | `margin` | 0.0 | sds of the week's gain a rental must also clear |
+| | `gate` | false | scale a rental's gain by phi(z)/phi(0) of the matchup z |
+| | `flat` | false | hold the bar at lam/2 all week instead of letting it fall |
+| | `claim` | true | a rental may be claimed off waivers, priced from his clear date |
+| | `shortlist` | 12 | free agents priced on the roster per pass |
+| `rung3_streamer` | `horizon_weeks` | 1 | how far ahead rung 3 prices a swap |
+| `rung4_full_system` | `horizon_weeks` | 1 | how far ahead rung 4 prices an acquisition (matched to rung 3) |
+| | `drop_horizon_weeks` | 3 | window a forced IR-activation drop is priced over (rungs 2-4) |
+| | `drop_rate_source` | `per_game` | the rate that drop is priced on |
+| | `z_clip` | 3.0 | the matchup z is clipped to +-this; the normal tails are not trusted |
+| `priors` | `prior_rate_shrink_games` | 20 | games of league mean mixed into last season's per-game rate |
+| | `goalie_start_share_prior` | 0.5 | the naive P(start) shrinks toward a tandem split... |
+| | `goalie_start_share_prior_games` | 2 | ...by this many games |
+| | `opening_days` | 7 | days of rest-of-season rows the VOR draft board treats as draft day |
+
+### Where the values come from
+
+None is tuned: 2025-26 is the only clean holdout, so section 11 tunes on 2024-25.
+
+- **`adddrop.horizon_weeks = 3`** is section 9's plan. On the 2025-26 sensitivity check
+  (`Season/docs/ladder-league_sens-*.md`) H = 1, 3 and the rest of the season all cleared hold,
+  with 3 and season within noise of each other and ahead of 1.
+- **`claim_premium = 0`** since 2026-09-23, when claims were made to resolve: a claim clears the
+  same bar as an add and priority is treated as free. Unmeasured; a sweep over {0, 5} is planned.
+- **The streaming values** are the section 10 v1 settings; the ablations are in `Season/README.md`.
+- **`goalie_start_share_prior`**: deliberately not "who started last game", which has an AUC of
+  0.520 over all candidates.
+
+The goalie prior is shared by every seat, because the naive P(start) is part of the view the
+engine builds for all of them, so a field must carry one strategy. The engine checks this.

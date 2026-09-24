@@ -49,7 +49,8 @@ def prior_season_board(actuals: pd.DataFrame, goalie_lines: pd.DataFrame, scores
     return board.sort_values(ascending=False)
 
 
-def prior_season_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFrame, scoreset) -> pd.Series:
+def prior_season_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFrame, scoreset,
+                      shrink_games: float) -> pd.Series:
     """Last season's fantasy points **per game played** -- a different thing from the board.
 
     The draft board is a season total, because a draft values the whole season and a player who
@@ -76,7 +77,7 @@ def prior_season_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFrame, scorese
     games = pd.concat([played.groupby("player_id").size(),
                        started.groupby("player_id").size()]).groupby(level=0).sum()
     league_mean = float((rate * games).sum() / games.sum())
-    k = 20.0
+    k = shrink_games                     # strategy: priors.prior_rate_shrink_games
     shrunk = ((rate * games + league_mean * k) / (games + k)).rename("prior_rate")
     log.info("prior rate: %d players, league mean %.2f, shrunk range %.2f-%.2f "
              "(raw max %.2f before shrinkage)",
@@ -85,7 +86,7 @@ def prior_season_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFrame, scorese
 
 
 def prior_season_team_game_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFrame,
-                                scoreset) -> pd.Series:
+                                scoreset, shrink_games: float) -> pd.Series:
     """Last season's fantasy points **per team game**, availability included -- the fallback rate.
 
     The same units as a carried projection (`lambda x p_plays`), so it can stand in for one: a
@@ -95,7 +96,7 @@ def prior_season_team_game_rate(actuals: pd.DataFrame, goalie_lines: pd.DataFram
     skater, starts over dressed games for a goalie -- because a forward value is about games that
     will happen, including the ones he misses. Rookies have no row and stay unknown.
     """
-    rate = prior_season_rate(actuals, goalie_lines, scoreset)
+    rate = prior_season_rate(actuals, goalie_lines, scoreset, shrink_games)
     skater_share = actuals["target_played"].astype(bool).groupby(actuals["player_id"]).mean()
     goalie_share = goalie_lines["is_starter"].astype(bool).groupby(goalie_lines["player_id"]).mean()
     share = pd.concat([skater_share, goalie_share]).groupby(level=0).max()
@@ -146,7 +147,7 @@ POSITIONS = ("C", "LW", "RW", "D", "G")
 
 
 def preseason_values(ros: pd.DataFrame, prior_board: pd.Series, prior_goalie_lines: pd.DataFrame,
-                     scoreset, opening_days=7) -> pd.Series:
+                     scoreset, opening_days: int) -> pd.Series:
     """What each player is worth over the coming season, as known on draft day. Season totals.
 
     **Skaters:** projected points from each player's first rest-of-season row, if it is dated in
