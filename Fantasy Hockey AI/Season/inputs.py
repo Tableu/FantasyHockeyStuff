@@ -270,6 +270,23 @@ def load_p_start(season: str):
     return table
 
 
+def load_goalie_history(season: str) -> pd.DataFrame:
+    """Every season's per-start goalie lines BEFORE `season`, for the numbers a manager may know
+    about goalies in general -- the league-average line. The replayed season's own starts are its
+    outcomes, and averaging them hands every manager 2025-26's goalie scoring before it happened.
+    """
+    first = int(season[:4])
+    earlier = [f"{y}-{str(y + 1)[2:]}" for y in range(first - 10, first)]
+    frames = [load_goalie_starts(s) for s in earlier if paths.goalie_starts(s).exists()]
+    if not frames:
+        raise FileNotFoundError(f"no goalie starts before {season} -- the league-average goalie "
+                                f"line needs at least one earlier season")
+    table = pd.concat(frames, ignore_index=True)
+    if (table["game_date"] >= pd.Timestamp(f"{first}-07-01")).any():
+        raise AssertionError(f"goalie history for {season} reaches into {season} itself")
+    return table
+
+
 def load_season(season: str, variant: str = "A") -> dict:
     """Everything a run needs, loaded once and shared across every manager and replication."""
     return {
@@ -277,6 +294,7 @@ def load_season(season: str, variant: str = "A") -> dict:
         "projections": load_projections(season, variant),
         "actuals": load_actuals(season),
         "goalie_starts": load_goalie_starts(season),
+        "goalie_history": load_goalie_history(season),
         "goalie_candidates": load_goalie_candidates(season, variant),
         "availability": load_availability(season, variant),
         "p_start": load_p_start(season),

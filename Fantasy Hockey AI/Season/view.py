@@ -57,7 +57,8 @@ class SlateView:
     def __init__(self, day, week, config, calendar, projections, goalie_projections,
                  unavailable, playing_tonight, nhl_team, history, state, team_index,
                  opponent_index, my_week_points, opponent_week_points,
-                 decision_points=None, rate_estimate=None, ros_estimate=None, injured=None):
+                 decision_points=None, rate_estimate=None, ros_estimate=None, injured=None,
+                 goalie_draw_column=None):
         self.day = pd.Timestamp(day)
         self.week = week
         self.config = config
@@ -82,6 +83,9 @@ class SlateView:
         # random stream that never resolves a night -- see engine.decision_draws. Empty unless
         # the run asked for decision sims, so rungs 1-3 are unaffected by its presence.
         self.decision_points = decision_points or {}
+        # Which P(start) column the goalie draws in `decision_points` were made with, or None if
+        # no goalie was drawn tonight.
+        self.goalie_draw_column = goalie_draw_column
         # {player_id: most recently projected fantasy points per game}. Carried forward by the
         # engine so a transaction can value a player whose team is dark tonight. Never a
         # future projection -- see engine.latest_rate.
@@ -187,15 +191,20 @@ class SlateView:
         """{player_id: (mean, sd)} of tonight's fantasy points, for the candidates asked about.
 
         Skaters come from the sampled draws when the run has them, so the mean and the spread are
-        the calibrated layer's own -- which is the point of having built it. Goalies are not sampled
-        yet (phase 3), so they come from the closed-form Bernoulli-times-line mixture instead, which
-        is the standing `P(start) x league average` treatment with its variance written out.
+        the calibrated layer's own -- which is the point of having built it. Goalies do too, when
+        they were drawn with the P(start) column this manager reads (`Simulation/goalies.py`: the
+        line built from the opposing skaters' draw). Otherwise -- rung 3's naive share, a game
+        whose skaters were not drawn, or no simulator -- they come from the closed-form
+        Bernoulli-times-line mixture, the standing `P(start) x league average` treatment with its
+        variance written out.
 
         The cross-player copula is deliberately NOT in these numbers: they are per-player marginals,
         and correlation between two of my own players raises the variance of my TOTAL without
         changing either marginal. It is worth about 6% on a random roster's variance and it moves
         every candidate in nearly the same direction, so leaving it out of a per-player ranking
-        costs little. It is not left out of the total -- see `week_distribution`.
+        costs little. Rung 4's matchup z adds these per-player variances (`FullSystem.
+        _week_projection`), so it does leave the correlation out of the total -- and with it the
+        goalie-skater links the sampler draws. Reading sampled joint totals there is its own change.
         """
         wanted = set(players) if players is not None else None
         out = {}
@@ -208,6 +217,9 @@ class SlateView:
                 player_id = int(row.player_id)
                 if wanted is not None and player_id not in wanted:
                     continue
+                if (player_id in self.decision_points
+                        and self.p_start_column == self.goalie_draw_column):
+                    continue                               # drawn: keep the sampled moments
                 p = float(getattr(row, self.p_start_column))
                 mu, sigma = float(row.expected_line), float(row.line_sd)
                 mean = p * mu

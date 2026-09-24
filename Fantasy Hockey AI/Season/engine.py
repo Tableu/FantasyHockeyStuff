@@ -48,7 +48,10 @@ log = logging.getLogger("engine")
 # Bernoulli-times-line mixture, Var = p(sigma^2 + mu^2) - (p mu)^2. A skater floors at 0.00 and a
 # pulled goalie does not.
 def goalie_line(goalie_starts, scoreset):
-    """(mean, sd) of one start's fantasy points under this scoring, from the realized export."""
+    """(mean, sd) of one start's fantasy points under this scoring, from the realized export.
+
+    Pass the seasons BEFORE the one replayed (`data["goalie_history"]`). It used to be the
+    replayed season's own starts -- one league-level number, but a leak all the same."""
     started = goalie_starts[goalie_starts["is_starter"].astype(bool)]
     points = scoreset.score_columns(started, side="goalies")
     return float(points.mean()), float(points.std())
@@ -152,13 +155,17 @@ class Season:
         # start costs nothing; discovering it later invalidates every number.
         self.decision_sims = int(decision_sims)
         self.simulator = None
+        self.goalie_fit = None
         if self.decision_sims:
             self.simulator = simlayer.build_simulator(data["season"], seed=decision_seed)
+            # Goalies are drawn from the same game as the skaters (Simulation/goalies.py), with
+            # the fitted P(start) -- the column rungs 4 and up read.
+            self.goalie_fit = simlayer.load_goalie_fit(data["season"])
             log.info("decision draws: %d sims a slate, seed %d (independent of outcomes)",
                      self.decision_sims, decision_seed)
 
         self.outcomes = Outcomes(data["actuals"], data["goalie_starts"], scoreset)
-        self.goalie_line_mean, self.goalie_line_sd = goalie_line(data["goalie_starts"], scoreset)
+        self.goalie_line_mean, self.goalie_line_sd = goalie_line(data["goalie_history"], scoreset)
         log.info("goalie line under %s: %.2f points a start, sd %.2f",
                  scoreset.name, self.goalie_line_mean, self.goalie_line_sd)
         self._index_inputs()
@@ -331,7 +338,11 @@ class Season:
                          "line_sd": self.goalie_line_sd})
         return pd.DataFrame(rows)
 
-    def decision_draws(self, day):
+    # The P(start) column goalie draws are made with. A manager reading another column (rung 3's
+    # naive share) gets the closed form instead, so the two estimates never mix.
+    GOALIE_DRAW_COLUMN = "p_start_model"
+
+    def decision_draws(self, day, goalie_projections=None):
         """Per-candidate fantasy-point samples for tonight, drawn once and shared.
 
         Section 6 says projections are deterministic given the lockout snapshot, so inference
@@ -351,8 +362,32 @@ class Season:
         draws = self.simulator.draw(frame.reset_index(drop=True), self.decision_sims)
         points = self.scoreset.score_draws(draws)                     # [rows, sims]
         out = {int(p): points[i] for i, p in enumerate(draws.keys["player_id"])}
+        out.update(self._goalie_draws(day, draws, goalie_projections))
         self._draw_cache = (day, out)
         return out
+
+    def _goalie_draws(self, day, skater_draws, goalie_projections) -> dict:
+        """Tonight's goalie points on the skaters' sims: {player_id: array of sims}. Only games
+        with both teams' skaters drawn -- a goalie line is built from the opponent's draw, and
+        with no opponent drawn it would be a free shutout, so those keep the closed form."""
+        candidates = self.goalies_by_day.get(day)
+        if (self.goalie_fit is None or candidates is None or goalie_projections is None
+                or not len(goalie_projections)):
+            return {}
+        p_start = dict(zip(goalie_projections["player_id"].astype(int),
+                           goalie_projections[self.GOALIE_DRAW_COLUMN].astype(float)))
+        sides = skater_draws.keys.groupby("game_id")["team_id"].nunique()
+        drawn = set(sides[sides == 2].index)
+        rows = candidates.loc[candidates["game_id"].isin(drawn),
+                              ["game_id", "team_id", "player_id"]].copy()
+        rows["p_start"] = rows["player_id"].astype(int).map(p_start)
+        rows = rows.dropna(subset=["p_start"])
+        if not len(rows):
+            return {}
+        goalie = simlayer.goalies_module.draw_goalies(skater_draws, rows, self.goalie_fit,
+                                                      self.simulator.rng)
+        points = self.scoreset.score_draws(goalie, side="goalies")
+        return {int(p): points[i] for i, p in enumerate(goalie.keys["player_id"])}
 
     def _view_for(self, team_index, day, week, opponent, history, goalie_projections):
         projections = self.proj_by_day.get(day, self.data["projections"].iloc[:0])
@@ -373,7 +408,8 @@ class Season:
             opponent_index=opponent,
             my_week_points=self.weekly[week][team_index],
             opponent_week_points=self.weekly[week][opponent] if opponent is not None else 0.0,
-            decision_points=self.decision_draws(day),
+            decision_points=self.decision_draws(day, goalie_projections),
+            goalie_draw_column=self.GOALIE_DRAW_COLUMN if self.goalie_fit is not None else None,
             rate_estimate=self.latest_rate,
             ros_estimate=self.latest_ros)
 

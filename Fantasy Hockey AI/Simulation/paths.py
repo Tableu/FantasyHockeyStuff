@@ -17,6 +17,7 @@ PROJECTIONS_REPORTS = PROJECTIONS_DIR / "reports"
 SCORESETS_DIR = PROJECT_ROOT.parent / "Settings" / "scoring"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 DOCS_DIR = PROJECT_ROOT / "docs"
+FEATURES_DIR = PROJECT_ROOT.parent / "ModelFeatures" / "data" / "features"
 
 # Fitted on one holdout season's residuals, so keyed by it. Replaying another season with these
 # would carry that season's fit into the replay -- for a section 11 run on 2024-25, final-holdout
@@ -27,6 +28,11 @@ def dispersion_path(season: str = "2025-26") -> Path:
 
 def correlations_path(season: str = "2025-26") -> Path:
     return REPORTS_DIR / f"correlations_{season}.json"
+
+
+def goalie_fit_path(season: str = "2025-26") -> Path:
+    """The goalie sampler's fitted numbers FOR `season`, fitted on the seasons before it."""
+    return REPORTS_DIR / f"goalie_fit_{season}.json"
 
 
 def ensure(directory: Path) -> Path:

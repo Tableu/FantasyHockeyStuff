@@ -58,6 +58,10 @@ def dispersion_path(season: str) -> Path:
     return PROJECTIONS_REPORTS / f"dispersion_{season}.json"
 
 
+def goalie_fit_path(season: str) -> Path:
+    return SIMULATION_DIR / "reports" / f"goalie_fit_{season}.json"
+
+
 def correlations_path(season: str) -> Path:
     return SIMULATION_DIR / "reports" / f"correlations_{season}.json"
 

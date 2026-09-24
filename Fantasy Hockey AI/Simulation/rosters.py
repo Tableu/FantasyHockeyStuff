@@ -16,6 +16,9 @@ Everything here works on the same draws, so one simulation answers all of them a
     start_sit       the swing in P(win) from starting each candidate, which is the actual
                     lineup decision and is not the same ranking as expected points
 
+Goalies are drawn on the same sims (`goalies.py`) when the window's P(start) table exists, so a
+roster CSV can list its goalies beside its skaters; `--no-goalies` gives the skaters-only total.
+
 Used as a script it takes rosters as CSV files of `player_id` (with an optional `game_date`
 to pin a player to one night) and reports the matchup:
 
@@ -30,6 +33,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import goalies as goalies_module
 import paths
 import scoring as scoring_module
 import simulate as simulate_module
@@ -38,12 +42,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("rosters")
 
 
-def roster_points(draws, scoreset, rows=None):
+def roster_points(draws, scoreset, rows=None, side="skaters"):
     """Points per draw for a roster: [sims], summed over the player-games it holds."""
-    points = scoreset.score_draws(draws)
+    points = scoreset.score_draws(draws, side=side)
     if rows is not None:
         points = points[np.asarray(rows)]
     return points.sum(axis=0)
+
+
+def goalie_table(season, table):
+    """The P(start) rows for the window's games that have both teams' skaters in `table`."""
+    path = paths.PROJECTIONS_REPORTS / f"goalie_pstart_{season}.parquet"
+    if not path.exists():
+        return None
+    frame = pd.read_parquet(path)
+    frame["game_date"] = pd.to_datetime(frame["game_date"])
+    sides = table.groupby("game_id")["team_id"].nunique()
+    return frame[frame["game_id"].isin(sides[sides == 2].index)].reset_index(drop=True)
 
 
 def summarize(totals, thresholds=()):
@@ -139,6 +154,8 @@ def parse_args():
     parser.add_argument("--roster", type=Path, required=True)
     parser.add_argument("--opponent", type=Path, default=None)
     parser.add_argument("--independent", action="store_true")
+    parser.add_argument("--no-goalies", action="store_true",
+                        help="Skaters only: do not draw the rosters' goalies")
     parser.add_argument("--chunk-rows", type=int, default=10 ** 9)
     parser.add_argument("--seed", type=int, default=17)
     return parser.parse_args()
@@ -153,17 +170,33 @@ def main():
     # One draw over the whole window, so both rosters -- and any two players who share an
     # NHL game -- are sampled inside the same simulation.
     draws = simulator.draw(table, args.sims)
-    mine_rows = load_roster(args.roster, table)
-    mine = roster_points(draws, scoreset, mine_rows)
-    log.info("roster: %d player-games over %d draws", len(mine_rows), args.sims)
+    goalie_draws = goalie_rows = None
+    if args.season and not args.no_goalies:
+        goalie_rows = goalie_table(args.season, table)
+        if goalie_rows is not None and len(goalie_rows):
+            fit = goalies_module.GoalieFit.load(paths.goalie_fit_path(args.season))
+            goalie_draws = goalies_module.draw_goalies(draws, goalie_rows, fit, simulator.rng)
+
+    def total(path):
+        rows = load_roster(path, table)
+        points = roster_points(draws, scoreset, rows)
+        count = len(rows)
+        if goalie_draws is not None:
+            g_rows = load_roster(path, goalie_rows)
+            if len(g_rows):
+                points = points + roster_points(goalie_draws, scoreset, g_rows, side="goalies")
+                count += len(g_rows)
+        return points, count
+
+    mine, count = total(args.roster)
+    log.info("roster: %d player-games over %d draws", count, args.sims)
 
     print(f"\n{args.roster.stem} under {scoreset.name}")
     for key, value in summarize(mine).items():
         print(f"  {key:12s} {value:8.2f}")
 
     if args.opponent:
-        theirs_rows = load_roster(args.opponent, table)
-        theirs = roster_points(draws, scoreset, theirs_rows)
+        theirs, _ = total(args.opponent)
         print(f"\n{args.opponent.stem}")
         for key, value in summarize(theirs).items():
             print(f"  {key:12s} {value:8.2f}")

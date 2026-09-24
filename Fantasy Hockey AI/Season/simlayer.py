@@ -38,6 +38,7 @@ log = logging.getLogger("simlayer")
 sys.path.insert(0, str(paths.SIMULATION_DIR))
 
 import copula as copula_module      # noqa: E402
+import goalies as goalies_module    # noqa: E402
 import sampler as sampler_module    # noqa: E402
 import scoring as scoring_module    # noqa: E402
 
@@ -63,6 +64,19 @@ def assert_scoreset_dirs_agree() -> None:
 def load_scoreset(name):
     assert_scoreset_dirs_agree()
     return scoring_module.load(paths.scoreset(name))
+
+
+def load_goalie_fit(season):
+    """The goalie sampler's fitted numbers FOR `season` (fitted on the seasons before it)."""
+    path = paths.goalie_fit_path(season)
+    if not path.exists():
+        raise FileNotFoundError(f"{path} is missing -- run Simulation/goalie_fit.py --season "
+                                f"{season}")
+    fit = goalies_module.GoalieFit.load(path)
+    if season in fit.payload["trained_on"]:
+        raise AssertionError(f"{path.name} was trained on {season}, the season it is for")
+    log.info("goalie sampler: fit on %s", ", ".join(fit.payload["trained_on"]))
+    return fit
 
 
 def build_simulator(season, seed=90210, independent=False):

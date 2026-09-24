@@ -55,6 +55,9 @@ python build_fantasy_positions.py --platform Yahoo --season 2026-27 --adp
 python goalie_starts.py --train --save --predict --season 2025-26
 python ros_train.py --train 2023-24 2024-25 --test 2025-26 --horizon season --predictions-out
 
+# once, from Simulation/ -- the goalie sampler's numbers, fitted on the seasons before 2025-26
+python goalie_fit.py --season 2025-26
+
 python ladder.py --season 2025-26 --weights points-league --weights banger-league \
     --replications 8 --decision-sims 120
 python ladder.py --league league-12team-simple --replications 8 \
@@ -364,9 +367,20 @@ exactly one goalie starts.
 
 Nothing here predicts how well a goalie will play, and that is deliberate: per-start points
 measured at R² −0.8% and save percentage carries at r = +0.026. The line is the league average,
-and it is **computed from the scoring file rather than hard-coded** — under points-league a start
-is worth 4.39 with a spread of 4.03, under banger-league 3.59 and 3.31, and under a
-goals-and-assists-only format −3.02, where a goalie is a liability rather than an asset.
+and it is **computed from the scoring file rather than hard-coded**.
+
+**It is computed from the seasons before the one replayed** (`inputs.load_goalie_history`). It
+used to average the replayed season's own starts -- 4.39 a start under points-league in 2025-26 --
+which handed every manager that season's goalie scoring before it happened. From 2023-24 and
+2024-25 it is 4.74 (sd 4.20): goalies scored about 8% less in 2025-26 than before. Fixing it cost
+rung 5 2.1 ± 0.9 points a week, paired seat by seat (`docs/ladder-league_goalie-line.md`); the
+other rungs did not move beyond noise.
+
+**Rungs 4 and up now read goalies from the Monte Carlo layer** (`Simulation/goalies.py`): on each
+slate the goalies are drawn on the skaters' sims, their line built from the opposing skaters'
+sampled shots and goals, with the fitted P(start). `view.moments` takes their mean and spread from
+those draws; rung 3, which reads the naive start share, keeps the closed-form
+`P(start) x league average`, so the two estimates never mix.
 
 ## What is honest about these numbers, and what is not
 

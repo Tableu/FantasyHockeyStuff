@@ -756,6 +756,83 @@ def check_playoffs() -> str:
             f"{seeds[champion]} won {rounds_won} round(s)")
 
 
+def check_goalie_draws() -> str:
+    """Goalie lines built from the skaters' draw obey the game's identities: one starter per
+    team-game, saves never negative, goals against never above the opponent's skater goals, a
+    shutout only on zero goals against and a win, and -- with pulls switched off -- exactly one win
+    and one loss of some kind per game. Then the season wiring: rung 4 reads drawn goalies, a naive
+    reader keeps the closed form, and the fit was not trained on the season replayed."""
+    import copy
+
+    import simlayer
+
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    data = inputs.load_season(SEASON)
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    calendar = schedule_module.from_candidates(
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+    season = engine_module.Season(config, calendar, data, eligibility, scoreset,
+                                  managers_module.build_field(config, scoreset, _strategy(),
+                                                              rungs=(4,)),
+                                  decision_sims=200)
+    assert SEASON not in season.goalie_fit.payload["trained_on"], "goalie fit trained on the replay"
+    day = calendar.days[60]
+    frame = season.proj_by_day[day].reset_index(drop=True)
+    skaters = season.simulator.draw(frame, 200)
+    candidates = season.goalies_by_day[day][["game_id", "team_id", "player_id"]].copy()
+    candidates["p_start"] = 1.0
+
+    no_pull = copy.deepcopy(season.goalie_fit.payload)
+    no_pull["pull_by_ga"] = [0.0] * len(no_pull["pull_by_ga"])
+    for label, fit in (("fitted", season.goalie_fit),
+                       ("no pulls", simlayer.goalies_module.GoalieFit(no_pull))):
+        g = simlayer.goalies_module.draw_goalies(skaters, candidates, fit, np.random.default_rng(5))
+        tg = g.keys["game_id"].astype(str) + ":" + g.keys["team_id"].astype(str)
+        starters = pd.DataFrame(g.played.astype(int)).groupby(tg.to_numpy()).sum()
+        assert (starters.to_numpy() == 1).all(), f"{label}: not exactly one starter per team-game"
+        assert (g["saves"] >= 0).all(), f"{label}: negative saves"
+        assert not ((g["shutouts"] > 0) & ((g["goals_against"] > 0) | (g["wins"] == 0))).any(),             f"{label}: a shutout with goals against or without a win"
+        opp_goals = {}
+        sk_tg = skaters.keys["game_id"].astype(str) + ":" + skaters.keys["team_id"].astype(str)
+        team_goals = pd.DataFrame(skaters["goals"].astype(int)).groupby(sk_tg.to_numpy()).sum()
+        games = g.keys.drop_duplicates(["game_id", "team_id"])
+        for game_id, sides in games.groupby("game_id"):
+            a, b = [f"{game_id}:{t}" for t in sides["team_id"]]
+            opp_goals[a], opp_goals[b] = team_goals.loc[b].to_numpy(), team_goals.loc[a].to_numpy()
+        ga = pd.DataFrame(g["goals_against"].astype(int)).groupby(tg.to_numpy()).sum()
+        for key, row in ga.iterrows():
+            assert (row.to_numpy() <= opp_goals[key]).all(), f"{label}: goals against above the opponent's goals"
+        if label == "no pulls":
+            game = g.keys["game_id"].to_numpy()
+            wins = pd.DataFrame(g["wins"].astype(int)).groupby(game).sum().to_numpy()
+            lost = pd.DataFrame((g["losses"] + g["ot_losses"]).astype(int)).groupby(game).sum().to_numpy()
+            assert (wins == 1).all() and (lost == 1).all(), "no pulls: not one win and one loss per game"
+
+    from decisionlayer import estimators
+
+    history = estimators.NaiveHistory({}, {}, 1.0)
+    goalie_projections = season._goalie_projections(day, history)
+    draws = season.decision_draws(day, goalie_projections)
+    drawn = [p for p in goalie_projections["player_id"].astype(int) if p in draws]
+    assert drawn, "no goalie was drawn into the decision draws"
+    season.state = state_module.LeagueState(config, season.player_pool(), eligibility)
+    view = season._view_for(0, day, calendar.week_of(day), None, history, goalie_projections)
+    view.p_start_column = "p_start_model"
+    sampled = view.moments(scoreset, drawn[:3])
+    view.p_start_column = "p_start_naive"
+    closed = view.moments(scoreset, drawn[:3])
+    p = drawn[0]
+    assert abs(sampled[p][0] - float(draws[p].mean())) < 1e-6, "rung 4 did not read the drawn goalie"
+    assert sampled[p] != closed[p], "a naive reader got the drawn goalie"
+    return (f"{len(drawn)} goalies drawn on {pd.Timestamp(day).date()}; one starter per team-game, "
+            f"saves >= 0, GA <= opponent goals, shutouts on 0 GA wins; rung 4 reads the draws, "
+            f"the naive share keeps the closed form")
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -804,6 +881,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("frozen rosters", check_frozen_rosters),
           ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("claims", check_claims), ("league rules", check_league_rules),
           ("settings", check_settings), ("playoffs", check_playoffs),
+          ("goalie draws", check_goalie_draws),
           ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 

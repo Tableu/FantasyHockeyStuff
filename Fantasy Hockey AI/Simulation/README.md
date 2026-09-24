@@ -22,10 +22,13 @@ marginals.py      the per-category distributions, as inverse-CDF functions
 copula.py         correlation between players, imposed on the uniforms
 correlations.py   fits that structure from the scored holdout        -> reports/correlations.json
 sampler.py        one draw of a night: lambdas in, stat lines out
+goalies.py        goalie lines built from the skaters' draw (P(start), shots/goals against)
+goalie_fit.py     the few numbers that structure cannot supply    -> reports/goalie_fit_<season>.json
 scoring.py        a scoring file applied to sampled stat lines
 simulate.py       CLI: a lambda table -> per-player-game distributions
 rosters.py        roster totals, head-to-head matchups, start/sit
 validate.py       the calibration report                             -> docs/calibration.md
+validate_goalies.py  the goalie sampler against real starts       -> reports/goalie_validation_<season>.json
 ```
 
 ## Running it
@@ -37,6 +40,8 @@ python correlations.py                      # once per model build; writes the f
 python simulate.py --season 2025-26 --variant A --sims 2000 \
     --weights points-league --weights banger-league
 python validate.py --sims 300 --weights points-league --independent --docs
+python goalie_fit.py --season 2025-26                # fits on the seasons BEFORE 2025-26
+python validate_goalies.py --season 2025-26 --sims 200 --weights points-league
 ```
 
 `correlations.py` depends on `../Projections/reports/predictions_B.parquet` and
@@ -134,10 +139,42 @@ reading it:
 
 ## Not covered
 
-**Goalies.** The goalie model stack was measured and removed (see the build log), and the
-agreed treatment is `p(start) × league average` rather than projected goalie quality. Nothing
-here samples a goalie, so a roster total from `rosters.py` is its skaters only. Doing it
-properly needs an empirical start distribution with an explicit pull component — a goalie's
-outcome has a real left tail, which is the one place the Gamma-Poisson machinery here would
-fit badly — and the per-start goalie lines that would come from are not currently exported to
-parquet by `ModelFeatures/`.
+**Goalie quality.** The goalie model stack was measured and removed (see the build log); the
+treatment is `P(start) x league average`, and no goalie is better than another here. **Relief
+goalies'** lines are not drawn either (140-173 relief appearances a season).
+
+## Goalies
+
+`goalies.py` builds a goalie's line from the game the skaters already drew, rather than sampling
+it beside them: one starter per team-game from P(start); shots and goals against are the
+**opposing** skaters' sampled shots and goals, less empty-net goals; the decision is own skater
+goals against the opponent's (a tie is a shootout, since shootout goals are not skater goals; a
+one-goal game went to overtime at a fitted rate); a fitted pull rule charges a pulled starter a
+share of the line. `goalie_fit.py` fits the handful of numbers that cannot come from the skaters
+(empty-net rate by margin, P(OT | one-goal margin), pull rate by goals against, the pulled
+starter's share) on the seasons **before** the one drawn, and refuses the season itself.
+
+Scored against 2025-26's 2584 real starts (fit on 2023-24 and 2024-25):
+
+| | simulated | actual |
+|---|---|---|
+| points per start (points-league) | 4.65 | 4.38 |
+| variance of points per start | 16.7 | 16.2 |
+| goals against / saves per start | 2.71 / 24.4 | 2.81 / 24.1 |
+| W / L / OTL / shutout / pulled | 0.492 / 0.348 / 0.139 / 0.063 / 0.064 | 0.494 / 0.365 / 0.123 / 0.041 / 0.055 |
+| corr(starter, own skaters) | +0.300 | +0.307 |
+| corr(starter, opposing skaters) | -0.709 | -0.731 |
+| stack of 10 skaters + their own 2 goalies, variance / sum of parts | 1.547 | 1.706 |
+| 10 skaters + the opponent's 2 goalies | 0.905 | 0.931 |
+
+The links are what the structure is for, and they land: a starter's points move with his own
+skaters (+0.30) and hard against the opponent's (-0.71), which the closed form sets to zero.
+**The level is 6% high**, and it is two known errors, not a new one: the skater projections run
+4% light on goals and 1% heavy on shots in 2025-26, and the goalie line inherits both -- which is
+what taking goals against from the skaters' draw should do. The one error of the sampler's own is
+**shutouts**: summed skater draws give a team's goals a Poisson-like spread (variance
+2.72 per start against a real 2.25), while
+real team scoring is under-dispersed -- score effects pull a game toward the middle -- so zero
+goals against comes up 6.7% of starts against 4.5%.
+That is worth about 0.05 points a start. A split-half check does not apply: nothing in the goalie
+fit is fitted on the season scored.
