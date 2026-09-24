@@ -132,6 +132,11 @@ class SlateView:
         replace this with the platform's own designation, which is the thing it carries."""
         return {p for p in self.roster if p in self.injured}
 
+    def waiver_clears(self, player_id):
+        """The date a player on waivers can be awarded to a claim (None if he is not on them).
+        A claim entered today pays out only from then, which is what a rental claim has to price."""
+        return self._state.waived.get(player_id)
+
     def healthy_on_ir(self) -> list:
         """IR players whose latest report says healthy. The league makes these come off today."""
         return [p for p in self.ir if p not in self.injured]

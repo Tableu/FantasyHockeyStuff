@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument("--rate-source", choices=("ros", "per_game"), default=None,
                         help="Rung 5: rest-of-season (holdout build) or per-game carried rate")
     parser.add_argument("--claim-premium", type=float, default=None,
-                        help="Rung 5: extra points a waiver claim must clear ('inf' never claims)")
+                        help="Rung 5: extra points a waiver claim must clear (default 0; 'inf' never claims)")
     # Section 10's orchestrator, seated as rung 7: rung 5's upgrades plus streaming.
     parser.add_argument("--streams", type=int, default=None,
                         help="Rung 7: streaming spots (0 makes it rung 5)")
@@ -70,6 +70,8 @@ def parse_args():
                         help="Rung 7: sds of the week's gain a stream must also clear")
     parser.add_argument("--stream-gate", action="store_true",
                         help="Rung 7: scale a stream's gain by phi(z)/phi(0) of the matchup")
+    parser.add_argument("--no-stream-claim", action="store_true",
+                        help="Rung 7: stop rentals claiming players off waivers (on by default)")
     parser.add_argument("--stream-flat", action="store_true",
                         help="Rung 7: hold the rental bar at lam/2 all week instead of letting it fall")
     parser.add_argument("--tag", default=None,
@@ -112,6 +114,8 @@ def stream_params(args):
         changes["gate"] = True
     if args.stream_flat:
         changes["flat"] = True
+    if args.no_stream_claim:
+        changes["claim"] = False
     return replace(streaming.StreamParams(), **changes)
 
 
@@ -182,6 +186,9 @@ def summarize(per_replication, scoreset_name):
                     decision_efficiency=("decision_efficiency", "mean"),
                     moves_spent=("moves_spent", "mean"),
                     forced_drops=("forced_drops", "mean"),
+                    claims_submitted=("claims_submitted", "mean"),
+                    claims_awarded=("claims_awarded", "mean"),
+                    claims_failed=("claims_failed", "mean"),
                     move_hit_rate=("move_hit_rate", "mean"),
                     realized_gain_per_move=("realized_gain_per_move", "mean"),
                     rentals=("rentals", "mean"),
@@ -244,7 +251,8 @@ def main():
         print(f"\n{scoreset.name}")
         print(table[["rung", "strategy", "win_rate", "points_per_week", "games_started_rate",
                      "decision_efficiency", "empty_slot_nights", "wasted_slot_nights",
-                     "moves_spent", "forced_drops", "move_hit_rate", "realized_gain_per_move",
+                     "moves_spent", "forced_drops", "claims_awarded", "claims_failed", "move_hit_rate",
+                     "realized_gain_per_move",
                      "rentals", "rental_hit_rate", "rental_gain"]]
               .to_string(index=False, float_format=lambda v: f"{v:.3f}"))
         report["results"][scoreset.name] = {

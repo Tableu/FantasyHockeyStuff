@@ -415,7 +415,13 @@ class Season:
             self.injured_status.update(self.status_by_day.get(day, {}))
             self.injured = {p for p, hurt in self.injured_status.items() if hurt}
 
-            self.state.process_waivers(day)
+            # A claim whose drop has left the roster asks its manager again, with today's view.
+            def redrop(team_index, player_id, _day=day, _week=week):
+                view = self._view_for(team_index, _day, _week, opponents.get(team_index),
+                                      history, goalie_projections)
+                return self.field[team_index].claim_drop(view, player_id)
+
+            self.state.process_waivers(day, redrop=redrop)
             for manager in self.field:
                 v = self._view_for(manager.team_index, day, week,
                                    opponents.get(manager.team_index), history,
@@ -548,6 +554,12 @@ class Season:
                                    if t["team"] == manager.team_index),
                 # Activations on a full roster, each of which forced a (free) drop.
                 "forced_drops": len(manager.ir_log),
+                # Waiver claims: entered, won, and lost for a recorded reason (state.failed_claims).
+                "claims_submitted": self.state.claims_submitted.get(manager.team_index, 0),
+                "claims_awarded": sum(1 for t in self.state.transactions
+                                      if t["team"] == manager.team_index and t["kind"] == "claim"),
+                "claims_failed": sum(1 for f in self.state.failed_claims
+                                     if f["team"] == manager.team_index),
                 **self._move_quality(manager.team_index),
             })
         return {"teams": pd.DataFrame(rows), "matchups": pd.DataFrame(self.results),

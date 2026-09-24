@@ -7,6 +7,7 @@
   "ir": 2,
   "moves_per_week": 7,
   "moves_carry_over": false,
+  "waiver_days": 2,
   "week_starts_on": "MON",
   "regular_season_weeks": 22,
   "playoff_rounds": 3,

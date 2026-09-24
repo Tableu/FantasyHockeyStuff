@@ -106,6 +106,13 @@ class Manager:
         """
         return self._cheapest_safe_drop(view, returning, lambda p: view.history.get(p))
 
+    def claim_drop(self, view, incoming):
+        """Whom to drop for a waiver claim being awarded, when the drop chosen at submission has
+        left the roster. The same rule as a forced activation, with the incoming player as the
+        other candidate: if releasing him is cheapest, the claim is abandoned (None)."""
+        drop = self.activation_drop(view, incoming)
+        return None if drop == incoming else drop
+
     def _cheapest_safe_drop(self, view, returning, cost):
         """The forced drop that leaves the roster able to fill as many slots as it can, and among
         those the cheapest by `cost` -- the returning player himself included.

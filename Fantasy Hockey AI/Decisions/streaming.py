@@ -55,11 +55,13 @@ class StreamParams:
     margin: float = 0.0         # sds of the week's gain a stream must also clear
     gate: bool = False          # scale the gain by phi(z)/phi(0) of the matchup z
     flat: bool = False          # hold the bar at lam/2 all week (the falling bar's average)
+    claim: bool = True          # may claim a rental off waivers (priced from his clear date)
     shortlist: int = 12         # free agents priced on the roster per pass
 
     def describe(self) -> str:
         return (f"k={self.spots} r={self.reserve} lam={self.lam:g} ms={self.margin:g}"
-                f"{' gate' if self.gate else ''}{' flat' if self.flat else ''}")
+                f"{' gate' if self.gate else ''}{' flat' if self.flat else ''}"
+                f"{' claim' if self.claim else ''}")
 
 
 def _week_share_left(view) -> float:
@@ -151,7 +153,7 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
     while view.moves_left - reserve_today(view, params) > 0:
         roster = list(view.roster)
         pool = [p for p in view.free_agents()
-                if not view.on_waivers(p) and p not in reserved
+                if (params.claim or not view.on_waivers(p)) and p not in reserved
                 and not is_goalie(eligibility, p)]
         holders = [p for p in spots(view, params, horizon, source, pool, eligibility)
                    if p not in reserved]
@@ -181,7 +183,9 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
                 if outgoing is not None and not fieldable(
                         [p for p in roster if p != outgoing] + [incoming], eligibility, roster):
                     continue
-                gain = scale * nights.swap_gain(incoming, outgoing)
+                # A claim is awarded when the player clears waivers, so it pays from then.
+                clears = view.waiver_clears(incoming) if view.on_waivers(incoming) else None
+                gain = scale * nights.swap_gain(incoming, outgoing, from_day=clears)
                 floor = cost[outgoing]
                 bar = (max(floor, params.lam * share_left)
                        + params.margin * nights.swap_sd(incoming, outgoing))
@@ -192,14 +196,22 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
 
         _, gain, bar, floor, incoming, outgoing = best
         reserved.update({incoming, outgoing} - {None})
+        claiming = view.on_waivers(incoming)
         try:
-            state.add(view.team_index, incoming, view.day, drop=outgoing, reason="rental")
+            if claiming:
+                state.submit_claim(view.team_index, incoming, drop=outgoing, today=view.day)
+            else:
+                state.add(view.team_index, incoming, view.day, drop=outgoing, reason="rental")
         except Exception as error:                     # noqa: BLE001 - state raises IllegalMove
             log.debug("team %d could not stream %s: %s", view.team_index, incoming, error)
             continue
-        done.append({"day": view.day, "kind": "rental", "incoming": incoming,
+        done.append({"day": view.day, "kind": "rental claim" if claiming else "rental",
+                     "incoming": incoming,
                      "outgoing": outgoing, "predicted_gain": gain, "bar": bar,
                      "drop_cost": floor, "spot": outgoing in holders,
                      "reserve": reserve_today(view, params), "moves_left": view.moves_left,
                      "incoming_games": len(nights.nights(incoming))})
+        if claiming:
+            # The claim resolves later; stop pricing against a roster that may change first.
+            break
     return done

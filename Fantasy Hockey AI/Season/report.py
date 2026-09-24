@@ -65,11 +65,12 @@ def write(report: dict, season: str, weeks: int, path=None) -> str:
 
     columns = ["rung", "strategy", "win_rate", "points_per_week", "games_started_rate",
                "decision_efficiency", "empty_slot_nights", "wasted_slot_nights", "moves_spent",
-               "forced_drops", "move_hit_rate", "realized_gain_per_move", "rentals",
+               "forced_drops", "claims_awarded", "claims_failed", "move_hit_rate",
+               "realized_gain_per_move", "rentals",
                "rental_hit_rate", "rental_gain"]
     headers = ["rung", "strategy", "win rate", "points / week", "games started",
                "decision eff.", "empty slots", "wasted slots", "moves", "forced drops",
-               "move hit rate", "gain / move", "rentals", "rental hit", "rental gain"]
+               "claims won", "claims lost", "move hit rate", "gain / move", "rentals", "rental hit", "rental gain"]
 
     for scoreset_name, payload in report["results"].items():
         table = pd.DataFrame(payload["by_rung"]).sort_values("rung")

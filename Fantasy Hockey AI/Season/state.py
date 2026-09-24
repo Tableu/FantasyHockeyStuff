@@ -85,8 +85,10 @@ class LeagueState:
         self.pool = set(player_pool)
         self.owner = {}                 # player_id -> team index
         self.waived = {}                # player_id -> date it clears waivers
-        self.pending_claims = defaultdict(list)   # player_id -> [team index]
+        self.pending_claims = defaultdict(list)   # player_id -> [team index], until he clears
         self.claim_drops = {}                     # (team index, player_id) -> player to drop
+        self.claims_submitted = defaultdict(int)  # team index -> claims entered
+        self.failed_claims = []                   # {date, team, player_id, reason}
         self.week = None
         self.transactions = []
 
@@ -138,6 +140,13 @@ class LeagueState:
                               f"{self.waived[player_id].date()}; use claim()")
         if team.moves_left <= 0:
             raise IllegalMove(f"team {team_index} has no moves left this week")
+        self._acquire(team_index, player_id, today, drop, reason)
+
+    def _acquire(self, team_index: int, player_id, today, drop, reason) -> None:
+        """Take a player from the pool for one move: the part `add` and a waiver award share.
+        A claim award skips `add`'s on-waivers refusal -- awarding a player from waivers is the
+        one thing that refusal must not block."""
+        team = self.teams[team_index]
         if drop is not None:
             self.drop(team_index, drop, today)
         if len(team.roster) >= self.config.roster_size:
@@ -164,8 +173,7 @@ class LeagueState:
             raise IllegalMove(f"team {team_index} does not hold {player_id}")
         self.owner.pop(player_id, None)
         self.pool.add(player_id)
-        self.waived[player_id] = (pd.Timestamp(today)
-                                  + pd.Timedelta(days=getattr(self.config, "waiver_days", 2)))
+        self.waived[player_id] = pd.Timestamp(today) + pd.Timedelta(days=self.config.waiver_days)
         team.assert_legal()
 
     def stash(self, team_index: int, player_id, ir_eligible: set) -> None:
@@ -225,50 +233,94 @@ class LeagueState:
 
     # ---------- waivers ----------
 
-    def submit_claim(self, team_index: int, player_id, drop=None) -> None:
-        """Register interest in a player on waivers; resolved at the next processing.
+    def submit_claim(self, team_index: int, player_id, drop=None, today=None) -> None:
+        """Enter a claim on a player on waivers. It resolves when his waiver window ends, not
+        before (`process_waivers`).
 
-        `drop` is who goes if the claim is awarded. A full roster cannot take a player without
-        one, and the choice is made now, when the claim is priced, not at award time.
+        `drop` is who goes if the claim is awarded, chosen when the claim is priced. If he has
+        left the roster by then, the award asks the manager again rather than failing silently.
         """
         if self.teams[team_index].moves_left <= 0:
             raise IllegalMove(f"team {team_index} has no moves left to claim with")
-        self.pending_claims[player_id].append(team_index)
+        if player_id not in self.waived or player_id not in self.pool:
+            raise IllegalMove(f"{player_id} is not on waivers; add() him instead")
+        if today is not None and not self.on_waivers(player_id, today):
+            raise IllegalMove(f"{player_id} has already cleared waivers; add() him instead")
+        if team_index not in self.pending_claims[player_id]:
+            self.pending_claims[player_id].append(team_index)
+            self.claims_submitted[team_index] += 1
         if drop is not None:
             self.claim_drops[(team_index, player_id)] = drop
 
-    def process_waivers(self, today, drops=None) -> list:
-        """Award claims by rolling priority, then send winners to the back of the queue.
+    def process_waivers(self, today, redrop=None) -> list:
+        """Award every claim whose player's waiver window has ended, by rolling priority.
 
-        A claim spends two scarce things at once -- priority and one of the week's seven -- which
-        is why it resolves here rather than being folded into `add`.
+        Claims used to be processed the next game day, while the player was usually still inside
+        his window, and the award went through `add()` -- which refuses a player on waivers. So a
+        claim almost never succeeded (one of two in a whole 2025-26 replay), and the refusal was
+        a DEBUG line followed by the claim being cleared. Now:
+
+          * a claim waits until its player clears (`clears <= today`), then resolves;
+          * the claimant with the best priority who can still take him wins -- if he cannot (no
+            moves left, no legal drop), the next claimant is tried, as a real league does;
+          * a drop that has left the roster is re-chosen through `redrop(team, player)` (the
+            engine passes the manager's rule), and None from it abandons the claim;
+          * every failure is recorded in `failed_claims` with its reason.
+
+        The winner spends one move and goes to the back of the priority queue. Returns the
+        awarded (team, player_id) pairs.
         """
+        today = pd.Timestamp(today)
         awarded = []
-        drops = {**self.claim_drops, **(drops or {})}
-        for player_id, claimants in sorted(self.pending_claims.items()):
-            live = [t for t in claimants
-                    if self.teams[t].moves_left > 0 and player_id in self.pool]
-            if not live:
-                continue
-            winner = min(live, key=lambda t: self.teams[t].waiver_priority)
-            try:
-                self.add(winner, player_id, today, drop=drops.get((winner, player_id)),
-                         reason="claim")
-            except IllegalMove as error:
-                log.debug("claim on %s by team %d failed: %s", player_id, winner, error)
-                continue
-            # Rolling priority: a successful claim drops you behind everyone who did not claim.
-            worst = max(t.waiver_priority for t in self.teams)
-            for team in self.teams:
-                if team.waiver_priority > self.teams[winner].waiver_priority:
-                    team.waiver_priority -= 1
-            self.teams[winner].waiver_priority = worst
-            awarded.append((winner, player_id))
-        self.pending_claims.clear()
-        self.claim_drops.clear()
-        self.waived = {p: d for p, d in self.waived.items()
-                       if pd.Timestamp(today) < d and p in self.pool}
+        due = sorted(p for p in self.pending_claims if not self.on_waivers(p, today))
+        for player_id in due:
+            claimants = sorted(set(self.pending_claims.pop(player_id)),
+                               key=lambda t: self.teams[t].waiver_priority)
+            for team_index in claimants:
+                reason = self._claim_blocker(team_index, player_id, today, redrop)
+                if reason is None:
+                    try:
+                        self._acquire(team_index, player_id, today,
+                                      self.claim_drops.get((team_index, player_id)), "claim")
+                    except IllegalMove as error:
+                        reason = str(error)
+                if reason is not None:
+                    self.failed_claims.append({"date": today, "team": team_index,
+                                               "player_id": player_id, "reason": reason})
+                    continue
+                self._to_back_of_queue(team_index)
+                awarded.append((team_index, player_id))
+                break
+            for team_index in claimants:
+                self.claim_drops.pop((team_index, player_id), None)
+        self.waived = {p: d for p, d in self.waived.items() if today < d and p in self.pool}
         return awarded
+
+    def _claim_blocker(self, team_index, player_id, today, redrop):
+        """Why this team cannot be awarded this player now, or None. Re-chooses a stale drop."""
+        team = self.teams[team_index]
+        if player_id not in self.pool:
+            return "no longer in the pool"
+        if team.moves_left <= 0:
+            return "no moves left this week"
+        drop = self.claim_drops.get((team_index, player_id))
+        if drop is not None and not team.holds(drop):
+            drop = redrop(team_index, player_id) if redrop else None
+            if drop is None:
+                self.claim_drops.pop((team_index, player_id), None)
+                return "the chosen drop had left the roster and no replacement drop was chosen"
+            self.claim_drops[(team_index, player_id)] = drop
+        if drop is None and len(team.roster) >= self.config.roster_size:
+            return "a full roster and no drop"
+        return None
+
+    def _to_back_of_queue(self, winner: int) -> None:
+        """Rolling priority: a successful claim drops you behind everyone who did not claim."""
+        worst = max(t.waiver_priority for t in self.teams)
+        for team in self.teams:
+            if team.waiver_priority > self.teams[winner].waiver_priority:
+                team.waiver_priority -= 1
+        self.teams[winner].waiver_priority = worst
 
     # ---------- invariants ----------
 

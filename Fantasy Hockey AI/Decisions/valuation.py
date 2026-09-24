@@ -99,11 +99,15 @@ class RosterNights:
             self._nights[player_id] = self.view.nights_through(player_id, self.weeks_ahead)
         return self._nights[player_id]
 
-    def swap_gain(self, incoming, outgoing) -> float:
+    def swap_gain(self, incoming, outgoing, from_day=None) -> float:
         """Lineup points over the window with `incoming` in place of `outgoing`, minus without.
-        `outgoing=None` is an add into an open spot."""
+        `outgoing=None` is an add into an open spot. `from_day` prices a swap that only happens
+        later -- a waiver claim, awarded when the player clears -- so only nights from then on
+        count, for both sides: the outgoing player keeps playing until the swap."""
         gain = 0.0
         for night in set(self.nights(incoming)) | set(self.nights(outgoing)):
+            if from_day is not None and night < from_day:
+                continue
             players = [p for p in self.playing.get(night, []) if p != outgoing]
             if night in self.nights(incoming):
                 players.append(incoming)

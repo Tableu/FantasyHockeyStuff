@@ -22,6 +22,7 @@ season-level result rather than as an error:
     frozen rosters  a transacting team left short of its slots with a fix available (a goalie on IR)
     vor board       a draft board that read past draft day, or a VOR draft that leaves a roster short
     draft lottery   replications that repeat one draft, or give a rung more early picks
+    claims          a waiver claim resolved early, awarded out of priority, or failing silently
     no clobber      a scored projection build overwriting the deployment boosters in models/
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
@@ -530,6 +531,76 @@ def check_draft_lottery(replications=8) -> str:
     return "; ".join(notes)
 
 
+def check_claims() -> str:
+    """Waiver claims resolve when the player clears, to the best-priority claimant who can take
+    him, cost that claimant one move and his place in the queue -- and fail loudly, not silently.
+
+    Claims used to be processed the next game day through add(), which refuses a player still on
+    waivers: in a whole 2025-26 replay one claim of two succeeded and the other vanished at DEBUG.
+    """
+    config = league_module.load()
+    pool = list(range(1, 400))
+    eligibility = {p: frozenset({["C", "LW", "RW", "D", "G"][p % 5]}) for p in pool}
+    s = state_module.LeagueState(config, pool, eligibility)
+    for seat in range(3):
+        for p in pool[seat * config.roster_size:(seat + 1) * config.roster_size]:
+            s.draft(seat, p)
+    s.start_week(1)
+    monday = pd.Timestamp("2026-01-05")
+    roster = {t: list(s.teams[t].roster) for t in range(3)}
+
+    try:
+        s.submit_claim(0, pool[-1], drop=roster[0][0], today=monday)
+        raise AssertionError("a claim on a player who is not on waivers was accepted")
+    except state_module.IllegalMove:
+        pass
+
+    # Team 2 drops X; teams 1 and 0 claim him. Team 0 has the better priority.
+    x = roster[2][0]
+    s.drop(2, x, monday)
+    clears = s.waived[x]
+    s.submit_claim(1, x, drop=roster[1][0], today=monday + pd.Timedelta(days=1))
+    s.submit_claim(0, x, drop=roster[0][0], today=monday + pd.Timedelta(days=1))
+    s.process_waivers(monday + pd.Timedelta(days=1))
+    assert x in s.pool and x in s.pending_claims, "a claim was processed before the player cleared"
+
+    moves_before = {t: s.teams[t].moves_used for t in range(3)}
+    priority_before = {t: s.teams[t].waiver_priority for t in range(3)}
+    awarded = s.process_waivers(clears)
+    assert awarded == [(0, x)], f"the best-priority claimant did not win: {awarded}"
+    assert x in s.teams[0].roster and roster[0][0] in s.pool, "the award or its drop did not happen"
+    assert s.teams[0].moves_used == moves_before[0] + 1, "the award did not cost one move"
+    assert s.teams[1].moves_used == moves_before[1], "the losing claimant spent a move"
+    assert roster[1][0] in s.teams[1].roster, "the losing claimant's drop happened anyway"
+    assert s.teams[0].waiver_priority == max(t.waiver_priority for t in s.teams), \
+        "the winner did not go to the back of the queue"
+    assert s.teams[1].waiver_priority == priority_before[1] - 1, "the queue did not move up"
+
+    # A stale drop is re-chosen through the hook; without a replacement the claim fails loudly.
+    y = roster[2][1]
+    s.drop(2, y, clears)
+    s.submit_claim(1, y, drop=roster[1][1], today=clears)
+    s.drop(1, roster[1][1], clears)                      # the chosen drop leaves the roster
+    s.add(1, pool[-2], clears)                           # and his spot is filled again
+    replacement = roster[1][2]
+    awarded = s.process_waivers(s.waived[y], redrop=lambda team, player: replacement)
+    assert (1, y) in awarded and replacement in s.pool, "a stale drop was not re-chosen"
+
+    z = roster[2][2]
+    s.drop(2, z, clears)
+    s.submit_claim(1, z, drop=roster[1][3], today=clears)
+    s.drop(1, roster[1][3], clears)
+    s.add(1, pool[-3], clears)
+    failures_before = len(s.failed_claims)
+    s.process_waivers(s.waived[z], redrop=lambda team, player: None)
+    assert z not in s.teams[1].roster, "a claim with no legal drop was awarded"
+    assert len(s.failed_claims) == failures_before + 1 and "drop" in s.failed_claims[-1]["reason"], \
+        "a failed claim was not recorded with its reason"
+    s.assert_legal()
+    return (f"awarded at the clear date to the best priority; {s.claims_submitted[1]} claims by one "
+            f"team, {len(s.failed_claims)} recorded failure(s); stale drop re-chosen")
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -576,7 +647,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
           ("frozen rosters", check_frozen_rosters),
-          ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("no clobber", check_no_clobber),
+          ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("claims", check_claims), ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 
 

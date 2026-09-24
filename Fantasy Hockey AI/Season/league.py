@@ -60,6 +60,9 @@ class LeagueConfig:
     regular_season_weeks: int
     playoff_rounds: int
     playoff_teams: int
+    # Days a dropped player spends on waivers before anyone may add him. Required, so a config
+    # cannot silently inherit a default; the target league's real value is still to be checked.
+    waiver_days: int
     week_starts_on: str = "MON"
     moves_carry_over: bool = False
     eligibility_platform: str = "yahoo"

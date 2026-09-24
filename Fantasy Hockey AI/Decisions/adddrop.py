@@ -17,7 +17,10 @@ The rule, in the order it is applied:
    the margin raised far enough *is* not transacting, so a tuned margin cannot do worse than that
    except by noise.
 4. **Waiver claims** clear the same bar plus `claim_premium`, the points a claim must be worth to
-   spend the top of the priority queue. Infinite by default, which is how every rung behaved before.
+   spend the top of the priority queue. On by default since 2026-09-23 at a premium of 0 -- a
+   claim clears the same margin as an add, and priority is treated as free. Provisional: the
+   premium is unmeasured (a sweep over {0, 5} is planned). Before that, the default was infinite
+   and no rung ever claimed; `claim_premium=inf` restores that.
 
 Then repeat while moves remain. Nothing here reads a file or a table: it is handed a view, and
 it acts through the view's league state, whose methods raise on an illegal move.
@@ -41,7 +44,7 @@ class AddDropParams:
     horizon_weeks: int | None = 3
     margin: float = 1.0               # sds of the gain a move must clear; inf never moves
     rate_source: str = "ros"          # "ros" (rest-of-season, holdout) or "per_game"
-    claim_premium: float = math.inf   # extra points a waiver claim must clear
+    claim_premium: float = 0.0        # extra points a waiver claim must clear; inf never claims
     shortlist: int = 10               # free agents priced on the roster per pass
     drop_shortlist: int = 4           # cheapest fieldable drops tried against each
 
@@ -111,7 +114,7 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
         reserved.update({incoming, outgoing} - {None})
         try:
             if view.on_waivers(incoming):
-                state.submit_claim(view.team_index, incoming, drop=outgoing)
+                state.submit_claim(view.team_index, incoming, drop=outgoing, today=view.day)
                 kind = "claim"
             else:
                 state.add(view.team_index, incoming, view.day, drop=outgoing, reason="upgrade")
