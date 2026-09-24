@@ -103,13 +103,26 @@ def summary(workbook, sheet: str) -> dict:
 
 
 def published_dates(workbook) -> dict:
-    """{SourceCheck source name: date} from the tab's 'last update' row."""
+    """{SourceCheck source name: date} from the tab's 'last update' row. A source SourceCheck
+    leaves blank takes the date of the ChangeLog entry that added it ("Added Bangers Fantasy
+    Hockey", 12 Sep 2025); one with neither stays undated (Dom's sheet)."""
     rows = list(workbook["SourceCheck"].iter_rows(max_row=2, values_only=True))
     dates, names = rows[0], rows[1]
-    out = {}
+    out, blank = {}, []
     for date, name in zip(dates, names):
-        if isinstance(date, dt.datetime) and name:
+        if not name or name in ("PLAYER", "MASTER", "TOTAL"):
+            continue
+        if isinstance(date, dt.datetime):
             out[str(name)] = date.date()
+        else:
+            blank.append(str(name))
+    for row in workbook["ChangeLog"].iter_rows(max_col=2, values_only=True):
+        when, text = (tuple(row) + (None, None))[:2]
+        if not isinstance(when, dt.datetime) or not text:
+            continue
+        for name in blank:
+            if f"added {name}".lower() in str(text).lower():
+                out.setdefault(name, when.date())
     return out
 
 
