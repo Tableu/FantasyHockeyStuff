@@ -41,6 +41,10 @@ class Manager:
     # Which P(start) estimate this rung may read. Declared per rung so that the naive share and
     # the fitted model cannot be confused for one another.
     p_start_column = "p_start_naive"
+    # Which draft board this seat picks from: "prior" (last season's points, what every rung used
+    # to share) or "vor" (value over replacement, draft.vor_board). The draft is the harness's
+    # event; the board is the manager's opinion.
+    draft_board = "prior"
 
     def __init__(self, team_index, config, scoreset):
         self.team_index = team_index
@@ -617,6 +621,9 @@ class Orchestrated(FullSystemAddDrop):
 LADDER[7] = Orchestrated
 
 
+VOR_TWIN = 10
+
+
 def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_horizon=None,
                 replication=0, adddrop_params=None, stream_params=None):
     """One manager per seat, rungs interleaved so seats are not blocked by strategy.
@@ -624,7 +631,9 @@ def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_hori
     Interleaving matters: three consecutive seats all drafting for the same rung would give that
     rung all three of the same snake positions.
     """
-    rungs = [r for r in rungs if r in LADDER]
+    # Rung r + VOR_TWIN is rung r drafting by value over replacement: the same in-season manager,
+    # so the gap between the two is the draft board's worth and nothing else.
+    rungs = [r for r in rungs if r in LADDER or r - VOR_TWIN in LADDER]
     clones = clones or (config.teams // len(rungs))
     field = []
     # The offset matters whenever the seat count is not a multiple of the rung count. Fourteen
@@ -632,7 +641,8 @@ def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_hori
     # assignment is rotated by replication and the extra seats move around instead of always
     # landing on the same rungs.
     for seat in range(config.teams):
-        rung = rungs[(seat + replication) % len(rungs)]
+        seated = rungs[(seat + replication) % len(rungs)]
+        rung = seated - VOR_TWIN if seated not in LADDER else seated
         if rung == 3 and streamer_horizon is not None:
             field.append(ScheduleStreamer(seat, config, scoreset,
                                           horizon_weeks=streamer_horizon))
@@ -643,6 +653,9 @@ def build_field(config, scoreset, rungs=(1, 2, 3, 4), clones=None, streamer_hori
                                       stream_params=stream_params))
         else:
             field.append(LADDER[rung](seat, config, scoreset))
+        if seated != rung:
+            twin = field[-1]
+            twin.rung, twin.draft_board, twin.name = seated, "vor", f"{twin.name}[vor draft]"
     if len(field) != config.teams:
         raise ValueError(f"{len(field)} managers for {config.teams} seats")
     return field

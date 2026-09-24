@@ -361,7 +361,8 @@ class Season:
 
     # ---------- the loop ----------
 
-    def run(self, prior_board: dict, prior_rate: dict, prior_forward: dict | None = None) -> dict:
+    def run(self, prior_board: dict, prior_rate: dict, prior_forward: dict | None = None,
+            boards: dict | None = None) -> dict:
         import draftroom
         import state as state_module
 
@@ -373,7 +374,10 @@ class Season:
 
         self.state = state_module.LeagueState(self.config, self.player_pool(), self.eligibility)
         board = pd.Series(prior_board).sort_values(ascending=False)
-        draftroom.run(self.state, self.config, board, self.eligibility, self.replication)
+        seat_boards = {seat: pd.Series(b).sort_values(ascending=False)
+                       for seat, b in (boards or {}).items()}
+        draftroom.run(self.state, self.config, board, self.eligibility, self.replication,
+                      boards=seat_boards, block=len({m.rung for m in self.field}))
         draftroom.verify_rosters_fieldable(self.state, self.config, self.eligibility)
 
         schedule = matchup_schedule(self.config, self.config.regular_season_weeks)

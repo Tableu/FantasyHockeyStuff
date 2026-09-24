@@ -125,6 +125,20 @@ def prior_season(prior_season_name, scoreset):
             draft_module.prior_season_team_game_rate(actuals, goalies, scoreset))
 
 
+def vor_board(data, prior_season_name, scoreset, config, eligibility):
+    """Section 9 step 2's draft board: value over replacement, from what is knowable on draft day
+    (opening-week rest-of-season rows from the holdout build, last season's goalie starts)."""
+    if data.get("ros") is None:
+        raise SystemExit("the VOR board needs rest-of-season projections -- run "
+                         "Projections/ros_train.py --horizon season --predictions-out")
+    board = data["prior"][scoreset.name][0]
+    board.index = board.index.astype(int)
+    values = draft_module.preseason_values(data["ros"], board,
+                                           inputs.load_goalie_starts(prior_season_name), scoreset)
+    return draft_module.vor_board(values[[p in eligibility for p in values.index]], config,
+                                  eligibility)
+
+
 def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, verbose_weeks,
             decision_sims=0, params=None, streams=None):
     from decisionlayer import managers as managers_module
@@ -132,18 +146,25 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
     field = managers_module.build_field(config, scoreset, rungs=rungs,
                                         replication=replication, adddrop_params=params,
                                         stream_params=streams)
-    if any(m.rung in (5, 7) for m in field) and params is not None and params.rate_source == "ros"             and data.get("ros") is None:
+    base = [m.rung % managers_module.VOR_TWIN for m in field]
+    if any(r in (5, 7) for r in base) and params is not None and params.rate_source == "ros"             and data.get("ros") is None:
         raise SystemExit("rung 5 reads rest-of-season projections and none are built -- run "
                          "Projections/ros_train.py --horizon season --predictions-out")
     # Draws are only paid for if a rung on the board actually uses them.
-    sims = decision_sims if any(m.rung in (4, 5, 6, 7) for m in field) else 0
+    sims = decision_sims if any(r in (4, 5, 6, 7) for r in base) else 0
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                  replication=replication, log_every_week=verbose_weeks,
                                  decision_sims=sims)
     board, rate, forward = data["prior"][scoreset.name]
+    vor = data.get("vor", {}).get(scoreset.name)
+    boards = {m.team_index: vor for m in field if m.draft_board == "vor"}
+    if boards and vor is None:
+        raise SystemExit("a VOR-drafting rung is seated but no VOR board was built")
     return season.run({int(k): float(v) for k, v in board.items()},
                       {int(k): float(v) for k, v in rate.items()},
-                      {int(k): float(v) for k, v in forward.items()})
+                      {int(k): float(v) for k, v in forward.items()},
+                      boards={s: {int(k): float(v) for k, v in b.items()}
+                              for s, b in boards.items()})
 
 
 def summarize(per_replication, scoreset_name):
@@ -206,9 +227,13 @@ def main():
         log.info("rung 7 orchestrator: %s | %s", params.describe(), streams.describe())
 
     data["prior"] = {}
+    data["vor"] = {}
     for name in weights:
         scoreset = simlayer.load_scoreset(name)
         data["prior"][scoreset.name] = prior_season(args.prior_season, scoreset)
+        if any(r > 10 for r in rungs):
+            data["vor"][scoreset.name] = vor_board(data, args.prior_season, scoreset, config,
+                                                   eligibility)
         log.info("=== %s === skaters score %s | goalies score %s (unpriced: %s)",
                  scoreset.name, scoreset.scored("skaters"), scoreset.scored("goalies"),
                  scoreset.missing("goalies") or "none")

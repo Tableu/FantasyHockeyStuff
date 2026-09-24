@@ -136,3 +136,100 @@ def choose_pick(roster, pool, ranked, config, eligibility, picks_left):
             if _improves(roster, candidate, config, eligibility, gap):
                 return candidate, True
     return min(pool, key=lambda p: ranked[p]), False
+
+
+# ---------------------------------------------------------------------------------------------
+# Value over replacement (section 9, step 2)
+# ---------------------------------------------------------------------------------------------
+
+POSITIONS = ("C", "LW", "RW", "D", "G")
+
+
+def preseason_values(ros: pd.DataFrame, prior_board: pd.Series, prior_goalie_lines: pd.DataFrame,
+                     scoreset, opening_days=7) -> pd.Series:
+    """What each player is worth over the coming season, as known on draft day. Season totals.
+
+    **Skaters:** projected points from each player's first rest-of-season row, if it is dated in
+    opening week -- the same rows the engine seeds its opening-week rates from. They come from the
+    holdout build (the caller loads them through `inputs.load_ros`, which refuses anything trained
+    on the season), and a row dated d is built from games before d, so an opening-week row is last
+    season plus the preseason. Its window runs to the end of the season (~80 team games).
+
+    **Goalies:** last season's starts x last season's league-average points per start. The
+    standing goalie treatment -- P(start) x league average, no goalie *quality* modelled, because
+    per-start quality did not project (R2 -0.8%).
+
+    **Everyone else** keeps last season's total, which is the board every rung used before.
+    """
+    values = prior_board.astype(float).copy()
+    values.index = values.index.astype(int)
+
+    started = prior_goalie_lines[prior_goalie_lines["is_starter"].astype(bool)]
+    line = float(pd.Series(scoreset.score_columns(started, side="goalies")).mean())
+    goalies = started.groupby("player_id").size().astype(float) * line
+    goalies.index = goalies.index.astype(int)
+
+    table = ros.copy()
+    table["game_date"] = pd.to_datetime(table["game_date"])
+    opening = table[table["game_date"] < table["game_date"].min() + pd.Timedelta(days=opening_days)]
+    first = opening.sort_values("game_date").groupby("player_id").head(1)
+    skaters = pd.Series(scoreset.score_columns(first, prefix="proj_"),
+                        index=first["player_id"].astype(int).to_numpy())
+
+    values = pd.concat([values.drop(goalies.index.union(skaters.index), errors="ignore"),
+                        goalies, skaters])
+    values = values[~values.index.duplicated(keep="last")]
+    log.info("preseason values: %d skaters projected, %d goalies at %.2f a start, %d from last "
+             "season's total", len(skaters), len(goalies), line,
+             len(values) - len(skaters) - len(goalies))
+    return values.sort_values(ascending=False)
+
+
+def simulate_draft(board: pd.Series, config, eligibility) -> list:
+    """Every team drafting from `board` with the real pick rule: who ends up rostered."""
+    ranked = {p: i for i, p in enumerate(board.index)}
+    pool = set(board.index)
+    rosters = [[] for _ in range(config.teams)]
+    order = list(range(config.teams))
+    for round_number in range(config.roster_size):
+        for seat in (order if round_number % 2 == 0 else order[::-1]):
+            picks_left = config.roster_size - len(rosters[seat])
+            available = [p for p in board.index if p in pool]
+            choice, _ = choose_pick(rosters[seat], available, ranked, config, eligibility,
+                                    picks_left)
+            rosters[seat].append(choice)
+            pool.discard(choice)
+    return [p for roster in rosters for p in roster]
+
+
+def replacement_levels(values: pd.Series, config, eligibility) -> dict:
+    """The best undrafted value at each position, when the whole league drafts by `values`.
+
+    Replacement comes from the league itself rather than from a rule of thumb: run the snake
+    draft with this board in every seat (positional need included) and see who is left. That is
+    what a manager can pick up for nothing on opening day.
+    """
+    drafted = set(simulate_draft(values, config, eligibility))
+    left = values[[p not in drafted for p in values.index]]
+    levels = {}
+    for position in POSITIONS:
+        eligible = [p for p in left.index if position in eligibility.get(p, ())]
+        levels[position] = float(left[eligible].max()) if eligible else 0.0
+    return levels
+
+
+def vor_board(values: pd.Series, config, eligibility) -> pd.Series:
+    """Value over replacement: preseason value minus the lowest replacement level among the
+    positions the player can fill.
+
+    The lowest, so a flexible player is credited for the scarce slot he can cover -- a C/LW is
+    measured against whichever of centre or wing is thinner. Only players with eligibility are
+    kept: anyone else cannot be rostered.
+    """
+    values = values[[p in eligibility for p in values.index]]
+    levels = replacement_levels(values, config, eligibility)
+    floor = {p: min(levels[x] for x in eligibility[p] if x in levels) for p in values.index
+             if any(x in levels for x in eligibility[p])}
+    vor = pd.Series({p: values[p] - floor[p] for p in floor}).sort_values(ascending=False)
+    log.info("VOR board: replacement %s", {k: round(v, 1) for k, v in levels.items()})
+    return vor

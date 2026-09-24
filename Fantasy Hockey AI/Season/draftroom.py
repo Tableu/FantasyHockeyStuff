@@ -19,28 +19,47 @@ from decisionlayer import slots as slots_module
 log = logging.getLogger("draftroom")
 
 
-def seat_order(config, replication=0) -> list:
-    """Which rung sits in which seat, rotated by replication.
+def seat_order(config, replication=0, block=1) -> list:
+    """The draft order for one replication: a seeded lottery, as a real league draws one.
 
-    Three clones of each rung, interleaved rather than blocked, so that a rung's three seats do
-    not all draft early or all draft late.
+    It used to be a rotation by replication, and `build_field` rotates which rung sits in which
+    seat by replication too. The two cancelled: the rung at draft position k was
+    rungs[(k + 2r) mod n], so with two rungs every replication was the SAME draft (a paired gap of
+    +/- 0.0 over eight "rotations") and with four a rung only ever drafted from two position
+    patterns. Removing the rotation leaves only n patterns for n rungs. A seeded shuffle makes
+    every replication a different draft, reproducibly.
+
+    `block` is the number of rungs. One lottery order is reused for `block` consecutive
+    replications while `build_field` cycles the rungs through the seats, so within a block every
+    draft position is taken by every rung exactly once -- a pure lottery over eight draws handed one
+    of two rungs the first pick five times.
     """
-    seats = list(range(config.teams))
-    shift = replication % config.teams
-    return seats[shift:] + seats[:shift]
+    import random
+
+    order = list(range(config.teams))
+    random.Random(1000 + replication // max(block, 1)).shuffle(order)
+    return order
 
 
-def run(state, config, board: pd.Series, eligibility: dict, replication=0) -> None:
+def run(state, config, board: pd.Series, eligibility: dict, replication=0,
+        boards: dict | None = None, block=1) -> None:
     """Snake draft until every roster is full.
 
     A single shared board means every team wants the same player, so the snake order is the only
     thing separating the seats -- which is the point: it isolates draft position as the one
     pre-season difference between two clones of the same rung.
     """
-    order = seat_order(config, replication)
+    order = seat_order(config, replication, block)
     rounds = config.roster_size
-    available = [p for p in board.index if p in state.pool]
-    ranked = {p: i for i, p in enumerate(available)}
+
+    def ranking(series):
+        return {p: i for i, p in enumerate(p for p in series.index if p in state.pool)}
+
+    # `boards` overrides the shared board for particular seats (a VOR-drafting twin rung). Each
+    # seat walks only its own board, so a seat never picks a player its board does not know.
+    default = ranking(board)
+    by_seat = {seat: ranking(b) for seat, b in (boards or {}).items()}
+    available = list(dict.fromkeys(list(default) + [p for r in by_seat.values() for p in r]))
     forced_picks = 0
 
     for round_number in range(rounds):
@@ -49,7 +68,8 @@ def run(state, config, board: pd.Series, eligibility: dict, replication=0) -> No
             team = state.teams[seat]
             picks_left = rounds - len(team.roster)
 
-            pool = [p for p in available if p in state.pool]
+            ranked = by_seat.get(seat, default)
+            pool = [p for p in available if p in state.pool and p in ranked]
             if not pool:
                 break
 

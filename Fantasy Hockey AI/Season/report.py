@@ -173,4 +173,12 @@ def _verdict(table: pd.DataFrame, seats: pd.DataFrame = None) -> str:
             mean, se = paired_difference(seats, higher, lower)
             if mean is not None:
                 out.append(f"{label}: **{mean:+.1f} points a week**{_significance(mean, se)}.")
+    # Section 9 step 2: a twin rung (r + 10) is rung r drafting by value over replacement, so the
+    # paired gap is what the draft board is worth with the in-season manager held fixed.
+    for twin in sorted(r for r in by_rung.index if r > 10 and r - 10 in by_rung.index):
+        mean, se = paired_difference(seats, twin, twin - 10)
+        if mean is not None:
+            out.append(f"Drafting by value over replacement, in-season manager held at rung "
+                       f"{twin - 10} (rung {twin} over {twin - 10}): **{mean:+.1f} points a "
+                       f"week**{_significance(mean, se)}.")
     return " ".join(out)

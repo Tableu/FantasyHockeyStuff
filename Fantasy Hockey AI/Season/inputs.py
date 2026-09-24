@@ -284,6 +284,11 @@ def load_season(season: str, variant: str = "A") -> dict:
     }
 
 
+def _side(slot: str) -> str:
+    """Goalie, defence or forward: the three kinds of player a slot code can belong to."""
+    return slot if slot in ("G", "D") else "F"
+
+
 def load_eligibility(config, universe: pd.DataFrame) -> dict:
     """{player_id: frozenset of slot codes} -- which slots each player may legally fill.
 
@@ -339,9 +344,12 @@ def load_eligibility(config, universe: pd.DataFrame) -> dict:
             out[player_id] = frozenset({nhl_slot})
             fallbacks += 1
             continue
-        # Keep only the side the NHL says he is on, and never leave him with nothing.
-        same_side = frozenset(s for s in slots
-                              if (s == goalie) == (nhl_slot == goalie))
+        # Keep only the side the NHL says he is on, and never leave him with nothing. Three sides,
+        # not two: a forward listed at D is a collision too. Yahoo 2026-27 lists Carolina's
+        # Sebastian Aho (a centre) at C and D -- the Islanders' defenceman shares his name -- and
+        # value over replacement credits a flexible player against his scarcest position, which
+        # put him third on the board.
+        same_side = frozenset(s for s in slots if _side(s) == _side(nhl_slot))
         if same_side != slots:
             conflicts.append(player_id)
         out[player_id] = same_side or frozenset({nhl_slot})
@@ -353,6 +361,7 @@ def load_eligibility(config, universe: pd.DataFrame) -> dict:
              100 * fallbacks / max(len(out), 1))
     if conflicts:
         log.warning("dropped cross-side eligibility for %d player(s) %s -- a skater listed at G "
-                    "or a goalie listed at a skater slot is a name-resolution collision in the "
-                    "fantasy import, not eligibility", len(conflicts), conflicts[:5])
+                    "or a goalie at a skater slot, or a forward at D, is a name-resolution "
+                    "collision in the fantasy import, not eligibility", len(conflicts),
+                    conflicts[:5])
     return out

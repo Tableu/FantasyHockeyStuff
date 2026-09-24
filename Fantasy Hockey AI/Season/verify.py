@@ -20,6 +20,8 @@ season-level result rather than as an error:
     streaming       rung 7 at zero spots differing from rung 5, or a rental breaking the reserve,
                     its drop-cost floor, the spot rule or the weekly budget
     frozen rosters  a transacting team left short of its slots with a fix available (a goalie on IR)
+    vor board       a draft board that read past draft day, or a VOR draft that leaves a roster short
+    draft lottery   replications that repeat one draft, or give a rung more early picks
     no clobber      a scored projection build overwriting the deployment boosters in models/
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
@@ -458,6 +460,76 @@ def check_frozen_rosters() -> str:
     return f"{checked[0]:,} transaction steps, none left a fixable roster short of its slots"
 
 
+def check_vor_board() -> str:
+    """The value-over-replacement draft board is built from draft-day knowledge only, against a
+    real replacement level, and drafting by it leaves every roster fieldable."""
+    import draftroom
+    import ladder
+
+    from decisionlayer import draft as draft_module
+
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    data = inputs.load_season(SEASON)
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    assert eligibility[240] == frozenset({"C"}), "a forward/defence name collision was kept"
+    data["prior"] = {scoreset.name: ladder.prior_season("2024-25", scoreset)}
+    board = ladder.vor_board(data, "2024-25", scoreset, config, eligibility)
+
+    # Draft-day knowledge only: inflating every rest-of-season row after opening week must not
+    # move the board at all.
+    later = data["ros"].copy()
+    cut = later["game_date"].min() + pd.Timedelta(days=7)
+    for column in [c for c in later.columns if c.startswith("proj_")]:
+        later.loc[later["game_date"] >= cut, column] *= 100.0
+    poisoned = ladder.vor_board({**data, "ros": later}, "2024-25", scoreset, config, eligibility)
+    assert board.equals(poisoned), "the VOR board read rest-of-season rows from after draft day"
+
+    values = draft_module.preseason_values(data["ros"], data["prior"][scoreset.name][0],
+                                           inputs.load_goalie_starts("2024-25"), scoreset)
+    levels = draft_module.replacement_levels(values[[p in eligibility for p in values.index]],
+                                             config, eligibility)
+    assert all(v > 0 for v in levels.values()), f"a position has no replacement level: {levels}"
+
+    state = state_module.LeagueState(config, sorted(eligibility), eligibility)
+    draftroom.run(state, config, board, eligibility,
+                  boards={seat: board for seat in range(config.teams)})
+    draftroom.verify_rosters_fieldable(state, config, eligibility)
+    return (f"{len(board)} players valued from opening-week rows only; replacement "
+            f"{ {k: round(v) for k, v in levels.items()} }; an all-VOR draft is fieldable")
+
+
+def check_draft_lottery(replications=8) -> str:
+    """Every replication is a different draft, and every rung takes each early pick equally often.
+
+    The rotation this replaced cancelled against build_field's own rotation: with two rungs all
+    eight "rotations" were the same draft, which is how a paired gap came out +/- 0.0.
+    """
+    import collections
+
+    import draftroom
+
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    notes = []
+    for rungs in ((2, 12), (2, 5, 6, 7)):
+        drafts, picks = set(), collections.Counter()
+        for rep in range(replications):
+            field = managers_module.build_field(config, scoreset, rungs=rungs, replication=rep)
+            order = draftroom.seat_order(config, rep, len(rungs))
+            drafts.add(tuple(field[s].rung for s in order))
+            for k in range(3):
+                picks[(field[order[k]].rung, k)] += 1
+        assert len(drafts) == replications, f"{rungs}: only {len(drafts)} distinct drafts"
+        counts = {picks[(r, k)] for r in rungs for k in range(3)}
+        assert len(counts) == 1, f"{rungs}: early picks unbalanced across rungs {dict(picks)}"
+        notes.append(f"{len(rungs)} rungs: {len(drafts)} drafts, picks 1-3 x{counts.pop()} each")
+    return "; ".join(notes)
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -503,7 +575,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
-          ("frozen rosters", check_frozen_rosters), ("no clobber", check_no_clobber),
+          ("frozen rosters", check_frozen_rosters),
+          ("vor board", check_vor_board), ("draft lottery", check_draft_lottery), ("no clobber", check_no_clobber),
           ("modules", check_modules)]
 
 
