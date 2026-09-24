@@ -31,6 +31,7 @@ from nhl_pipeline import config, db
 from nhl_pipeline.api import field_map
 from nhl_pipeline.api import play_by_play as api_play_by_play
 from nhl_pipeline.ingest import official_stats
+from nhl_pipeline.ingest import player_bio
 from nhl_pipeline.ingest import schedule as ingest_schedule
 from nhl_pipeline.ingest import season as ingest_season
 from nhl_pipeline.orchestration import discovery, pipeline
@@ -191,6 +192,19 @@ def main():
     log.info("Recomputing season totals")
     official_stats.sync_player_season_stats(cursor, season_id)
     conn.commit()
+
+    # Bio for anyone who has now played but was never fetched: debuts and call-ups, usually a
+    # handful at most. A bio is not worth failing a day's ingest over, so it only logs.
+    try:
+        newcomers = player_bio.players_to_fetch(cursor, played_only=True)
+        for player_id, nhl_player_id in newcomers:
+            player_bio.sync_player_bio(cursor, player_id, nhl_player_id)
+        conn.commit()
+        if newcomers:
+            log.info("Fetched the bio for %d newly seen player(s)", len(newcomers))
+    except Exception:
+        conn.rollback()
+        log.exception("  FAILED player bio fetch -- continuing")
 
     log.info("Done: %d game(s) processed, %d failure(s)", len(games_to_run), failures)
     sys.exit(1 if failures else 0)

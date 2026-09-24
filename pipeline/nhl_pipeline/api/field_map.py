@@ -297,6 +297,36 @@ def player_search_result_fields(result: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Player landing: api-web.nhle.com/v1/player/{playerId}/landing -> { ... }
+# ---------------------------------------------------------------------------
+
+# The bio and draft keys worth keeping from a ~30 KB payload that is mostly career stats and
+# awards. ingest/player_bio.py archives exactly these, so the bio columns -- and the draft
+# details, which nothing stores yet -- can be re-derived without another API call.
+PLAYER_LANDING_KEYS = ("playerId", "isActive", "firstName", "lastName", "position",
+                       "birthDate", "birthCity", "birthCountry", "heightInInches",
+                       "weightInPounds", "shootsCatches", "draftDetails", "currentTeamAbbrev")
+
+
+def player_bio_fields(payload: dict) -> dict:
+    """Reference.Players columns from a player landing payload -- only the ones present, so an
+    upsert can never overwrite a known value with null."""
+    from datetime import date
+
+    out = {}
+    if payload.get("birthDate"):
+        out["BirthDate"] = date.fromisoformat(str(payload["birthDate"])[:10])
+    if payload.get("heightInInches"):
+        out["HeightInches"] = float(payload["heightInInches"])
+    if payload.get("weightInPounds"):
+        out["WeightLbs"] = float(payload["weightInPounds"])
+    shoots = str(payload.get("shootsCatches") or "")[:1].upper()
+    if shoots in ("L", "R"):
+        out["Shoots"] = shoots
+    return out
+
+
+# ---------------------------------------------------------------------------
 # ESPN fantasy: games/fhl/seasons/{year}/players -> [ {...}, ... ]
 # ---------------------------------------------------------------------------
 

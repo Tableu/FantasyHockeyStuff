@@ -677,6 +677,21 @@ CREATE TABLE Ingestion.RawApiResponses
 );
 GO
 
+-- One row per (player, endpoint): player-level payloads that belong to no game -- the bio
+-- endpoint (api/player_landing.py). Trimmed to the bio and draft keys (see
+-- field_map.PLAYER_LANDING_KEYS); upserted on re-fetch.
+CREATE TABLE Ingestion.RawPlayerResponses
+(
+    RawPlayerResponseID  BIGINT IDENTITY(1,1) NOT NULL,
+    NHLPlayerID          INT NOT NULL,
+    EndpointType         VARCHAR(50) NOT NULL,   -- 'PLAYER_LANDING'
+    RawJSON              NVARCHAR(MAX) NOT NULL,
+    RetrievedAt          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_RawPlayerResponses PRIMARY KEY (RawPlayerResponseID),
+    CONSTRAINT UQ_RawPlayerResponses UNIQUE (NHLPlayerID, EndpointType)
+);
+GO
+
 -- Append-only log of each ingestion/recalculation workflow stage (see report section 13).
 CREATE TABLE Ingestion.IngestionRuns
 (
