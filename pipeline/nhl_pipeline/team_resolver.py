@@ -9,7 +9,14 @@ so a spelling we can't resolve just leaves TeamID NULL rather than blocking the 
 _ALIASES = {
     "L.A": "LAK", "N.J": "NJD", "S.J": "SJS", "T.B": "TBL",
     "LA": "LAK", "NJ": "NJD", "SJ": "SJS", "TB": "TBL",
+    "VGS": "VGK", "N.Y. ISLANDERS": "NYI", "N.Y. RANGERS": "NYR",
 }
+
+
+def _fold(text: str) -> str:
+    """Accents off ("MONTRÉAL" -> "MONTREAL"): sources type team names without them."""
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
 
 
 def load_team_index(cursor):
@@ -23,6 +30,10 @@ def load_team_index(cursor):
         exact_index[r.TeamName.upper()] = r.TeamID
         if r.Location:
             exact_index[r.Location.upper()] = r.TeamID
+            # The full name ("Colorado Avalanche"), as some sources spell every team.
+            exact_index[f"{r.Location} {r.TeamName}".upper()] = r.TeamID
+    for key in list(exact_index):
+        exact_index.setdefault(_fold(key), exact_index[key])
     name_pairs = [(r.TeamName.upper(), r.TeamID) for r in rows]
     return exact_index, name_pairs
 
@@ -30,7 +41,7 @@ def load_team_index(cursor):
 def resolve_team_id(raw_team, exact_index: dict, team_name_pairs: list) -> int | None:
     if not raw_team:
         return None
-    key = raw_team.strip().upper()
+    key = _fold(raw_team.strip().upper())
     key = _ALIASES.get(key, key)
     if key in exact_index:
         return exact_index[key]

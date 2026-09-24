@@ -721,6 +721,10 @@ CREATE TABLE Projections.Sources
     SourceName      VARCHAR(100) NOT NULL,     -- e.g. 'DtZ'
     SeasonID        INT NOT NULL,
     Description     VARCHAR(500) NULL,
+    -- When the source published this season's projections, where known (the Crome workbook's
+    -- SourceCheck tab dates each source). Lets a consumer check a projection was public before
+    -- the season it projects -- the 2025-26 sources all predate its 7 Oct 2025 opener.
+    PublishedOn     DATE NULL,
     ImportedAt      DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
     CONSTRAINT PK_Sources PRIMARY KEY (SourceID),
     CONSTRAINT UQ_Sources_NameSeason UNIQUE (SourceName, SeasonID),
