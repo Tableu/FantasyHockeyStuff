@@ -926,6 +926,26 @@ CREATE TABLE Fantasy.PlayerNameAliases
 );
 GO
 
+-- A platform's own player id -> PlayerID, per season: what a live draft or roster read uses to
+-- name a player exactly (a draft pick arrives by the platform's id, and matching names mid-draft
+-- is the fragile part). Written by the importer that resolves the platform's names.
+CREATE TABLE Fantasy.PlatformPlayerIDs
+(
+    FantasyPlatformID   INT NOT NULL,
+    SeasonID            INT NOT NULL,
+    ExternalPlayerID    VARCHAR(50) NOT NULL,
+    PlayerID            BIGINT NOT NULL,
+    UpdatedAt           DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_FantasyPlatformPlayerIDs PRIMARY KEY (FantasyPlatformID, SeasonID, ExternalPlayerID),
+    CONSTRAINT FK_FPPI_Platform FOREIGN KEY (FantasyPlatformID)
+        REFERENCES Fantasy.Platforms(FantasyPlatformID),
+    CONSTRAINT FK_FPPI_Season FOREIGN KEY (SeasonID)
+        REFERENCES Reference.Seasons(SeasonID),
+    CONSTRAINT FK_FPPI_Player FOREIGN KEY (PlayerID)
+        REFERENCES Reference.Players(PlayerID)
+);
+GO
+
 CREATE TABLE Fantasy.UnresolvedPlayerNames
 (
     UnresolvedPlayerNameID  BIGINT IDENTITY(1,1) NOT NULL,
@@ -1031,6 +1051,25 @@ CREATE TABLE Injuries.Spells
         REFERENCES Reference.Teams(TeamID),
     CONSTRAINT FK_InjurySpells_Player FOREIGN KEY (PlayerID)
         REFERENCES Reference.Players(PlayerID)
+);
+GO
+
+-- A published list of players at risk of missing games, per season (first: Dobber's Band-Aid
+-- Boys, nhl_pipeline/api/dobber_bandaid.py, imported by import_injury_risk.py). Tier is the
+-- source's own group ('Certified', 'Trainee', 'Goalie'). PlayerID is NULL only while the name
+-- sits in Injuries.UnresolvedPlayerNames.
+CREATE TABLE Injuries.RiskLists
+(
+    SourceID            INT NOT NULL,
+    SeasonID            INT NOT NULL,
+    RawPlayerName       VARCHAR(200) NOT NULL,
+    PlayerID            BIGINT NULL,
+    Tier                VARCHAR(20) NOT NULL,
+    ImportedAt          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_InjuryRiskLists PRIMARY KEY (SourceID, SeasonID, RawPlayerName),
+    CONSTRAINT FK_IRL_Source FOREIGN KEY (SourceID) REFERENCES Injuries.Sources(SourceID),
+    CONSTRAINT FK_IRL_Season FOREIGN KEY (SeasonID) REFERENCES Reference.Seasons(SeasonID),
+    CONSTRAINT FK_IRL_Player FOREIGN KEY (PlayerID) REFERENCES Reference.Players(PlayerID)
 );
 GO
 

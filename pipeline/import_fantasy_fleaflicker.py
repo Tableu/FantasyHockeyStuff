@@ -10,10 +10,16 @@ inherently about aggregate draft behavior, which one small league can't represen
 Rerunnable: each run fully replaces this platform's PlayerPositions rows for the season (not
 a pure upsert -- see fantasy_fleaflicker.py's docstring for why).
 
+It also records each resolved player's Fleaflicker id in Fantasy.PlatformPlayerIDs, which the
+draft assistant uses to name a pick exactly.
+
 Usage:
-    python import_fantasy_fleaflicker.py
+    python import_fantasy_fleaflicker.py                    # league 12090, the user's league
+    python import_fantasy_fleaflicker.py --league-id 100    # the old proxy league
+    python import_fantasy_fleaflicker.py --dry-run          # the same run, rolled back
 """
 
+import argparse
 import logging
 
 from nhl_pipeline import db
@@ -28,17 +34,25 @@ SEASON_CFG = {"SeasonID_NHL": 20262027, "DisplayName": "2026-27"}
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Import Fleaflicker positions and player ids")
+    parser.add_argument("--league-id", type=int, default=fantasy_fleaflicker.FLEAFLICKER_LEAGUE_ID)
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
     conn = db.connect()
     cursor = conn.cursor()
 
     season_id = ensure_season(cursor, SEASON_CFG)
     conn.commit()
 
-    log.info("Fetching Fleaflicker league %d player positions...", fantasy_fleaflicker.FLEAFLICKER_PROXY_LEAGUE_ID)
-    fantasy_fleaflicker.sync_fleaflicker(cursor, season_id)
-    conn.commit()
-
-    log.info("Done.")
+    log.info("Fetching Fleaflicker league %d player positions...", args.league_id)
+    fantasy_fleaflicker.sync_fleaflicker(cursor, season_id, league_id=args.league_id)
+    if args.dry_run:
+        conn.rollback()
+        log.info("Dry run: rolled back, nothing written.")
+    else:
+        conn.commit()
+        log.info("Done.")
 
 
 if __name__ == "__main__":

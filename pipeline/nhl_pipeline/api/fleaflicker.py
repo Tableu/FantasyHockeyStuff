@@ -15,11 +15,12 @@ _PAGE_SIZE = 30
 
 
 def get_players(league_id: int) -> list:
-    """Pages via result_offset until resultTotal players have been collected -- the
-    endpoint doesn't reliably return a short final page to signal the end (a naive
-    "stop when the page is smaller than the page size" loop kept paging past the real
-    total and got rate-limited), so the authoritative count from the first response is
-    used as the stopping point instead."""
+    """Pages via result_offset until the listing is exhausted -- the endpoint doesn't reliably
+    return a short final page to signal the end (a naive "stop when the page is smaller than the
+    page size" loop kept paging past the real total and got rate-limited). A league that reports
+    `resultTotal` stops there; one that does not (league 12090 returns only `resultOffsetNext`)
+    stops when `resultOffsetNext` is gone. Reading `resultTotal` alone, a league without it
+    returned just the first page of 30."""
     players: list = []
     offset = 0
     total = None
@@ -28,11 +29,14 @@ def get_players(league_id: int) -> list:
             f"{BASE}/FetchPlayerListing",
             params={"sport": "NHL", "league_id": league_id, "result_offset": offset},
         )
-        if total is None:
-            total = data.get("resultTotal", 0)
+        if total is None and "resultTotal" in data:
+            total = data["resultTotal"]
         page = data.get("players", [])
         if not page:
             break
         players.extend(page)
-        offset += _PAGE_SIZE
+        following = data.get("resultOffsetNext")
+        if total is None and following is None:
+            break
+        offset = following if following is not None else offset + _PAGE_SIZE
     return players
