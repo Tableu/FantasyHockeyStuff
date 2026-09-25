@@ -260,10 +260,7 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
     boards = {m.team_index: vor for m in field if m.draft_board == "vor"}
     if boards and vor is None:
         raise SystemExit("a VOR-drafting rung is seated but no VOR board was built")
-    ours = set(boards)                         # the VOR-drafting seats: our draft policy
-    starters_first = ours if strategy.fill_starters_first else set()
-    caps = ({seat: strategy.draft_max_goalies for seat in ours}
-            if strategy.draft_max_goalies is not None else {})
+    caps = {}
     fielded = data.get("field")
     if fielded is not None and fielded.opponent_board == "source_subsets":
         for m in field:
@@ -276,7 +273,7 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
                       {int(k): float(v) for k, v in forward.items()},
                       boards={s: {int(k): float(v) for k, v in b.items()}
                               for s, b in boards.items()},
-                      goalie_caps=caps or None, starters_first=starters_first)
+                      goalie_caps=caps or None)
 
 
 # One replication per task, in a pool of processes. Each worker receives the season's inputs once,

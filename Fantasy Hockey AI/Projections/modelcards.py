@@ -152,32 +152,6 @@ def render(variant, season="2025-26"):
         if baseline_rows:
             out += [table(baseline_rows, ["baseline", "MAE"]), ""]
 
-    walk = read(f"metrics_walkforward_{variant}_{season}.json")
-    if walk:
-        wf = (walk.get("composite") or {})
-        out += ["## Walk-forward -- the honesty check", "", measured, "",
-                "Refit monthly on an expanding window across the holdout season, which is how "
-                "the season simulator will actually consume these models. It buys little on "
-                "accuracy and helps mainly with level -- tracking the season's own rates "
-                "narrows the categories that drifted (see the bias column) -- so the single "
-                "fit stays the default.", ""]
-        walk_rows = []
-        for category in ("shots", "hits", "blocks", "assists", "goals", "pim"):
-            entry = walk.get(category)
-            single = metrics.get(category)
-            if entry and single:
-                def bias(m):
-                    return 100 * (m["mean_predicted"] / m["mean_actual"] - 1)
-                walk_rows.append([f"`{category}`",
-                                  f"{bias(single['model']):+.1f}% -> {bias(entry['model']):+.1f}%",
-                                  f"{entry['model']['mae']:.3f}",
-                                  f"{single['model']['mae']:.3f}",
-                                  f"{entry.get('pit', {}).get('deviation', float('nan')):.3f}"])
-        if walk_rows:
-            out += [table(walk_rows, ["target", "bias, single -> walk-forward",
-                                      "walk-forward MAE", "single-fit MAE",
-                                      "PIT deviation"]), ""]
-
     cross = metrics.get("cross_features")
     if cross:
         out += ["## The live-feed bound", "", measured, "",

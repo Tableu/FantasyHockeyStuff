@@ -42,8 +42,7 @@ def seat_order(config, replication=0, block=1) -> list:
 
 
 def run(state, config, board: pd.Series, eligibility: dict, replication=0,
-        boards: dict | None = None, block=1, goalie_caps: dict | None = None,
-        starters_first=()) -> None:
+        boards: dict | None = None, block=1, goalie_caps: dict | None = None) -> None:
     """Draft until every roster is full: snake or linear, as the league's `draft.type` says.
 
     A single shared board means every team wants the same player, so the snake order is the only
@@ -51,10 +50,7 @@ def run(state, config, board: pd.Series, eligibility: dict, replication=0,
     pre-season difference between two clones of the same rung.
 
     `goalie_caps` ({seat: n}) stops a seat drafting goalies once it holds n: the simulated
-    opponents' rule (`Settings/field.json`) and, when it is set, ours. A seat in
-    `starters_first` ranks, while its roster still cannot fill every starting slot, anyone who
-    would fill one more ahead of anyone who would not -- a third goalie is a bench player, and a
-    board that values him as a starter keeps taking goalies once they look scarce.
+    opponents' rule (`Settings/field.json`), never ours.
     """
     order = seat_order(config, replication, block)
     rounds = config.roster_size
@@ -82,8 +78,6 @@ def run(state, config, board: pd.Series, eligibility: dict, replication=0,
             cap = (goalie_caps or {}).get(seat)
             if cap is not None and sum("G" in eligibility.get(p, ()) for p in team.roster) >= cap:
                 pool = [p for p in pool if "G" not in eligibility.get(p, ())]
-            if seat in starters_first:
-                pool, ranked = _starters_first(team.roster, pool, ranked, config, eligibility)
             if not pool:
                 break
 
@@ -98,25 +92,6 @@ def run(state, config, board: pd.Series, eligibility: dict, replication=0,
                  forced_picks, rounds * config.teams)
     log.info("draft complete: %d players over %d rounds, %d free agents remain",
              sum(len(t.roster) for t in state.teams), rounds, len(state.pool))
-
-
-def _starters_first(roster, pool, ranked, config, eligibility):
-    """Re-order `pool` so players who let this roster fill one more starting slot come first,
-    each group in board order. Whether a player fills one depends only on his eligibility, so the
-    matching test runs once per distinct eligibility set."""
-    gap = draft_policy._unfillable(roster, config, eligibility)
-    if gap <= 0:
-        return pool, ranked
-    fits = {}
-
-    def fills(p):
-        key = eligibility.get(p, frozenset())
-        if key not in fits:
-            fits[key] = draft_policy._improves(roster, p, config, eligibility, gap)
-        return fits[key]
-
-    order = sorted(pool, key=lambda p: (0 if fills(p) else 1, ranked[p]))
-    return order, {p: i for i, p in enumerate(order)}
 
 
 def verify_rosters_fieldable(state, config, eligibility) -> None:

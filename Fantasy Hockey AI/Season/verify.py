@@ -33,8 +33,6 @@ season-level result rather than as an error:
     tune guard      section 11 tuning on the final holdout
     opponents       a simulated leaguemate whose board is not his sources' consensus, whose draw
                     differs between paired runs, or who drafts past his goalie cap
-    our draft rules starters-first leaving a starting slot uncovered after as many picks as there
-                    are slots, or our goalie cap exceeded
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
     python verify.py
@@ -1182,58 +1180,6 @@ def check_opponents() -> str:
             f"opponents drafted at most {most} goalies (cap {fielded.max_goalies})")
 
 
-def check_our_draft_rules() -> str:
-    """With fill-starters-first our first `active` picks form a full legal lineup, and our seats
-    never pass their goalie cap, drafting against the realistic field."""
-    import draftroom
-    import field as field_module
-    import ladder
-
-    from decisionlayer import slots as slots_module
-
-    season = "2024-25"
-    config = league_module.load()
-    scoreset = simlayer.load_scoreset("points-league")
-    strategy = _strategy()
-    data = inputs.load_season(season)
-    universe = pd.concat([data["projections"][["player_id", "position"]],
-                          data["goalie_candidates"][["player_id", "position"]]]
-                         ).drop_duplicates("player_id")
-    eligibility = inputs.load_eligibility(config, universe)
-    data["prior"] = {scoreset.name: ladder.prior_season("2023-24", scoreset, strategy)}
-    fielded = field_module.with_overrides(field_module.load(), "source_subsets")
-    ladder.prepare_field(data, fielded, strategy)
-    board = ladder.vor_board(data, "2023-24", scoreset, config, eligibility, strategy)
-    cap, worst_goalies, checked = 4, 0, 0
-    for replication in range(3):
-        seated = managers_module.build_field(config, scoreset, strategy, rungs=(2, 5, 6, 17),
-                                            replication=replication)
-        ours = {m.team_index for m in seated if m.draft_board == "vor"}
-        boards, caps = {seat: board for seat in ours}, {seat: cap for seat in ours}
-        for m in seated:
-            if m.team_index not in ours:
-                boards[m.team_index] = ladder.opponent_board(data, scoreset, config, eligibility,
-                                                             replication, m.team_index)
-                caps[m.team_index] = fielded.max_goalies
-        state = state_module.LeagueState(config, sorted(eligibility), eligibility)
-        draftroom.run(state, config, data["prior"][scoreset.name][0], eligibility,
-                      replication=replication, boards=boards, block=4, goalie_caps=caps,
-                      starters_first=ours)
-        for seat in ours:
-            roster = state.teams[seat].roster
-            first = roster[:config.active]
-            filled = slots_module.matching_size(first, config.slot_order(), eligibility,
-                                                config.accepts)
-            assert filled == config.active, (f"seat {seat}: its first {config.active} picks fill "
-                                             f"only {filled} starting slots")
-            goalies = sum("G" in eligibility.get(p, ()) for p in roster)
-            assert goalies <= cap, f"seat {seat} drafted {goalies} goalies (cap {cap})"
-            worst_goalies = max(worst_goalies, goalies)
-            checked += 1
-    return (f"{checked} of our rosters over 3 drafts: the first {config.active} picks fill all "
-            f"{config.active} starting slots; at most {worst_goalies} goalies (cap {cap})")
-
-
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -1289,7 +1235,6 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("no clobber", check_no_clobber),
           ("first week", check_first_week), ("candidate", check_candidate),
           ("tune guard", check_tune_guard), ("opponents", check_opponents),
-          ("our draft rules", check_our_draft_rules),
           ("modules", check_modules)]
 
 

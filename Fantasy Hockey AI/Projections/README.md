@@ -354,15 +354,12 @@ the past is a much weaker lever than staying current. Variant B holds three pert
 candidate; they share a game date, so date-based splitting keeps them on the same side, which
 `data.chronological_split` asserts, and each row carries `weight = 1/copies`.
 
-`train.py --walk-forward` refits monthly on an expanding window across the holdout season
-instead, which is how the season simulator will actually consume these models.
-
-Measured, it buys less than expected: fantasy-points MAE 1.847 against the single fit's
+A monthly walk-forward refit across the holdout season was built, measured and removed
+(2026-09-24). It bought less than expected: fantasy-points MAE 1.847 against the single fit's
 1.845, top-100 capture 0.699 against 0.698. What it does help is *level* — the monthly refit
 tracks the season's own rates, cutting PIM's bias from −13.0% to −9.9% and blocks' from +5.9%
-to +4.7%, with Spearman up a point or two everywhere. So the single fit is the right default
-and walk-forward is the honesty check, not a free accuracy gain. Seven monthly refits take
-about an hour.
+to +4.7%, with Spearman up a point or two everywhere. So the single fit is the right default;
+seven monthly refits took about an hour for that.
 
 ## Variants, and the live-feed bound
 
@@ -443,5 +440,5 @@ system, which was exactly the kind of league assumption that does not belong in 
 - **PIM is the weakest model** (Spearman 0.14). It is 3% of scoring, and the NB shape fits it
   poorly — a lumpy 0/2/5 target is not really a count. Good enough for its weight.
 - **Goalies are not modelled here.** They need their own feature table (starts, shots-against,
-  save percentage), which is a section 2 job; `ModelFeatures/data/features/goalies_rolling_*`
-  only carries opposing-goalie form for the skater table.
+  save percentage), which is a section 2 job; the goalie rolling table the feature build computes
+  only carries opposing-goalie form into the skater table.

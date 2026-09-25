@@ -155,8 +155,6 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | `draft` | `vor_values` | `consensus` | what the VOR draft board values players on: `consensus`, the external sources' preseason projections alone (the only values a real draft has), or `own_model`, our opening-week rest-of-season rows (a backtest reference; they need the season's own games) |
 | | `min_sources` | 3 | sources a player needs for the consensus; below it he keeps last season's total, or his thin consensus if he has none |
 | | `undated_sources` | `include` | a source with no publish date (Dom's 2025-26 sheet; every 2026-27 file today) is used, or dropped with `exclude`; logged either way |
-| | `fill_starters_first` | false | while our roster cannot fill every starting slot, a player who would fill one ranks ahead of one who would not |
-| | `max_goalies` | null | our seats never draft more goalies than this (null: no cap) |
 
 ### Where the values come from
 
@@ -182,10 +180,10 @@ was not touched.
   `Season/README.md`): it ranks value over replacement better than our model or last season in
   every format and scoring, and drafting by it beats the last-season board with the orchestrator
   in all four. Our model's rows cannot be built before a real season, so it is not a live option.
-- **`draft.fill_starters_first` and `max_goalies` are off** (2026-09-24): with each other and with a
-  draft-time replacement level (since removed), seat-paired on 2024-25 against the realistic field,
-  none cleared the noise in any format (the combination: +0.2 / +2.6 / +0.6 / -1.0 points a week).
-  So are a replacement weight and a bench weight, tried and removed.
+- **The draft is plain value over replacement** (2026-09-24): fill-starters-first, a goalie cap for
+  our seats, a draft-time replacement level, a replacement weight and a bench weight were each
+  tried seat-paired on 2024-25 against the realistic field and removed -- none cleared the noise in
+  any format (`Season/README.md`, section 9 step 2).
 - **`goalie_start_share_prior`**: deliberately not "who started last game", which has an AUC of
   0.520 over all candidates.
 

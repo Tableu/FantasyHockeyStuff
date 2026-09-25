@@ -9,7 +9,7 @@ VOR board), in exactly its seats -- the same design as `tune.py`, so seat luck c
     draft        the shipped manager, drafting from a VOR board built on the season's ACTUAL
                  fantasy points instead of the consensus. The in-season manager is unchanged, so
                  the gap is what a perfect draft board is worth.
-    transactions `headroom.OracleStreamer` in rung 17's seats, drafting by the same consensus
+    transactions `OracleStreamer` (below) in rung 17's seats, drafting by the same consensus
                  board: the same rosters on opening night, then add/drop and streaming by what
                  players really scored over the forward window. The gap is what perfect
                  in-season information is worth -- including scoring luck no model can know.
@@ -49,7 +49,6 @@ import pandas as pd
 
 import engine as engine_module
 import field as field_module
-import headroom
 import inputs
 import ladder
 import paths
@@ -61,6 +60,67 @@ from decisionlayer import managers as managers_module
 log = logging.getLogger("ceilings")
 ORACLE, ORACLE_VOR = 99, 99 + managers_module.VOR_TWIN
 ORACLE_FIELD = (2, 5, 6, ORACLE_VOR)       # the oracle in exactly rung 17's seats
+
+
+class OracleStreamer(managers_module.FullSystem):
+    """NOT A STRATEGY. Streams with perfect foresight, to establish the ceiling.
+
+    Identical to rung 4 in every respect except the number it ranks acquisitions by: instead of a
+    projection it uses what the player *actually* scored over the forward window. The budget, the
+    roster rules, the fieldability constraint and the drop logic are unchanged, so the difference
+    against rung 4 is attributable to ranking quality and nothing else.
+    """
+
+    name = "ORACLE-streamer"
+    rung = 99
+    realized = None          # injected by `run`: {(date, player_id): points}
+    calendar = None
+
+    def _window_points(self, view, player_id) -> float:
+        """What he really scored from today to the end of the forward window."""
+        week = view.week
+        if week is None:
+            return 0.0
+        last = self.calendar.weeks[min(week - 1 + self.horizon_weeks,
+                                      len(self.calendar.weeks) - 1)].end
+        total = 0.0
+        for day in self.calendar.days:
+            if day < view.day:
+                continue
+            if day > last:
+                break
+            total += self.realized.get((pd.Timestamp(day), int(player_id)), 0.0)
+        return total
+
+    def transactions(self, view) -> None:
+        state = view._state
+        if view.moves_left <= 0:
+            return
+        eligibility = state.eligibility
+        roster = [p for p in view.roster if p not in view.ir]
+        if not roster:
+            return
+
+        pool = [p for p in view.free_agents() if not view.on_waivers(p)]
+        candidates = sorted(((self._window_points(view, p), p) for p in pool), reverse=True)
+        candidates = [(v, p) for v, p in candidates if v > 0.0]
+
+        while view.moves_left > 0 and candidates:
+            gain, incoming = candidates.pop(0)
+            roster = [p for p in view.roster if p not in view.ir]
+            drops = sorted(roster, key=lambda p: self._window_points(view, p))
+            outgoing = next(
+                (d for d in drops
+                 if self._fieldable([x for x in roster if x != d] + [incoming], eligibility)),
+                None)
+            if outgoing is None:
+                continue
+            if gain <= self._window_points(view, outgoing):
+                break
+            try:
+                state.add(self.team_index, incoming, view.day, drop=outgoing, reason="oracle")
+            except Exception:
+                continue
 
 
 class LockoutOracleSeason(engine_module.Season):
@@ -231,9 +291,9 @@ def oracle_values(ctx, level) -> dict:
 def transaction_ceiling(ctx, args, base, shipped, level="full"):
     # 2. Transaction ceiling: the oracle streamer in rung 17's seats, same draft. One process: the
     # oracle class is registered here, and a spawned worker would not see it.
-    headroom.OracleStreamer.realized = oracle_values(ctx, level)
-    headroom.OracleStreamer.calendar = ctx.calendar
-    managers_module.LADDER[ORACLE] = headroom.OracleStreamer
+    OracleStreamer.realized = oracle_values(ctx, level)
+    OracleStreamer.calendar = ctx.calendar
+    managers_module.LADDER[ORACLE] = OracleStreamer
     log.info("transaction ceiling (%s): %d drafts, one process", level, args.replications)
     ns = SimpleNamespace(replications=args.replications, workers=1, verbose_weeks=False,
                          decision_sims=200)

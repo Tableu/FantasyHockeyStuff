@@ -19,7 +19,6 @@ Read-only with respect to NHLStats -- this folder never opens a database connect
 Usage:
     python train.py --all
     python train.py --target shots --variant A
-    python train.py --all --walk-forward
 """
 
 import argparse
@@ -70,8 +69,6 @@ def parse_args():
                         help="Where the boosters go. Default models/<season>/skaters/<variant>/, where "
                              "<season> is the one the build predicts: the holdout, or for a "
                              "deployment build (--no-holdout) the season after the last trained")
-    parser.add_argument("--walk-forward", action="store_true",
-                        help="Refit monthly across the holdout season instead of once")
     parser.add_argument("--folds", type=int, default=OOF_FOLDS,
                         help="Out-of-fold splits for the offset-supplying models")
     return parser.parse_args()
@@ -348,12 +345,7 @@ def save_predictions(table, split, chain, variant, season, tag=None):
 
 
 def main():
-    args = parse_args()
-    if args.walk_forward:
-        import walkforward
-        walkforward.run(args)
-        return
-    run(args)
+    run(parse_args())
 
 
 if __name__ == "__main__":

@@ -39,8 +39,6 @@ class Strategy:
     vor_values: str                           # VOR board: "consensus" or "own_model" (reference)
     vor_min_sources: int                      # ...sources a player needs, else last season
     undated_sources: str                      # "include" or "exclude" a source with no publish date
-    fill_starters_first: bool                 # VOR draft: rank a player who fills a starting slot first
-    draft_max_goalies: int | None             # ...never draft more goalies than this (None: no cap)
     description: str = ""
 
 
@@ -102,16 +100,10 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         raise ValueError(f"strategy {name}: playoffs.future_week_weight "
                          f"{playoffs['future_week_weight']!r}")
     draft = payload["draft"]
-    draft_keys = {"vor_values", "min_sources", "undated_sources", "fill_starters_first",
-                  "max_goalies"}
+    draft_keys = {"vor_values", "min_sources", "undated_sources"}
     if set(draft) != draft_keys:
         raise ValueError(f"strategy {name} draft: needs exactly {sorted(draft_keys)}; "
                          f"got {sorted(draft)}")
-    if not isinstance(draft["fill_starters_first"], bool):
-        raise ValueError(f"strategy {name}: draft.fill_starters_first must be true or false")
-    cap = draft["max_goalies"]
-    if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int) or cap < 2):
-        raise ValueError(f"strategy {name}: draft.max_goalies must be null or a whole number >= 2")
     if draft["vor_values"] not in ("own_model", "consensus"):
         raise ValueError(f"strategy {name}: draft.vor_values {draft['vor_values']!r}")
     if draft["undated_sources"] not in ("include", "exclude"):
@@ -143,7 +135,5 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         vor_values=draft["vor_values"],
         vor_min_sources=draft["min_sources"],
         undated_sources=draft["undated_sources"],
-        fill_starters_first=draft["fill_starters_first"],
-        draft_max_goalies=draft["max_goalies"],
         description=payload.get("description", ""),
     )

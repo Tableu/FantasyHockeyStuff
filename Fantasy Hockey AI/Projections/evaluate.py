@@ -64,17 +64,13 @@ def parse_args():
     parser.add_argument("--recalibrate", action="store_true",
                         help="Apply drift.py's rolling level correction before scoring")
     parser.add_argument("--tag", default=None, help="Score a tagged (ablation) build's predictions")
-    parser.add_argument("--walk-forward", action="store_true",
-                        help="Score the monthly refit backtest instead of the single fit")
     return parser.parse_args()
 
 
-def load(variant, season, walk_forward=False, tag=None):
-    path = paths.predictions(variant, season, walk_forward, tag)
+def load(variant, season, tag=None):
+    path = paths.predictions(variant, season, tag)
     if not path.exists():
-        raise FileNotFoundError(
-            f"{path} is missing -- run train.py --all --variant {variant}"
-            + (" --walk-forward" if walk_forward else ""))
+        raise FileNotFoundError(f"{path} is missing -- run train.py --all --variant {variant}")
     return pd.read_parquet(path)
 
 
@@ -204,13 +200,13 @@ def start_sit_accuracy(frame, actual_points, predicted_points, top_n=100):
     return float(captured / available) if available else float("nan")
 
 
-def evaluate(variant, season, walk_forward=False, recalibrate=False, scoresets=(), tag=None):
-    frame = load(variant, season, walk_forward, tag)
+def evaluate(variant, season, recalibrate=False, scoresets=(), tag=None):
+    frame = load(variant, season, tag)
     if recalibrate:
         import drift
         frame = drift.recalibrate(frame)
     played = played_rows(frame)
-    report = {"variant": variant, "walk_forward": walk_forward, "recalibrated": recalibrate,
+    report = {"variant": variant, "recalibrated": recalibrate,
               "holdout_rows": len(frame), "played_rows": len(played)}
 
     # P(plays) -- scored on every candidate, not just the ones who played.
@@ -353,7 +349,7 @@ def reliability(actual, predicted, bins=10):
 
 def summarise(report):
     """A scannable table of each category against its best baseline."""
-    label = "walk-forward (monthly refit)" if report.get("walk_forward") else "single fit"
+    label = "single fit"
     if report.get("recalibrated"):
         label += " + drift recalibration"
     lines = [f"{label} -- {report['played_rows']:,} played rows of "
@@ -419,16 +415,14 @@ def main():
     scoresets = [weights_module.load(w) for w in (args.weights or [])]
     if scoresets:
         log.info("scoring under: %s", ", ".join(x.name for x in scoresets))
-    report = evaluate(args.variant, args.holdout_season, args.walk_forward, args.recalibrate,
-                      scoresets, args.tag)
+    report = evaluate(args.variant, args.holdout_season, args.recalibrate, scoresets, args.tag)
 
-    if args.cross_features and not args.walk_forward:
+    if args.cross_features:
         report["cross_features"] = cross_features(
             args.cross_features, args.holdout_season, report, scoresets)
 
-    kind = "metrics_walkforward_" if args.walk_forward else "metrics_"
     suffix = f"_{args.tag}" if args.tag else ""
-    path = paths.REPORTS_DIR / f"{kind}{args.variant}_{args.holdout_season}{suffix}.json"
+    path = paths.REPORTS_DIR / f"metrics_{args.variant}_{args.holdout_season}{suffix}.json"
     path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(summarise(report))
     log.info("wrote %s", path.name)

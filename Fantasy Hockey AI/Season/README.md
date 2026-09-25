@@ -454,8 +454,7 @@ None of seven draft refinements beat the static board, seat-paired on 2024-25 in
 a replacement level re-read at every pick from the room's pace (it hoarded goalies until given
 roster rules: -3.1 / +1.2 / +0.4 / -1.5 with them), fill-starters-first with a goalie cap (+0.2 /
 +2.6 / +0.6 / -1.0), a replacement weight below 1 (flat to -4.4) and bench weights (best +1.3 ±
-1.0 pooled). The dynamic level and the two weights were removed; fill-starters-first and the cap
-stay as settings, off.
+1.0 pooled). All were removed.
 
 ## Section 11: tuning on 2024-25
 
