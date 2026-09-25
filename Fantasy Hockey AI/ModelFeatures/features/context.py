@@ -112,9 +112,12 @@ def arena_factors(team_games: pd.DataFrame, min_games: int = 10) -> pd.DataFrame
     """
     df = team_games.copy()
     df["arena_team_id"] = np.where(df["is_home"] == 1, df["team_id"], df["opp_team_id"])
+    # Tonight's not-yet-played games (the live build's placeholders) take no part in the
+    # league's rate: their empty stats would count as zero-hit games.
+    df["_played"] = ~df["is_placeholder"].fillna(False).astype(bool) if "is_placeholder" in df else True
     # One row per game per arena: both teams' recorded totals in that building.
     per_game = (df.groupby(["season_id", "arena_team_id", "game_id", "game_date"], as_index=False)
-                  .agg(hits=("hits_for", "sum"), blocks=("blocks_for", "sum")))
+                  .agg(hits=("hits_for", "sum"), blocks=("blocks_for", "sum"), played=("_played", "all")))
     per_game = per_game.sort_values(["arena_team_id", "game_date", "game_id"], kind="mergesort").reset_index(drop=True)
 
     # The rink's own history to date (season-to-date only -- a rink hosts ~41 games a year,
@@ -128,12 +131,13 @@ def arena_factors(team_games: pd.DataFrame, min_games: int = 10) -> pd.DataFrame
     league_frames = []
     for season_id, group in per_game.groupby("season_id", sort=False):
         group = group.sort_values(["game_date", "game_id"], kind="mergesort").reset_index(drop=True)
-        prior_games = pd.Series(range(len(group)), dtype="float").where(lambda s: s > 0)
+        played = group["played"].astype(float)
+        prior_games = played.cumsum().shift(1).where(lambda s: s > 0)
         league_frames.append(pd.DataFrame({
             "season_id": season_id,
             "game_id": group["game_id"],
-            "league_hits": group["hits"].cumsum().shift(1) / prior_games,
-            "league_blocks": group["blocks"].cumsum().shift(1) / prior_games,
+            "league_hits": (group["hits"] * played).cumsum().shift(1) / prior_games,
+            "league_blocks": (group["blocks"] * played).cumsum().shift(1) / prior_games,
         }))
     arena = arena.merge(pd.concat(league_frames, ignore_index=True), on=["season_id", "game_id"], how="left")
 

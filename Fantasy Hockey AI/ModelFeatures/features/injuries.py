@@ -34,6 +34,7 @@ def last_known_roles(player_games: pd.DataFrame) -> pd.DataFrame:
         ["player_id", "game_date", "position", "actual_line", "actual_pair", "actual_pp"],
     ].copy()
     roles["game_date"] = pd.to_datetime(roles["game_date"])
+    roles["player_id"] = roles["player_id"].astype("int64")   # typed even when empty (opening night)
     return roles.sort_values(["game_date", "player_id"], kind="mergesort").reset_index(drop=True)
 
 

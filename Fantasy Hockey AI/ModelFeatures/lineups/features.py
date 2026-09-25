@@ -80,58 +80,78 @@ def build_lineup_features(cursor, season_ids: list, variant: str, rates: dict | 
                 continue  # season opener: nothing lockout-knowable about this team's deployment yet
             prev = history[-1]
             assert prev.game_date < target.game_date, "variant-A source must predate the target"
+            rows.extend(target_rows(team_id, history, target, variant, spells, static_positions,
+                                    rates=rates, copies=copies, rng=rng))
+    if not rows:
+        return pd.DataFrame()   # a season with no second game for any team yet
+    return _typed(pd.DataFrame(rows))
 
-            pool = {}
-            for g in history:
-                for p, pl in g.players.items():
-                    if pl.dressed:
-                        pool[p] = pl.position
-            # Realized absence (inside a spell today) decides who is a candidate and who cannot be
-            # a healthy extra; only the lockout-knowable subset becomes the feature.
-            injured_today = {p for (t, p) in spells if t == team_id and store.injured_on(spells, team_id, p, target.game_date)}
-            injured_known = {p for p in injured_today
-                             if store.injured_known_on(spells, team_id, p, target.game_date)}
-            candidates = set(pool) | injured_today | set(target.players)
-            positions = dict(pool)
-            positions.update({p: pl.position for p, pl in target.players.items()})
-            for p in injured_today - set(positions):
-                # An injured candidate who dressed in none of the lookback games has no
-                # position from any lineup; fall back to his static one so the row can still
-                # be classified as a skater downstream.
-                positions[p] = static_positions.get(p)
 
-            healthy_extras = {
-                p: pos for p, pos in pool.items()
-                if p not in target.players and p not in injured_today and pos != "G"
+def target_rows(team_id: int, history: list, target, variant: str, spells: dict, static_positions: dict,
+                rates: dict | None = None, copies: int = 1, rng=None, source=None) -> list:
+    """The candidate rows for one team-game. `history` is the team's earlier games this season
+    (oldest first, at most CANDIDATE_LOOKBACK). The lineup the features read is the previous
+    game's (A), `copies` perturbed copies of the target's own (B), or -- live -- `source`, an
+    explicit lineup such as tonight's pre-game chart (then `target` is that chart too, and the
+    labels it yields are placeholders)."""
+    prev = history[-1] if history else None
+    pool = {}
+    for g in history:
+        for p, pl in g.players.items():
+            if pl.dressed:
+                pool[p] = pl.position
+    # Realized absence (inside a spell today) decides who is a candidate and who cannot be
+    # a healthy extra; only the lockout-knowable subset becomes the feature.
+    injured_today = {p for (t, p) in spells if t == team_id and store.injured_on(spells, team_id, p, target.game_date)}
+    injured_known = {p for p in injured_today
+                     if store.injured_known_on(spells, team_id, p, target.game_date)}
+    candidates = set(pool) | injured_today | set(target.players)
+    positions = dict(pool)
+    positions.update({p: pl.position for p, pl in target.players.items()})
+    for p in injured_today - set(positions):
+        # An injured candidate who dressed in none of the lookback games has no
+        # position from any lineup; fall back to his static one so the row can still
+        # be classified as a skater downstream.
+        positions[p] = static_positions.get(p)
+
+    if source is not None:
+        sources = [(0, source)]
+    elif variant == "A":
+        sources = [(0, prev)]
+    else:
+        healthy_extras = {
+            p: pos for p, pos in pool.items()
+            if p not in target.players and p not in injured_today and pos != "G"
+        }
+        sources = [(k, perturb.perturb(target, healthy_extras, rates, rng)) for k in range(copies)]
+
+    rows = []
+    for copy_index, lineup in sources:
+        for p in candidates:
+            row = {
+                "season_id": target.season_id, "game_id": target.game_id, "nhl_game_id": target.nhl_game_id,
+                "game_date": target.game_date, "team_id": team_id, "player_id": p,
+                "position": positions.get(p), "variant": variant, "copy_index": copy_index,
+                "lineup_age_days": (target.game_date - prev.game_date).days if variant == "A" and prev else 0,
+                "injured_at_lockout": p in injured_known,
+                "label_in_spell": p in injured_today,
+                "games_dressed_lookback": sum(1 for g in history if p in g.players and g.players[p].dressed),
             }
-            sources = [(0, prev)] if variant == "A" else [
-                (k, perturb.perturb(target, healthy_extras, rates, rng)) for k in range(copies)
-            ]
+            row.update({f"feat_{k}": v for k, v in _lineup_columns(lineup, p, history).items()})
+            actual = target.players.get(p)
+            row.update({
+                "label_dressed": bool(actual and actual.dressed),
+                "label_line": actual.line if actual else None,
+                "label_pair": actual.pair if actual else None,
+                "label_pp": actual.pp if actual else None,
+                "label_pk": actual.pk if actual else None,
+                "label_starting_goalie": bool(actual and actual.starting_goalie),
+            })
+            rows.append(row)
+    return rows
 
-            for copy_index, source in sources:
-                for p in candidates:
-                    row = {
-                        "season_id": target.season_id, "game_id": target.game_id, "nhl_game_id": target.nhl_game_id,
-                        "game_date": target.game_date, "team_id": team_id, "player_id": p,
-                        "position": positions.get(p), "variant": variant, "copy_index": copy_index,
-                        "lineup_age_days": (target.game_date - prev.game_date).days if variant == "A" else 0,
-                        "injured_at_lockout": p in injured_known,
-                        "label_in_spell": p in injured_today,
-                        "games_dressed_lookback": sum(1 for g in history if p in g.players and g.players[p].dressed),
-                    }
-                    row.update({f"feat_{k}": v for k, v in _lineup_columns(source, p, history).items()})
-                    actual = target.players.get(p)
-                    row.update({
-                        "label_dressed": bool(actual and actual.dressed),
-                        "label_line": actual.line if actual else None,
-                        "label_pair": actual.pair if actual else None,
-                        "label_pp": actual.pp if actual else None,
-                        "label_pk": actual.pk if actual else None,
-                        "label_starting_goalie": bool(actual and actual.starting_goalie),
-                    })
-                    rows.append(row)
 
-    frame = pd.DataFrame(rows)
+def _typed(frame: pd.DataFrame) -> pd.DataFrame:
     for col in ("feat_line", "feat_pair", "feat_pp", "feat_pk", "feat_mate1_id", "feat_mate2_id", "feat_partner_id",
                 "label_line", "label_pair", "label_pp", "label_pk"):
         frame[col] = frame[col].astype("Int64")

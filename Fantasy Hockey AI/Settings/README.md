@@ -9,6 +9,7 @@ scoring/        what each stat is worth                 read by Projections, Sim
 rosters/        slots, rules, schedule, draft, playoffs read by Season                           (--league)
 strategy.json   how the managers decide                 read by Season, handed to Decisions      (--strategy)
 field.json      how the simulated opponents draft       read by Season                           (--field)
+live.json       how tonight's reports become odds       read by Projections/project_tonight.py
 ```
 
 The first two are what the league imposes; `strategy.json` is what a manager chooses; `field.json`
@@ -223,3 +224,15 @@ goalie-rich source was handed goalies by the rest of the room (4-5 in 6 picks). 
 our consensus board's edge falls from +6.2 to +3.4 +/- 2.7 points a week, and a perfect board is
 worth +5.7 +/- 2.8 instead of +2.6 (`Season/README.md`, section 9 step 2).
 
+
+## live.json
+
+What the live runner does with tonight's reports that the models never saw
+(`Projections/project_tonight.py`):
+
+- `questionable_p_plays_cap`: `DTD` / `GTD` -> the highest `p_plays` (or `p_start` for a goalie
+  without a report) such a player gets. Judgment calls until the live snapshots measure them.
+- `goalie_report_p_start`: Daily Faceoff report strength -> the named goalie's `p_start`; his
+  partners share the rest in proportion to the model. `Confirmed` is measured (99.7%, 2025-26).
+
+Keys starting with `_` are notes (sources, dates), not settings.

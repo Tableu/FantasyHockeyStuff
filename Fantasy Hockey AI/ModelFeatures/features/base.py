@@ -84,6 +84,9 @@ def player_game_facts(cursor, season_ids: list) -> pd.DataFrame:
     facts = facts.merge(zones, on=["game_id", "player_id", "team_id"], how="left")
 
     played = facts["toi"].fillna(0) > 0
+    for column in ONICE_STATS:
+        if column not in facts:   # a season with no games yet (the live build on opening night)
+            facts[column] = pd.NA
     for column in ANALYTIC_STATS + ZONE_STATS:
         if column not in facts:
             facts[column] = pd.NA
@@ -134,6 +137,9 @@ def attach_player_history(candidates: pd.DataFrame, history: pd.DataFrame) -> pd
     left = candidates.sort_values(["game_date", "player_id"], kind="mergesort").reset_index(drop=True)
     right = history.sort_values(["source_game_date", "player_id"], kind="mergesort").reset_index(drop=True)
     right = right.drop(columns=["season_id"])
+    # Typed even when empty -- a season with no games yet (the live build on opening night).
+    right["player_id"] = right["player_id"].astype(left["player_id"].dtype)
+    right["source_game_date"] = pd.to_datetime(right["source_game_date"])
 
     merged = pd.merge_asof(
         left, right,
@@ -143,11 +149,18 @@ def attach_player_history(candidates: pd.DataFrame, history: pd.DataFrame) -> pd
     return merged
 
 
-def team_context(cursor, season_ids: list, player_facts: pd.DataFrame) -> pd.DataFrame:
-    """Everything keyed on (game, team): form, the opponent's form, schedule, rink, injuries."""
+def team_context(cursor, season_ids: list, player_facts: pd.DataFrame, tonight: dict | None = None) -> pd.DataFrame:
+    """Everything keyed on (game, team): form, the opponent's form, schedule, rink, injuries.
+    `tonight` (live build, ModelFeatures/tonight.py) adds not-yet-played games as placeholder
+    rows with empty stats, so the same shift-by-one windows give the form entering them, and
+    overlays the injury reports known now onto the spells."""
     team_games = extract.team_games(cursor, season_ids)
     games = extract.games(cursor, season_ids)
     spells = store.load_injury_spells(cursor, season_ids)
+    if tonight is not None:
+        team_games = pd.concat([_before(team_games, tonight), tonight["team_games"]], ignore_index=True)
+        games = pd.concat([_before(games, tonight), tonight["games"]], ignore_index=True)
+        spells = store.merge_spells(spells, tonight["spells"])
 
     form = context.team_form(team_games)
     frame = team_games[["game_id", "team_id", "opp_team_id", "is_home", "season_id", "game_date"]]
@@ -168,10 +181,13 @@ def team_context(cursor, season_ids: list, player_facts: pd.DataFrame) -> pd.Dat
     return frame.merge(opponent_rest, on=["game_id", "opp_team_id"], how="left")
 
 
-def goalie_history(cursor, season_ids: list) -> pd.DataFrame:
+def goalie_history(cursor, season_ids: list, tonight: dict | None = None) -> pd.DataFrame:
     """Rolling save performance per (game, goalie), entering that game. Joined onto the row's
-    own game, so the ordinary shift-by-one applies."""
+    own game, so the ordinary shift-by-one applies (tonight's expected starters are added as
+    placeholder rows by the live build)."""
     goalies = extract.goalie_games(cursor, season_ids)
+    if tonight is not None:
+        goalies = pd.concat([_before(goalies, tonight), tonight["goalie_games"]], ignore_index=True)
     goalies["game_date"] = pd.to_datetime(goalies["game_date"])
     goalies = goalies.sort_values(["player_id", "game_date", "game_id"], kind="mergesort").reset_index(drop=True)
 
@@ -190,12 +206,21 @@ def goalie_history(cursor, season_ids: list) -> pd.DataFrame:
     return frame[keep]
 
 
-def build_base(cursor, season_ids: list, candidates: pd.DataFrame) -> tuple:
-    """(skaters, goalie_history) for the given seasons, over the candidate universe."""
+def _before(frame: pd.DataFrame, tonight: dict) -> pd.DataFrame:
+    """The live build sees only games played before its date -- on a real game day nothing
+    later exists yet; replaying a past date, this is what makes the replay honest."""
+    return frame[pd.to_datetime(frame["game_date"]) < pd.Timestamp(tonight["date"])]
+
+
+def build_base(cursor, season_ids: list, candidates: pd.DataFrame, tonight: dict | None = None) -> tuple:
+    """(skaters, goalie_history) for the given seasons, over the candidate universe. `tonight`
+    is the live build's not-yet-played games (see team_context)."""
     facts = player_game_facts(cursor, season_ids)
+    if tonight is not None:
+        facts = _before(facts, tonight)
     history = player_history(facts)
-    teams = team_context(cursor, season_ids, facts)
-    goalies = goalie_history(cursor, season_ids)
+    teams = team_context(cursor, season_ids, facts, tonight)
+    goalies = goalie_history(cursor, season_ids, tonight)
 
     candidates = candidates.copy()
     candidates["game_date"] = pd.to_datetime(candidates["game_date"])
@@ -216,7 +241,8 @@ def build_base(cursor, season_ids: list, candidates: pd.DataFrame) -> tuple:
 
     skaters = add_age(skaters, extract.player_birthdates(cursor))
     skaters = add_targets(skaters, facts)
-    assert_no_leakage(skaters)
+    # Opening night has no history in the new season for anyone; only the live build meets it.
+    assert_no_leakage(skaters, require_history=tonight is None)
     return skaters, goalies
 
 
@@ -255,10 +281,10 @@ def add_targets(skaters: pd.DataFrame, facts: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([merged, played], axis=1).copy()
 
 
-def assert_no_leakage(skaters: pd.DataFrame) -> None:
+def assert_no_leakage(skaters: pd.DataFrame, require_history: bool = True) -> None:
     """Every attached history must come from a game strictly before the row's own."""
     known = skaters["source_game_date"].notna()
-    if not known.any():
+    if require_history and not known.any():
         raise AssertionError("no row got any player history -- the as-of join matched nothing")
     offenders = skaters.loc[known & (skaters["source_game_date"] >= skaters["game_date"])]
     if len(offenders):

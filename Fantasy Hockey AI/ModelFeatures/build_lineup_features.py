@@ -73,6 +73,9 @@ def main():
 
     if args.variant:
         frame = features.build_lineup_features(cursor, season_ids, args.variant, rates=rates, copies=args.copies, seed=args.seed)
+        if frame.empty:
+            log.info("Variant %s: no rows yet (no team has played twice) -- nothing written", args.variant)
+            return
         out = DATA_DIR / f"features_{args.variant}_{tag}.parquet"
         frame.to_parquet(out, index=False)
         log.info("Variant %s: %d rows x %d columns -> %s", args.variant, len(frame), frame.shape[1], out)

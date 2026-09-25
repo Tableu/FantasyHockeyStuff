@@ -1,0 +1,13 @@
+{
+  "description": "How the live runner turns tonight's reports into chances of playing. Read by Projections/project_tonight.py after the models score. Measured values say so; the rest are judgment calls to be replaced by the live snapshots' own measurements (plan Step 5).",
+  "questionable_p_plays_cap": {
+    "DTD": 0.70,
+    "GTD": 0.60,
+    "_source": "judgment call, 2026-09-25 -- no history of DTD/GTD reports exists; replace with the measured dress rate per status (Live.PlayerStatus vs Lineups.GameLineups) after 2-4 weeks"
+  },
+  "goalie_report_p_start": {
+    "Confirmed": 0.997,
+    "Likely": 0.85,
+    "_source": "Confirmed measured 2026-09-25 on Daily Faceoff's 2025-26 archive: 1,966 confirmed starts whose goalie dressed for that team that season, 99.69% started (206 archive rows naming another team's goalie excluded). Likely is a judgment call: the archive shows only final states (4 Likely rows), so it is measured from the live snapshots later."
+  }
+}

@@ -82,18 +82,39 @@ def load_team_games(cursor, season_ids: list) -> dict:
     return dict(by_team)
 
 
+# Spells come from ONE source per season, or every injury would count twice: the NHL Injury Viz
+# history up to 2025-26, and from 2026-27 the spells snapshot_live's reports build night by night
+# (pipeline build_live_spells). A later Injury Viz import of a live season is a check, not a source.
+LIVE_SPELL_SOURCE = "Live snapshots"
+FIRST_LIVE_SEASON_START_YEAR = 2026
+
+
 def load_injury_spells(cursor, season_ids: list) -> dict:
-    """{(TeamID, PlayerID): [(StartDate, EndDate), ...]} for dated spells in the seasons."""
+    """{(TeamID, PlayerID): [(StartDate, EndDate, first_game_known), ...]} for dated spells in
+    the seasons. `first_game_known` is True for a live spell: it only counts games he was
+    reported out for BEFORE the lock, so its first game was knowable, unlike a history spell's."""
     placeholders = ",".join("?" * len(season_ids))
     cursor.execute(
-        f"SELECT TeamID, PlayerID, StartDate, EndDate FROM Injuries.Spells "
-        f"WHERE SeasonID IN ({placeholders}) AND PlayerID IS NOT NULL AND StartDate IS NOT NULL",
-        *season_ids,
+        f"SELECT s.TeamID, s.PlayerID, s.StartDate, s.EndDate, src.SourceName "
+        f"FROM Injuries.Spells s JOIN Injuries.Sources src ON src.SourceID = s.SourceID "
+        f"JOIN Reference.Seasons x ON x.SeasonID = s.SeasonID "
+        f"WHERE s.SeasonID IN ({placeholders}) AND s.PlayerID IS NOT NULL AND s.StartDate IS NOT NULL "
+        f"AND (CASE WHEN x.StartYear >= ? THEN 1 ELSE 0 END) = "
+        f"    (CASE WHEN src.SourceName = ? THEN 1 ELSE 0 END)",
+        *season_ids, FIRST_LIVE_SEASON_START_YEAR, LIVE_SPELL_SOURCE,
     )
     spells: dict = defaultdict(list)
     for r in cursor.fetchall():
-        spells[(r.TeamID, r.PlayerID)].append((r.StartDate, r.EndDate))
+        spells[(r.TeamID, r.PlayerID)].append((r.StartDate, r.EndDate, r.SourceName == LIVE_SPELL_SOURCE))
     return dict(spells)
+
+
+def merge_spells(spells: dict, extra: dict) -> dict:
+    """`spells` with `extra`'s spells added (same {(TeamID, PlayerID): [(start, end, known)]} shape)."""
+    merged = {key: list(value) for key, value in spells.items()}
+    for key, value in extra.items():
+        merged.setdefault(key, []).extend(value)
+    return merged
 
 
 def load_player_positions(cursor) -> dict:
@@ -108,7 +129,7 @@ def injured_on(spells: dict, team_id: int, player_id: int, on_date: date) -> boo
     """Inside a spell on that date: REALIZED absence. A spell's StartDate is the first game he
     missed, so this is true on that first game too -- which a lockout cannot always know. Use it
     for labels, never for a lockout-time feature (see `injured_known_on`)."""
-    return any(start <= on_date <= end for start, end in spells.get((team_id, player_id), ()))
+    return any(start <= on_date <= end for start, end, _ in spells.get((team_id, player_id), ()))
 
 
 def injured_known_on(spells: dict, team_id: int, player_id: int, on_date: date) -> bool:
@@ -116,5 +137,7 @@ def injured_known_on(spells: dict, team_id: int, player_id: int, on_date: date) 
     game. The spell's first game is unknown -- 90% of those players dressed the game before
     (2025-26: 885 rows), and whether the absence was announced before the lock is not in the
     history. Conservative on purpose, like the lineup noise: a backtest should understate what
-    the live injury feed will know, not overstate it."""
-    return any(start < on_date <= end for start, end in spells.get((team_id, player_id), ()))
+    the live injury feed will know, not overstate it. A live spell (2026-27 on) was reported
+    before the lock by construction, so its first game counts."""
+    return any((start <= on_date if known else start < on_date) and on_date <= end
+               for start, end, known in spells.get((team_id, player_id), ()))
