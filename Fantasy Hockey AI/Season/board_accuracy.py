@@ -11,8 +11,8 @@ points), over the players drafted by either. Raw-value rank by position, MAE and
 
 Candidates, all knowable before the opener unless marked:
 
-    consensus         the external sources alone: 3+ sources, else last season's total, else the
-                      thin consensus (`draft.consensus_board`) -- what a real draft can use
+    consensus         the external sources alone: min_sources+ sources (strategy), else last
+                      season's total, else the thin consensus (`draft.consensus_board`) -- what a real draft can use
     consensus_min1    the same with no minimum: every covered player on the consensus
     consensus_fitted  consensus x a per-position factor fitted on THIS season's actuals --
                       in-sample here, an upper bound on what any cross-position scale can buy

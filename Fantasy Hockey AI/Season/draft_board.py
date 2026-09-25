@@ -4,8 +4,8 @@
     python draft_board.py --season 2026-27 --league league --weights points-league
 
 What the ladder's VOR seats draft from (`vor_values: consensus`), built for a season that has not
-started: the consensus line where three or more sources cover a player, last season's total where
-fewer do (a rookie with one or two sources keeps their thin consensus), scored with the league's
+started: the consensus line where `draft.min_sources` or more sources cover a player, last
+season's total where fewer do (a rookie too thinly covered keeps his thin consensus), scored with the league's
 file; replacement levels from a simulated league draft on the same board, with the real pick
 rule; each player measured against the lowest replacement level among his positions.
 
@@ -13,6 +13,10 @@ No model of ours is in it -- our rest-of-season rows need the season's own games
 either: ADP is printed beside the board only to answer "will he last to my next pick", which is
 what it forecasts. Every row says what its value rests on, so a fallback is never mistaken for a
 projection.
+
+With `--playoffs START END` (the fantasy playoff weeks) it also counts each player's team's
+off-night games and playoff games, as the aggregate workbook's Schedule Info sheet does
+(`schedule_counts`).
 
 Sources must be published before `--draft-date` (default today). Writes
 reports/draft_board_<season>_<league>_<scoring>.csv, and .md with the top of the board.
@@ -34,6 +38,10 @@ from decisionlayer import load_strategy
 
 log = logging.getLogger("draft-board")
 POSITION_CODES = {"LW": "L", "RW": "R"}      # Reference.Players carries a few platform-style codes
+# A skater's peripheral categories: the scored stats that are not scoring (goals, assists and the
+# power-play and short-handed points built from them). `periph_pct` is their share of his points.
+PERIPHERALS = ("hits", "blocks", "shots", "pim")
+OFF_NIGHT_MAX_GAMES = 8     # the aggregate workbook's off night: a date with 8 or fewer NHL games
 
 
 def previous(season: str) -> str:
@@ -41,9 +49,93 @@ def previous(season: str) -> str:
     return f"{first}-{str(first + 1)[2:]}"
 
 
-def build(season, prior_season, league_name, scoring, draft_date, strategy):
-    config = league_module.load(league_name)
-    scoreset = simlayer.load_scoreset(scoring)
+def schedule_counts(season, playoff_start, playoff_end) -> pd.DataFrame:
+    """Per team, the aggregate workbook's two schedule columns (its Schedule Info sheet):
+
+    - `off`: games on an off night -- a date with at most OFF_NIGHT_MAX_GAMES NHL games -- from the
+      start of the season through the last day of the fantasy playoffs (its OffNights, "<= 8" and
+      "<= playoff end");
+    - `pog`: games from the first through the last day of the fantasy playoffs, inclusive (its
+      PlayoffGames "All" column, which the Player Values sheets read as POG).
+
+    Indexed by team abbreviation, the way the board names teams."""
+    games = pd.read_parquet(paths.schedule(season))
+    games["game_date"] = pd.to_datetime(games["game_date"]).dt.normalize()
+    per_day = games.groupby("game_date").size()
+    games["off_night"] = games["game_date"].map(per_day) <= OFF_NIGHT_MAX_GAMES
+    start, end = pd.Timestamp(playoff_start), pd.Timestamp(playoff_end)
+    rows = pd.concat([games.rename(columns={"home_team_id": "team_id"}),
+                      games.rename(columns={"away_team_id": "team_id"})])[
+        ["team_id", "game_date", "off_night"]]
+    through = rows[rows["game_date"] <= end]
+    counts = pd.DataFrame({
+        "off": through[through["off_night"]].groupby("team_id").size(),
+        "pog": through[through["game_date"] >= start].groupby("team_id").size(),
+    }).reindex(rows["team_id"].unique()).fillna(0).astype(int)
+    teams = pd.read_parquet(paths.teams()).set_index("team_id")["team"]
+    counts.index = counts.index.map(teams)
+    return counts
+
+
+def peripheral_share(board, scoreset) -> pd.Series:
+    """Per skater, the percentage of his points (from his stat line, under this league's scoring)
+    that come from PERIPHERALS; blank for goalies and for a skater with no line. The line is the
+    one his value came from, so the points match the value to rounding."""
+    weights = scoreset.skaters
+    points = sum(board[s].fillna(0) * w for s, w in weights.items() if s in board)
+    periph = sum(board[s].fillna(0) * weights[s] for s in PERIPHERALS if s in weights and s in board)
+    share = (100 * periph / points).where(points > 0)
+    return share.where(board["positions"].ne("G") & board["goals"].notna()).round(0)
+
+
+def stat_lines(board, external, prior_season, scoreset) -> pd.DataFrame:
+    """Every stat the league scores, as a season line per board player, plus games played: the
+    consensus line for a player valued on it, last season's totals for one valued on last season
+    (the line his value came from). Skater stats are blank for goalies and goalie stats for
+    skaters."""
+    skater_stats, goalie_stats = list(scoreset.skaters), list(scoreset.goalies)
+    consensus = draft_module.consensus_lines(external)
+    consensus["player_id"] = consensus["player_id"].astype(int)
+    consensus = consensus.set_index("player_id")
+
+    actuals = inputs.load_actuals(prior_season)
+    played = actuals[actuals["target_played"].astype(bool)]
+    last_skaters = played.groupby("player_id")[[f"target_{c}" for c in skater_stats]].sum()
+    last_skaters.columns = skater_stats
+    last_skaters["games"] = played.groupby("player_id").size()
+    starts = inputs.load_goalie_starts(prior_season)
+    starts = starts[starts["appeared"].astype(bool)]
+    last_goalies = starts.groupby("player_id")[goalie_stats].sum()
+    last_goalies["games"] = starts.groupby("player_id").size()
+    last = pd.concat([last_skaters, last_goalies]).groupby(level=0).sum(min_count=1)
+    last.index = last.index.astype(int)
+
+    columns = ["games"] + skater_stats + goalie_stats
+    from_last = board["basis"].str.startswith("last season")
+    lines = pd.concat([consensus.reindex(board.index[~from_last.to_numpy()]),
+                       last.reindex(board.index[from_last.to_numpy()])]).reindex(board.index)
+    lines = lines.reindex(columns=columns)
+    goalie = board["positions"].eq("G").to_numpy()
+    lines.loc[goalie, skater_stats] = float("nan")
+    lines.loc[~goalie, goalie_stats] = float("nan")
+    return lines.round(1).rename(columns={"games": "gp"})
+
+
+def build(season, prior_season, league_name, scoring, draft_date, strategy, eligibility_platform=None,
+          playoffs=None, config=None, scoreset=None):
+    """The board, the replacement levels, the league config and the eligibility map. Positions come
+    from `eligibility_platform` when given (the league's own platform -- Fleaflicker for league
+    12090), else from the league config's. With `playoffs` (first day, last day of the fantasy
+    playoffs) the board also has `off` and `pog`, the player's team's `schedule_counts`. `config` and
+    `scoreset`, when given, stand in for the named league and scoring files (the draft window's
+    own roster and scoring settings)."""
+    from dataclasses import replace
+
+    config = config if config is not None else league_module.load(league_name)
+    if eligibility_platform:
+        config = replace(config, eligibility_platform=eligibility_platform.lower(),
+                         eligibility_season=season)
+    scoreset = scoreset if scoreset is not None else simlayer.load_scoreset(scoring)
     external = inputs.load_external_projections(season, draft_date, strategy.undated_sources)
     last = draft_module.prior_season_board(inputs.load_actuals(prior_season),
                                            inputs.load_goalie_starts(prior_season), scoreset)
@@ -89,14 +181,27 @@ def build(season, prior_season, league_name, scoring, draft_date, strategy):
         "basis": basis.to_numpy(),
     }, index=vor.index)
     board.index.name = "player_id"
-    for platform in ("yahoo", "espn"):
-        path = paths.fantasy_adp(platform, season)
-        if path.exists():
-            adp = pd.read_parquet(path).set_index("player_id")["adp"]
-            board[f"adp_{platform}"] = adp.reindex(board.index).to_numpy()
-    log.info("%s %s %s: %d players, replacement %s; %s", season, league_name, scoring, len(board),
+    if paths.injury_risk().exists():
+        # Dobber's Band-Aid Boys tier (Certified, Trainee, Goalie), blank when not listed. Shown,
+        # never used: the value is the projections' either way.
+        risk = pd.read_parquet(paths.injury_risk())
+        risk = risk[risk["season"] == season].groupby("player_id")["tier"].agg("/".join)
+        board["injury"] = board.index.map(risk)
+    if playoffs is not None:
+        counts = schedule_counts(season, *playoffs)
+        board["off"] = board["team"].map(counts["off"]).astype("Int64")
+        board["pog"] = board["team"].map(counts["pog"]).astype("Int64")
+    stats = stat_lines(board, external, prior_season, scoreset)
+    board = board.join(stats)
+    board["periph_pct"] = peripheral_share(board, scoreset)
+    for path in sorted(paths.FEATURES_DIR.glob(f"fantasy_adp_*_{season}.parquet")):
+        platform = path.name[len("fantasy_adp_"):-len(f"_{season}.parquet")]
+        adp = pd.read_parquet(path).set_index("player_id")["adp"]
+        board[f"adp_{platform}"] = adp.reindex(board.index).to_numpy()
+    log.info("%s %s %s (%s positions): %d players, replacement %s; %s", season, league_name,
+             scoring, config.eligibility_platform, len(board),
              {s: round(v, 1) for s, v in levels.items()}, board["basis"].value_counts().to_dict())
-    return board, levels, config
+    return board, levels, config, eligibility
 
 
 def to_markdown(board: pd.DataFrame, top: int) -> str:
@@ -117,6 +222,12 @@ def main():
     parser.add_argument("--draft-date", default=dt.date.today().isoformat(),
                         help="Every source must be published before this (default today)")
     parser.add_argument("--strategy", default=None)
+    parser.add_argument("--eligibility", default=None,
+                        help="Position platform, e.g. fleaflicker (default: the strategy's "
+                             "draft.eligibility_platform)")
+    parser.add_argument("--playoffs", nargs=2, metavar=("START", "END"), default=None,
+                        help="First and last day of the fantasy playoffs: adds off-night and "
+                             "playoff games (e.g. 2027-03-15 2027-04-04 for league 12090)")
     parser.add_argument("--top", type=int, default=300, help="Rows in the Markdown board")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s",
@@ -124,8 +235,10 @@ def main():
     strategy = load_strategy(args.strategy)
     prior = args.prior_season or previous(args.season)
     for scoring in args.weights or ["points-league"]:
-        board, levels, config = build(args.season, prior, args.league, scoring,
-                                      pd.Timestamp(args.draft_date), strategy)
+        board, levels, config, _ = build(args.season, prior, args.league, scoring,
+                                         pd.Timestamp(args.draft_date), strategy,
+                                         args.eligibility or strategy.eligibility_platform,
+                                         args.playoffs)
         paths.ensure(paths.REPORTS_DIR)
         csv = paths.draft_board(args.season, args.league, scoring, "csv")
         board.to_csv(csv)

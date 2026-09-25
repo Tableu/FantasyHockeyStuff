@@ -116,6 +116,21 @@ def teams() -> Path:
     return FEATURES_DIR / "teams.parquet"
 
 
+def schedule(season: str) -> Path:
+    """The season's NHL regular-season schedule (ModelFeatures/build_schedule.py)."""
+    return FEATURES_DIR / f"schedule_{season}.parquet"
+
+
+def injury_risk() -> Path:
+    """Published injury-risk lists per season, e.g. Dobber's Band-Aid Boys (build_players.py)."""
+    return FEATURES_DIR / "injury_risk.parquet"
+
+
+def platform_ids() -> Path:
+    """A fantasy platform's own player id -> player_id, per season (ModelFeatures/build_players.py)."""
+    return FEATURES_DIR / "platform_ids.parquet"
+
+
 def draft_board(season: str, league: str, scoring: str, suffix: str) -> Path:
     return REPORTS_DIR / f"draft_board_{season}_{league}_{scoring}.{suffix}"
 
@@ -145,6 +160,12 @@ def ros_predictions(season: str, horizon: str = "season") -> Path:
 def scoreset(name: str) -> Path:
     path = Path(name)
     return path if path.exists() else SCORESETS_DIR / f"{path.stem}.json"
+
+
+def draft_window_settings() -> Path:
+    """The draft tools' own saved settings (the draft window's settings popup): positions, ADP,
+    playoff dates, roster and scoring for the live draft. Never read by the simulator."""
+    return SETTINGS_DIR / "draft_window.json"
 
 
 def strategy_config(name: str) -> Path:
