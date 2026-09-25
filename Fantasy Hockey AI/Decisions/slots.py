@@ -57,7 +57,8 @@ def fills(slot, eligible, accepts=None) -> bool:
 # eligibility sets, so each row is computed once instead of `fills` being called for every
 # player-slot pair on every solve (110M calls a replication before this cache).
 _SLOT_KEYS = {}            # id(accepts) -> (accepts, its content key); the reference pins the id
-_ROWS = {}                 # (slots, accepts key, eligible) -> boolean row
+_ROWS = {}                 # (slots, accepts key) -> {eligible: boolean row}
+_SLOTS_KEYS = {}           # id(slots list) -> (slots list, tuple of its codes)
 _MATCHING = {}             # (slots, accepts key, multiset of eligibility sets) -> matching size
 
 
@@ -72,13 +73,43 @@ def _accepts_key(accepts):
     return key
 
 
-def _row(slots_key, accepts, accepts_key, eligible):
-    key = (slots_key, accepts_key, eligible)
-    row = _ROWS.get(key)
+def _slots_key(slots):
+    cached = _SLOTS_KEYS.get(id(slots))
+    if cached is not None and cached[0] is slots:
+        return cached[1]
+    key = tuple(slots)
+    _SLOTS_KEYS[id(slots)] = (slots, key)
+    return key
+
+
+def _row_table(slots, accepts) -> dict:
+    """{eligibility set: boolean row over `slots`} for one slot layout, filled lazily. Looked up
+    by the eligibility set alone, whose hash is cached, rather than by a key that re-hashes the
+    whole slot layout for every player of every solve."""
+    table_key = (_slots_key(slots), _accepts_key(accepts))
+    table = _ROWS.get(table_key)
+    if table is None:
+        table = _ROWS[table_key] = {}
+    return table
+
+
+def _row(table, slots_key, accepts, eligible):
+    row = table.get(eligible)
     if row is None:
-        row = np.array([fills(slot, eligible, accepts) for slot in slots_key], dtype=bool)
-        _ROWS[key] = row
+        row = table[eligible] = np.array([fills(slot, eligible, accepts) for slot in slots_key],
+                                         dtype=bool)
     return row
+
+
+def _cost(slots, values, eligibility, accepts):
+    """The solve's matrix: -value where the player may fill the slot, FORBIDDEN elsewhere."""
+    players = list(values)
+    table, slots_key = _row_table(slots, accepts), _slots_key(slots)
+    empty = frozenset()
+    mask = np.array([_row(table, slots_key, accepts, eligibility.get(p, empty))
+                     for p in players])
+    value = np.array([float(values[p]) for p in players], dtype="float64")
+    return players, np.where(mask, -value[:, None], FORBIDDEN)
 
 
 class Lineup:
@@ -113,13 +144,8 @@ def assign(slots: list, values: dict, eligibility: dict, accepts=None) -> Lineup
     if not players or not slots:
         return Lineup({}, list(players), list(range(len(slots))))
 
-    # The same matrix the per-pair loop built -- -value where the player may fill the slot,
-    # FORBIDDEN elsewhere -- assembled from cached eligibility rows.
-    slots_key, accepts_key = tuple(slots), _accepts_key(accepts)
-    mask = np.array([_row(slots_key, accepts, accepts_key, eligibility.get(p, frozenset()))
-                     for p in players])
-    value = np.array([float(values[p]) for p in players], dtype="float64")
-    cost = np.where(mask, -value[:, None], FORBIDDEN)
+    # The same matrix the per-pair loop built, assembled from cached eligibility rows.
+    players, cost = _cost(slots, values, eligibility, accepts)
 
     rows, columns = linear_sum_assignment(cost)
 
@@ -134,6 +160,18 @@ def assign(slots: list, values: dict, eligibility: dict, accepts=None) -> Lineup
     return Lineup(assigned=assigned,
                   benched=[p for p in players if p not in started],
                   unfilled=[j for j in range(len(slots)) if j not in assigned])
+
+
+def assign_value(slots: list, values: dict, eligibility: dict, accepts=None) -> float:
+    """`total_value(assign(...), values)` without building the Lineup: the same solve, and the
+    started players' values summed in the same order (the order `assign` inserts them), so the
+    result is the same float, bit for bit. The swap valuation needs only this number, hundreds
+    of thousands of times a season."""
+    if not values or not slots:
+        return 0.0
+    players, cost = _cost(slots, values, eligibility, accepts)
+    rows, columns = linear_sum_assignment(cost)
+    return float(sum(values[players[i]] for i, j in zip(rows, columns) if cost[i, j] < FORBIDDEN))
 
 
 def candidates_for(roster, playing_tonight: set, available: set) -> list:

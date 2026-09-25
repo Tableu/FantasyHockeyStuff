@@ -113,7 +113,8 @@ def main():
     p.add_argument("--league", default="league")
     p.add_argument("--weights", default="points-league")
     p.add_argument("--replications", type=int, default=8)
-    p.add_argument("--workers", type=int, default=6)
+    p.add_argument("--workers", type=int, default=None,
+                   help="Processes (default: ladder.default_workers)")
     p.add_argument("--which", default="draft,transactions,availability")
     args = p.parse_args()
     which = set(args.which.split(","))

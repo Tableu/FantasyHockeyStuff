@@ -18,6 +18,7 @@ So weeks are the Monday-to-Sunday spans that actually contain games, numbered in
 span with no games is not a week at all.
 """
 
+import bisect
 import logging
 from dataclasses import dataclass
 
@@ -72,6 +73,13 @@ class Calendar:
         self._week_of_period = {period: i for i, g in enumerate(groups, start=1) for period in g}
         self._periods_of_week = dict(enumerate(groups, start=1))
         self._memo = {}
+        # Each team's game dates, sorted, once: a window is a slice of this list, found by binary
+        # search, where it used to be a boolean filter over the whole schedule (1.3 ms a miss).
+        # One game per team per day, so a team's distinct games and distinct dates are the same.
+        per_team = self.schedule.drop_duplicates(["team_id", "game_id"])
+        self._team_dates = {team: sorted(rows["game_date"])
+                            for team, rows in per_team.groupby("team_id")}
+        self._week_memo = {}
         # The last matchup week that scores in the league being run (regular season plus playoffs).
         # A forward window stops here: an NHL game after the fantasy final is worth nothing. The
         # engine sets it from the league config; unset, windows run to the NHL calendar's end.
@@ -86,9 +94,23 @@ class Calendar:
         return self.schedule["game_id"].nunique()
 
     def week_of(self, day) -> int | None:
-        """The matchup week a date falls in, or None if it falls in the hole."""
+        """The matchup week a date falls in, or None if it falls in the hole. Memoized on the
+        date as given: the period conversion is the costly part, and managers ask about the same
+        few nights constantly."""
+        try:
+            return self._week_memo[day]
+        except KeyError:
+            pass
         period = pd.Timestamp(day).to_period(WEEK_ANCHORS[self.week_starts_on])
-        return self._week_of_period.get(period)
+        week = self._week_memo[day] = self._week_of_period.get(period)
+        return week
+
+    def _window(self, team_id, start, end) -> list:
+        """The team's game dates from `start` through `end`, inclusive, in order."""
+        dates = self._team_dates.get(team_id, [])
+        lo = bisect.bisect_left(dates, pd.Timestamp(start))
+        hi = bisect.bisect_right(dates, pd.Timestamp(end))
+        return dates[lo:hi]
 
     def days_in(self, week: int) -> list:
         target = self.weeks[week - 1]
@@ -117,10 +139,7 @@ class Calendar:
             self._remaining[key] = 0
             return 0
         end = self.weeks[week - 1].end
-        rows = self.schedule
-        count = int(rows[(rows["team_id"] == team_id)
-                         & (rows["game_date"] >= pd.Timestamp(day))
-                         & (rows["game_date"] <= end)]["game_id"].nunique())
+        count = len(self._window(team_id, day, end))
         self._remaining[key] = count
         return count
 
@@ -158,11 +177,7 @@ class Calendar:
                     end = self.weeks[cap - 1].end
                 else:
                     end = self.weeks[min(week - 1 + weeks_ahead, cap - 1)].end
-                rows = self.schedule
-                dates = rows[(rows["team_id"] == team_id)
-                             & (rows["game_date"] >= pd.Timestamp(day))
-                             & (rows["game_date"] <= end)].drop_duplicates("game_id")["game_date"]
-                self._memo[key] = sorted(dates)
+                self._memo[key] = self._window(team_id, day, end)
         return self._memo[key]
 
     def gaps(self, min_days=7) -> list:

@@ -87,7 +87,8 @@ def parse_args():
                         help="What the VOR board values players on (strategy draft.vor_values)")
     parser.add_argument("--workers", type=int, default=None,
                         help="Processes to run replications in (default: one per replication, at "
-                             "most 6). 1 runs them in this process, one after another")
+                             "most the logical cores less 4). 1 runs them in this process, one "
+                             "after another")
     parser.add_argument("--tag", default=None,
                         help="Suffix for the report and doc names, so an experiment does not "
                              "overwrite the committed ladder")
@@ -238,9 +239,18 @@ def _run_replication(replication):
                    w.get("candidate"))
 
 
+def default_workers(replications) -> int:
+    """One process per replication, up to the logical cores less four (8 on a 12-core machine):
+    an 8-draft run then finishes in one wave -- 52 s against 85 s at the old fixed 6 -- and the
+    spare cores keep the machine usable. Results do not depend on it."""
+    import os
+
+    return max(1, min(replications, (os.cpu_count() or 2) - 4))
+
+
 def run_replications(args, config, calendar, data, eligibility, scoreset, rungs, strategy,
                      candidate=None):
-    workers = args.workers or min(args.replications, 6)
+    workers = args.workers or default_workers(args.replications)
     if workers <= 1 or args.replications <= 1:
         return [run_one(config, calendar, data, eligibility, scoreset, rungs, r,
                         args.verbose_weeks, args.decision_sims, strategy, candidate)

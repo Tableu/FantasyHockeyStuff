@@ -93,8 +93,8 @@ class RosterNights:
                      if not (today and p in self.view.unavailable)}
         if not startable:
             return 0.0
-        lineup = slots_module.assign(self.slot_order, startable, self.eligibility, self.accepts)
-        return slots_module.total_value(lineup, startable)
+        return slots_module.assign_value(self.slot_order, startable, self.eligibility,
+                                         self.accepts)
 
     def removal_cost(self, player_id) -> float:
         """Lineup points over the window lost by taking `player_id` off this roster."""

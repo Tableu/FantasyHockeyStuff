@@ -311,7 +311,8 @@ def parse_args():
     p.add_argument("--screen", type=int, default=4, help="Drafts per candidate in the screen")
     p.add_argument("--confirm", type=int, default=8, help="Drafts for each stage's top few")
     p.add_argument("--top", type=int, default=3)
-    p.add_argument("--workers", type=int, default=6)
+    p.add_argument("--workers", type=int, default=None,
+                   help="Processes (default: ladder.default_workers)")
     p.add_argument("--strategy", default=None)
     p.add_argument("--final", action="store_true",
                    help="Run the frozen parameters (--tuned) against the shipped on 2025-26")
