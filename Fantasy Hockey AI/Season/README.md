@@ -430,6 +430,58 @@ The same work found one eligibility collision: Carolina's Sebastian Aho was list
 name with the Islanders' defenceman, which put him third on the VOR board. Forward/defence mixes are
 now rejected like skater/goalie ones (`inputs._side`).
 
+## Section 11: tuning on 2024-25
+
+`tune.py` searches the shipped manager's add/drop and streaming values on **2024-25**, so 2025-26
+stays the clean holdout. The inputs are a build that never saw 2024-25: projections, rest of
+season, goalie P(start), dispersion, correlations and the goalie line, all trained or fitted on
+2023-24 alone (more history measured as a weak lever, so 2022-23 was not backfilled). The draft is
+the consensus VOR board from the ten 2024-25 sources. 2024-25 opens with a one-game week (Prague),
+merged into week 2 (`min_first_week_games`).
+
+**Seat-paired.** Every draft is played twice: as the shipped league (rungs 2, 5, 6 and 17) and
+with the candidate (rung 27: rung 17 on the candidate's values, nothing else different --
+`build_field` and the engine refuse any other difference) in exactly rung 17's seats. The draft
+does not depend on in-season values, so both runs share rosters, draft slots and schedule, and a
+candidate's score is its seats' points a week minus the same seats' in the shipped run. The shipped
+values in the candidate's seats reproduce the shipped league seat for seat. Screened at 4 drafts;
+each stage's top 3 rerun at 8, promoted only past two paired standard errors.
+
+**Why seat-paired.** The first search seated the candidate beside the shipped system, in other
+seats. Seats running the same manager in one draft differ by 7-16 points a week, so its error was
+about ±2-2.4 at 8 drafts -- a change had to be worth about 4 points a week to be seen -- and it
+subtracted a shipped-vs-shipped "noise floor" that turned out uncorrelated with the candidate's gap
+(the league diverges once anything changes), which doubled the variance. Seat-paired, the error is
+±0.5 for a change that barely touches the league and ±1.5 for one that moves every other seat by
+about 3 points a week (a horizon change). Both searches promoted nothing; only the second could
+have seen a 1-2 point effect.
+
+Before tuning, a sanity ladder on 2024-25 (14-team points, 8 drafts) had 2025-26's signs: add/drop
+over hold +12.9 ± 1.2, the orchestrator over add/drop +12.3 ± 2.1, the VOR draft with rung 7
++11.1 ± 2.9 (`docs/ladder-league_sanity-2024-25.md`).
+
+**Result: the shipped values stay, now measured** (`docs/tuning-2024-25.md`). Points a week against
+shipped, 8 drafts where marked, else 4:
+
+| change from shipped | gap |
+|---|---|
+| streaming off | **−11.1 ± 1.6** |
+| rate per game instead of rest of season, at H = 3 / 6 / season | **−3.8 ± 1.1** / −4.3 ± 2.2 / −5.9 ± 2.7 |
+| add/drop margin 0.5 | **−3.1 ± 1.1** |
+| no move reserve | **−2.6 ± 1.0** |
+| rental margin 0.5 | **−1.5 ± 0.5** |
+| flat streaming bar (8 drafts) | +0.95 ± 0.98 |
+| claim premium 5 (8 drafts) | +0.83 ± 0.51 |
+| λ = 3 (8 drafts) | +0.32 ± 0.47 |
+| horizon 1 / 6 (8 drafts) | −1.26 ± 1.48 / −0.93 ± 1.64 |
+| margin 0 or 1.5, 1 or 3 spots, reserve 1, λ 0/1/4, gate, no rental claims | within about ±1 |
+
+Most single steps away from the shipped values cost points and none gains more than about one point
+a week on about two hundred: there is no real headroom in these parameters. The claim premium of 5
+is the one lead (+0.8 ± 0.5, about 25 seat-paired drafts would settle it, worth under half a
+percent either way). The per-game rate that beat rest of season on 2025-26's coarse check loses on
+2024-25, so rest of season stays. With nothing promoted, 2025-26 was not touched.
+
 ## Formats
 
 Both formats at eight seat rotations, both scoresets, identical everything else:

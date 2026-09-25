@@ -139,7 +139,8 @@ def run(args):
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
-        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
 
     strategy = decisionlayer.load_strategy(args.strategy)
     shrink = strategy.prior_rate_shrink_games

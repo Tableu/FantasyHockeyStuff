@@ -111,6 +111,8 @@ class LeagueConfig:
     # week containing that date in whichever season is replayed (`regular_season_weeks_in`).
     # Optional "regular_season_weeks_by_season": {"2025-26": 21} overrides the length for a
     # season whose calendar cannot hold the usual one (2025-26's Olympic break).
+    # "min_first_week_games": a first matchup week with fewer NHL games is merged into the second
+    # (2024-25 opens with a one-game week in Prague).
     schedule: dict
     # {"type": "snake" | "linear", "order": "lottery", "keepers": 0}. Keepers are not modelled, so
     # only 0 is accepted.
@@ -144,7 +146,8 @@ class LeagueConfig:
                                              if k not in ("week_starts_on", "regular_season_end",
                                                           "regular_season_weeks_by_season")},
                      SUPPORTED_SCHEDULE,
-                     {"regular_season_weeks": 1} if "regular_season_weeks" in length else {})
+                     {"min_first_week_games": 0,
+                      **({"regular_season_weeks": 1} if "regular_season_weeks" in length else {})})
         if "regular_season_end" in length:
             _month_day(self.name, self.schedule["regular_season_end"])
         if self.schedule.get("week_starts_on") not in WEEKDAYS:
@@ -230,6 +233,11 @@ class LeagueConfig:
     @property
     def week_starts_on(self) -> str:
         return self.schedule["week_starts_on"]
+
+    @property
+    def min_first_week_games(self) -> int:
+        """A first matchup week with fewer NHL games than this is merged into the second."""
+        return self.schedule["min_first_week_games"]
 
     @property
     def playoff_teams(self) -> int:

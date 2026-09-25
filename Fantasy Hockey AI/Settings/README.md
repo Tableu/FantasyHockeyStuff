@@ -59,7 +59,8 @@ per-stat numbers only. `Season/` defaults to `points-league`.
   "waiver_days": 2,
   "ties": "split",
   "schedule": {"type": "round_robin", "regular_season_weeks": 24,
-               "regular_season_weeks_by_season": {"2025-26": 21}, "week_starts_on": "MON"},
+               "regular_season_weeks_by_season": {"2025-26": 21}, "week_starts_on": "MON",
+               "min_first_week_games": 20},
   "draft": {"type": "snake", "order": "lottery", "keepers": 0},
   "playoffs": {"teams": 6, "byes": 2, "rounds": 3, "weeks_per_round": 1,
                "seeding": "record", "tiebreak": "points_for"},
@@ -82,7 +83,9 @@ per-stat numbers only. `Season/` defaults to `points-league`.
   containing that date), not both. `regular_season_weeks_by_season` overrides the length for a
   season whose calendar is short -- 2025-26 has only 26 matchup weeks with games (the Olympic
   break), so the target league's 24 + 3 plays as 21 + 3 there. The regular season plus the
-  playoff weeks must fit the season's calendar, or the run is refused.
+  playoff weeks must fit the season's calendar, or the run is refused. A first week with fewer
+  than `min_first_week_games` NHL games is merged into the second, as a platform stretches week 1
+  over an early opener: 2024-25's first week is the one Prague game. 2025-26's (26 games) is not.
 - **Draft:** `snake` or `linear`, seat order drawn by `lottery`. Keepers are not modelled (`0`).
 - **Playoffs:** simulated after the regular season. A fixed bracket of `2 ** rounds` slots, the top
   `byes` seeds skipping round one (`byes` must equal `2 ** rounds - teams`): with 6 teams, round
@@ -153,7 +156,12 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 
 ### Where the values come from
 
-None is tuned: 2025-26 is the only clean holdout, so section 11 tunes on 2024-25.
+**Tuned on 2024-25 (2026-09-24): nothing changed.** `Season/tune.py` searched the add/drop and
+streaming values against the shipped ones on 2024-25 (a build trained on 2023-24 alone), and no
+change cleared two paired standard errors at 8 seat-paired drafts (errors of ±0.5-1.6 points a
+week) -- see `Season/README.md`, section 11. Most single steps away cost points; none gains more
+than about one. So the values below are the shipped ones, now measured, not only reasoned. 2025-26, the clean holdout,
+was not touched.
 
 - **`adddrop.horizon_weeks = 3`** is section 9's plan. On the 2025-26 sensitivity check
   (`Season/docs/ladder-league_sens-*.md`) H = 1, 3 and the rest of the season all cleared hold,

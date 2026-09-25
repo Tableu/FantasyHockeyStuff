@@ -22,6 +22,7 @@ tonight's slate, the schedule, the projections -- and the README lists exactly w
 has to offer, so a live runner can hand the same managers a view built from real data.
 """
 
+import dataclasses
 import logging
 import math
 import statistics
@@ -668,19 +669,36 @@ LADDER[7] = Orchestrated
 
 VOR_TWIN = 10
 
+# Section 11's tuning seat: rung 17 (the shipped system) run on a candidate's parameters, seated
+# beside the incumbent rung 17 so the pair differ in those parameters and nothing else.
+CANDIDATE, CANDIDATE_OF = 27, 17
+TUNABLE = ("adddrop", "streaming")
 
-def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, replication=0):
+
+def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, replication=0,
+                candidate=None):
     """One manager per seat, rungs interleaved so seats are not blocked by strategy.
 
     `strategy` (a `strategy.Strategy`) carries every rung's parameters; vary one with
-    `dataclasses.replace` rather than by seating a differently built manager.
+    `dataclasses.replace` rather than by seating a differently built manager. `candidate`, a
+    strategy differing only in its add/drop and streaming blocks, is what the CANDIDATE seats
+    run -- anything else (the goalie prior, the draft, the playoff behaviour) must match the
+    field's, or the pair would differ in more than the parameters being tuned.
 
     Interleaving matters: three consecutive seats all drafting for the same rung would give that
     rung all three of the same snake positions.
     """
     # Rung r + VOR_TWIN is rung r drafting by value over replacement: the same in-season manager,
     # so the gap between the two is the draft board's worth and nothing else.
-    rungs = [r for r in rungs if r in LADDER or r - VOR_TWIN in LADDER]
+    rungs = [r for r in rungs if r in LADDER or r - VOR_TWIN in LADDER or r == CANDIDATE]
+    if CANDIDATE in rungs:
+        if candidate is None:
+            raise ValueError("a candidate seat needs a candidate strategy")
+        same = dataclasses.replace(candidate, name=strategy.name, description=strategy.description,
+                                   **{k: getattr(strategy, k) for k in TUNABLE})
+        if same != strategy:
+            raise ValueError("a candidate may differ from the field's strategy only in "
+                             f"{TUNABLE}")
     clones = clones or (config.teams // len(rungs))
     field = []
     # The offset matters whenever the seat count is not a multiple of the rung count. Fourteen
@@ -688,12 +706,15 @@ def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, rep
     # assignment is rotated by replication and the extra seats move around instead of always
     # landing on the same rungs.
     for seat in range(config.teams):
-        seated = rungs[(seat + replication) % len(rungs)]
+        label = rungs[(seat + replication) % len(rungs)]
+        seated, own = (CANDIDATE_OF, candidate) if label == CANDIDATE else (label, strategy)
         rung = seated - VOR_TWIN if seated not in LADDER else seated
-        field.append(LADDER[rung](seat, config, scoreset, strategy))
+        field.append(LADDER[rung](seat, config, scoreset, own))
         if seated != rung:
             twin = field[-1]
             twin.rung, twin.draft_board, twin.name = seated, "vor", f"{twin.name}[vor draft]"
+        if label == CANDIDATE:
+            field[-1].rung, field[-1].name = CANDIDATE, f"{field[-1].name}[candidate]"
     if len(field) != config.teams:
         raise ValueError(f"{len(field)} managers for {config.teams} seats")
     return field

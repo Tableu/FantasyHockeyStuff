@@ -195,11 +195,11 @@ def vor_board(data, prior_season_name, scoreset, config, eligibility, strategy):
 
 
 def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, verbose_weeks,
-            decision_sims, strategy):
+            decision_sims, strategy, candidate=None):
     from decisionlayer import managers as managers_module
 
     field = managers_module.build_field(config, scoreset, strategy, rungs=rungs,
-                                        replication=replication)
+                                        replication=replication, candidate=candidate)
     base = [m.rung % managers_module.VOR_TWIN for m in field]
     if any(r in (5, 7) for r in base) and strategy.adddrop.rate_source == "ros"             and data.get("ros") is None:
         raise SystemExit("rung 5 reads rest-of-season projections and none are built -- run "
@@ -234,14 +234,16 @@ def _init_worker(payload):
 def _run_replication(replication):
     w = _WORKER
     return run_one(w["config"], w["calendar"], w["data"], w["eligibility"], w["scoreset"],
-                   w["rungs"], replication, w["verbose_weeks"], w["decision_sims"], w["strategy"])
+                   w["rungs"], replication, w["verbose_weeks"], w["decision_sims"], w["strategy"],
+                   w.get("candidate"))
 
 
-def run_replications(args, config, calendar, data, eligibility, scoreset, rungs, strategy):
+def run_replications(args, config, calendar, data, eligibility, scoreset, rungs, strategy,
+                     candidate=None):
     workers = args.workers or min(args.replications, 6)
     if workers <= 1 or args.replications <= 1:
         return [run_one(config, calendar, data, eligibility, scoreset, rungs, r,
-                        args.verbose_weeks, args.decision_sims, strategy)
+                        args.verbose_weeks, args.decision_sims, strategy, candidate)
                 for r in range(args.replications)]
     import sys
     from concurrent.futures import ProcessPoolExecutor
@@ -254,7 +256,8 @@ def run_replications(args, config, calendar, data, eligibility, scoreset, rungs,
         sys.path.insert(0, str(paths.PROJECT_ROOT))
     payload = {"config": config, "calendar": calendar, "data": data, "eligibility": eligibility,
                "scoreset": scoreset, "rungs": rungs, "verbose_weeks": args.verbose_weeks,
-               "decision_sims": args.decision_sims, "strategy": strategy}
+               "decision_sims": args.decision_sims, "strategy": strategy,
+               "candidate": candidate}
     log.info("running %d replications in %d processes", args.replications, workers)
     with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker,
                              initargs=(payload,)) as pool:
@@ -311,7 +314,8 @@ def main():
     ]).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
-        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
     log.info("calendar: %s", json.dumps(calendar.verify()))
 
     strategy = load_strategy(args)

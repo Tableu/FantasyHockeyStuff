@@ -18,7 +18,8 @@
   "schedule": {
     "type": "round_robin",
     "regular_season_weeks": 22,
-    "week_starts_on": "MON"
+    "week_starts_on": "MON",
+    "min_first_week_games": 20
   },
   "draft": {
     "type": "snake",

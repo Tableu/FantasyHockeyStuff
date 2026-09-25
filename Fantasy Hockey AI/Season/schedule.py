@@ -43,7 +43,7 @@ class Week:
 class Calendar:
     """Game days and matchup weeks for one season."""
 
-    def __init__(self, schedule: pd.DataFrame, week_starts_on="MON"):
+    def __init__(self, schedule: pd.DataFrame, week_starts_on="MON", min_first_week_games=0):
         if week_starts_on not in WEEK_ANCHORS:
             raise ValueError(f"week_starts_on must be one of {sorted(WEEK_ANCHORS)}")
         self.schedule = schedule[["game_id", "game_date", "team_id"]].copy()
@@ -54,18 +54,23 @@ class Calendar:
         period = games["game_date"].dt.to_period(WEEK_ANCHORS[week_starts_on])
         counts = games.groupby(period)["game_id"].nunique().sort_index()
 
-        self.weeks = [Week(number=i, start=p.start_time.normalize(),
-                           end=p.end_time.normalize(), games=int(n))
-                      for i, (p, n) in enumerate(counts.items(), start=1)]
+        # A first week thinner than `min_first_week_games` is folded into the second, as a
+        # platform stretches week 1 over an early opener: 2024-25's first week holds one game
+        # (Prague), and a one-game matchup week is noise. Every other week is one period.
+        groups = [[period] for period in counts.index]
+        if len(groups) > 1 and counts.iloc[0] < min_first_week_games:
+            groups = [groups[0] + groups[1]] + groups[2:]
+        self.weeks = [Week(number=i, start=g[0].start_time.normalize(),
+                           end=g[-1].end_time.normalize(), games=int(sum(counts[p] for p in g)))
+                      for i, g in enumerate(groups, start=1)]
         self.days = sorted(games["game_date"].unique())
 
         # Team-games per week, the opportunity term every rung spends its attention on.
         team_period = self.schedule["game_date"].dt.to_period(WEEK_ANCHORS[week_starts_on])
         self._team_games = (self.schedule.assign(_p=team_period)
                             .groupby(["_p", "team_id"])["game_id"].nunique())
-        self._week_of_period = {week_period: week.number
-                                for week_period, week in zip(counts.index, self.weeks)}
-        self._period_of_week = {w.number: p for p, w in zip(counts.index, self.weeks)}
+        self._week_of_period = {period: i for i, g in enumerate(groups, start=1) for period in g}
+        self._periods_of_week = dict(enumerate(groups, start=1))
         self._memo = {}
         # The last matchup week that scores in the league being run (regular season plus playoffs).
         # A forward window stops here: an NHL game after the fantasy final is worth nothing. The
@@ -91,7 +96,10 @@ class Calendar:
 
     def team_games_in(self, week: int) -> pd.Series:
         """Games per team in a week -- unequal by design, and the point of section 15."""
-        return self._team_games.loc[self._period_of_week[week]]
+        periods = self._periods_of_week[week]
+        if len(periods) == 1:
+            return self._team_games.loc[periods[0]]
+        return pd.concat([self._team_games.loc[p] for p in periods]).groupby(level=0).sum()
 
     def games_remaining(self, team_id: int, day, week: int | None = None) -> int:
         """A team's games from `day` (inclusive) to the end of that matchup week.
@@ -190,7 +198,8 @@ class Calendar:
         }
 
 
-def from_candidates(candidates: pd.DataFrame, week_starts_on="MON") -> Calendar:
+def from_candidates(candidates: pd.DataFrame, week_starts_on="MON",
+                    min_first_week_games=0) -> Calendar:
     """Build the calendar from the projection candidate universe.
 
     The universe covers every team-game it has projections for, so the schedule comes out of it
@@ -199,7 +208,8 @@ def from_candidates(candidates: pd.DataFrame, week_starts_on="MON") -> Calendar:
     rows has no projections for anyone, so no manager in the field could act on it, and
     including it would let the rungs that ignore projections collect points the others cannot.
     """
-    return Calendar(candidates, week_starts_on=week_starts_on)
+    return Calendar(candidates, week_starts_on=week_starts_on,
+                    min_first_week_games=min_first_week_games)
 
 
 # Note on the module name: this file is `schedule.py` and not `calendar.py` because the folder

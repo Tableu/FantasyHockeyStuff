@@ -23,7 +23,8 @@
     "regular_season_weeks_by_season": {
       "2025-26": 21
     },
-    "week_starts_on": "MON"
+    "week_starts_on": "MON",
+    "min_first_week_games": 20
   },
   "draft": {
     "type": "snake",

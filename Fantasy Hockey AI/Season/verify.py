@@ -27,6 +27,10 @@ season-level result rather than as an error:
     claims          a waiver claim resolved early, awarded out of priority, or failing silently
     league rules    an unsupported league rule accepted, or a move cost charged wrongly
     no clobber      a scored projection build overwriting the deployment boosters in models/
+    first week      a one-game opening week scored as a matchup, or a normal one merged away
+    candidate       a tuning candidate that differs from the shipped system in more than the
+                    tuned parameters, or reaches seats that are not its own
+    tune guard      section 11 tuning on the final holdout
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
     python verify.py
@@ -133,7 +137,8 @@ def check_draws(day_limit=6) -> str:
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
-        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
 
     field = managers_module.build_field(config, scoreset, _strategy(), rungs=(4,))
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
@@ -215,7 +220,8 @@ def check_calendar() -> str:
     config = league_module.load()
     projections = inputs.load_projections(SEASON)
     calendar = schedule_module.from_candidates(
-        projections[["game_id", "game_date", "team_id"]], config.week_starts_on)
+        projections[["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
     summary = calendar.verify()
     assert summary["gaps"], "the mid-season break was not detected"
     return (f"{summary['games']} games in {summary['weeks']} weeks, "
@@ -231,7 +237,8 @@ def _small_season(rungs, strategy=None, sims=0):
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
-        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
     field = managers_module.build_field(config, scoreset, strategy or _strategy(), rungs=rungs)
     return engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                 decision_sims=sims), calendar
@@ -440,7 +447,8 @@ def check_frozen_rosters() -> str:
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
-        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
     field = managers_module.build_field(config, scoreset, _strategy(), rungs=(2, 5, 7))
     stuck, checked = [], [0]
     for manager in field:
@@ -871,7 +879,8 @@ def check_goalie_draws() -> str:
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
-        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
     season = engine_module.Season(config, calendar, data, eligibility, scoreset,
                                   managers_module.build_field(config, scoreset, _strategy(),
                                                               rungs=(4,)),
@@ -944,7 +953,8 @@ def check_week_draws() -> str:
                          ).drop_duplicates("player_id")
     eligibility = inputs.load_eligibility(config, universe)
     calendar = schedule_module.from_candidates(
-        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on)
+        data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
+        config.min_first_week_games)
     season = engine_module.Season(config, calendar, data, eligibility, scoreset,
                                   managers_module.build_field(config, scoreset, _strategy(),
                                                               rungs=(4,)),
@@ -1025,6 +1035,81 @@ def check_playoff_objective() -> str:
             f"eliminated 0; {len(out_of_it)} non-qualifiers made no playoff move under hold")
 
 
+def check_first_week() -> str:
+    """2024-25's one-game opening week (Prague) is merged into week 2; 2025-26's is untouched."""
+    config = league_module.load()
+    notes = []
+    for season, merged in (("2024-25", True), ("2025-26", False)):
+        games = inputs.load_actuals(season)[["game_id", "game_date", "team_id"]]
+        plain = schedule_module.from_candidates(games, config.week_starts_on, 0)
+        real = schedule_module.from_candidates(games, config.week_starts_on,
+                                               config.min_first_week_games)
+        assert (len(plain) - len(real)) == (1 if merged else 0), f"{season}: wrong merge"
+        first = real.weeks[0]
+        assert first.games >= config.min_first_week_games, f"{season}: week 1 has {first.games}"
+        assert real.week_of(real.days[0]) == 1 and real.week_of(plain.weeks[1].start) == (
+            1 if merged else 2), f"{season}: days map to the wrong week"
+        if merged:
+            both = plain.team_games_in(1).add(plain.team_games_in(2), fill_value=0)
+            assert real.team_games_in(1).sort_index().equals(both.sort_index().astype(int)), \
+                f"{season}: merged team-games are not the two weeks' sum"
+        notes.append(f"{season} week 1 {first.start.date()}..{first.end.date()} ({first.games} "
+                     f"games, {len(real)} weeks)")
+    return "; ".join(notes)
+
+
+def check_candidate() -> str:
+    """A tuning candidate runs only in its own seats, and may differ only in add/drop and
+    streaming -- a candidate with another goalie prior or draft setting is refused."""
+    from dataclasses import replace
+
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    shipped = _strategy()
+    candidate = replace(shipped, adddrop=replace(shipped.adddrop, margin=0.25))
+    rungs = (2, 5, 6, 17, managers_module.CANDIDATE)
+    for rep in range(3):
+        field = managers_module.build_field(config, scoreset, shipped, rungs=rungs,
+                                            replication=rep, candidate=candidate)
+        for m in field:
+            want = 0.25 if m.rung == managers_module.CANDIDATE else shipped.adddrop.margin
+            assert m.strategy.adddrop.margin == want, f"seat {m.team_index} (rung {m.rung})"
+            if m.rung == managers_module.CANDIDATE:
+                assert m.draft_board == "vor", "the candidate does not draft like rung 17"
+    for bad in (replace(candidate, goalie_start_share_prior=0.6),
+                replace(candidate, vor_values="own_model")):
+        try:
+            managers_module.build_field(config, scoreset, shipped, rungs=rungs, candidate=bad)
+        except ValueError:
+            continue
+        raise AssertionError("a candidate differing outside add/drop and streaming was seated")
+    try:
+        managers_module.build_field(config, scoreset, shipped, rungs=rungs)
+        raise AssertionError("a candidate seat with no candidate strategy was seated")
+    except ValueError:
+        pass
+    counts = collections_counter(m.rung for m in field)
+    return (f"candidate margin only in its {counts[managers_module.CANDIDATE]} seats over 3 "
+            f"rotations, drafting by VOR; other differences and a missing candidate refused")
+
+
+def collections_counter(items):
+    import collections
+    return collections.Counter(items)
+
+
+def check_tune_guard() -> str:
+    """`tune.py` refuses the final holdout unless asked for the final number."""
+    import subprocess
+
+    result = subprocess.run([sys.executable, str(Path(__file__).with_name("tune.py")),
+                             "--season", "2025-26", "--stage", "A"],
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode != 0 and "final holdout" in (result.stderr + result.stdout), \
+        f"tune.py accepted 2025-26: {result.returncode} {result.stderr[-200:]}"
+    return "tune.py --season 2025-26 refused without --final"
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -1078,6 +1163,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("goalie draws", check_goalie_draws), ("week draws", check_week_draws),
           ("playoff objective", check_playoff_objective),
           ("no clobber", check_no_clobber),
+          ("first week", check_first_week), ("candidate", check_candidate),
+          ("tune guard", check_tune_guard),
           ("modules", check_modules)]
 
 

@@ -127,12 +127,22 @@ class Season:
         self.eligibility = eligibility
         self.scoreset = scoreset
         self.field = field
-        # One strategy for the whole field: the naive goalie start share below is part of the
-        # view every seat shares, so its prior cannot differ by seat.
-        strategies = {m.strategy for m in field}
-        if len(strategies) != 1:
-            raise ValueError(f"the field carries {len(strategies)} different strategies")
-        self.strategy = field[0].strategy
+        # One strategy for the whole field, but for the blocks a tuning candidate may vary: the
+        # naive goalie start share below and the playoff behaviour are part of what every seat
+        # shares, so they cannot differ by seat. A seat's own add/drop and streaming parameters
+        # are its manager's business.
+        import dataclasses
+
+        from decisionlayer import managers as managers_module
+
+        base = field[0].strategy
+        shared = {dataclasses.replace(m.strategy, name=base.name, description=base.description,
+                                      **{k: getattr(base, k) for k in managers_module.TUNABLE})
+                  for m in field}
+        if len(shared) != 1:
+            raise ValueError(f"the field carries {len(shared)} different strategies outside "
+                             f"{managers_module.TUNABLE}")
+        self.strategy = base
         self.replication = replication
         self.log_every_week = log_every_week
         self.slot_order = config.slot_order()
