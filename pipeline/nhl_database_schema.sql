@@ -76,6 +76,9 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Lineups')
     EXEC('CREATE SCHEMA Lineups');
 GO
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = 'Live')
+    EXEC('CREATE SCHEMA Live');
+GO
 
 -- ============================================================================
 -- 1. Reference schema
@@ -1114,6 +1117,117 @@ CREATE TABLE Lineups.GameLineups
         REFERENCES Reference.Teams(TeamID),
     CONSTRAINT FK_GameLineups_Player FOREIGN KEY (PlayerID)
         REFERENCES Reference.Players(PlayerID)
+);
+GO
+
+-- ============================================================================
+-- 9b. Live schema
+-- ============================================================================
+
+-- Point-in-time snapshots of injury reports, line charts and starting-goalie reports, taken on a
+-- schedule during the season by snapshot_live.py (nhl_pipeline/ingest/live_snapshots.py). Change
+-- logs keyed to a poll: a row is written only when what a source says has changed, never
+-- overwritten. SourceID is Injuries.Sources (the registry the name-alias tables use).
+
+CREATE TABLE Live.SnapshotRuns
+(
+    SnapshotRunID   BIGINT IDENTITY(1,1) NOT NULL,
+    Kind            VARCHAR(20) NOT NULL,
+    SourceID        INT NOT NULL,
+    SnapshotAt      DATETIME2(0) NOT NULL,
+    RowsSeen        INT NULL,
+    RowsWritten     INT NULL,
+    Error           VARCHAR(1000) NULL,
+    CONSTRAINT PK_LiveSnapshotRuns PRIMARY KEY (SnapshotRunID),
+    CONSTRAINT FK_LSR_Source FOREIGN KEY (SourceID) REFERENCES Injuries.Sources(SourceID)
+);
+GO
+
+CREATE TABLE Live.InjuryStatus
+(
+    SnapshotRunID       BIGINT NOT NULL,
+    ExternalPlayerID    VARCHAR(50) NOT NULL,
+    RawPlayerName       VARCHAR(200) NOT NULL,
+    PlayerID            BIGINT NULL,
+    TeamID              INT NULL,
+    RawStatus           VARCHAR(50) NULL,
+    MappedStatus        VARCHAR(10) NOT NULL,
+    IREligible          BIT NULL,
+    ReturnDate          DATE NULL,
+    Detail              VARCHAR(1000) NULL,
+    CONSTRAINT PK_LiveInjuryStatus PRIMARY KEY (SnapshotRunID, ExternalPlayerID),
+    CONSTRAINT FK_LIS_Run FOREIGN KEY (SnapshotRunID) REFERENCES Live.SnapshotRuns(SnapshotRunID),
+    CONSTRAINT FK_LIS_Player FOREIGN KEY (PlayerID) REFERENCES Reference.Players(PlayerID),
+    CONSTRAINT FK_LIS_Team FOREIGN KEY (TeamID) REFERENCES Reference.Teams(TeamID)
+);
+GO
+
+CREATE TABLE Live.LineCharts
+(
+    LineChartID         BIGINT IDENTITY(1,1) NOT NULL,
+    SnapshotRunID       BIGINT NOT NULL,
+    TeamID              INT NOT NULL,
+    SourceLabel         VARCHAR(100) NULL,
+    SourceUpdatedAt     DATETIME2(3) NULL,
+    ContentHash         CHAR(64) NOT NULL,
+    CONSTRAINT PK_LiveLineCharts PRIMARY KEY (LineChartID),
+    CONSTRAINT FK_LLC_Run FOREIGN KEY (SnapshotRunID) REFERENCES Live.SnapshotRuns(SnapshotRunID),
+    CONSTRAINT FK_LLC_Team FOREIGN KEY (TeamID) REFERENCES Reference.Teams(TeamID)
+);
+GO
+
+CREATE TABLE Live.LineChartPlayers
+(
+    LineChartID         BIGINT NOT NULL,
+    ExternalPlayerID    VARCHAR(50) NOT NULL,
+    GroupIdentifier     VARCHAR(10) NOT NULL,
+    RawPlayerName       VARCHAR(200) NOT NULL,
+    PlayerID            BIGINT NULL,
+    Position            VARCHAR(5) NULL,
+    InjuryStatus        VARCHAR(20) NULL,
+    GameTimeDecision    BIT NOT NULL,
+    CONSTRAINT PK_LiveLineChartPlayers PRIMARY KEY (LineChartID, ExternalPlayerID, GroupIdentifier),
+    CONSTRAINT FK_LLCP_Chart FOREIGN KEY (LineChartID) REFERENCES Live.LineCharts(LineChartID),
+    CONSTRAINT FK_LLCP_Player FOREIGN KEY (PlayerID) REFERENCES Reference.Players(PlayerID)
+);
+GO
+
+-- The three sources' reports merged into one status per player (latest change wins among the
+-- sources that list him; GTD from his team's latest chart; IR eligibility from Fleaflicker).
+CREATE TABLE Live.PlayerStatus
+(
+    PlayerStatusID      BIGINT IDENTITY(1,1) NOT NULL,
+    ChangedAt           DATETIME2(0) NOT NULL,
+    PlayerID            BIGINT NOT NULL,
+    TeamID              INT NULL,
+    Status              VARCHAR(10) NOT NULL,
+    GameTimeDecision    BIT NOT NULL,
+    IREligible          BIT NOT NULL,
+    Sources             VARCHAR(300) NULL,
+    CONSTRAINT PK_LivePlayerStatus PRIMARY KEY (PlayerStatusID),
+    CONSTRAINT FK_LPS_Player FOREIGN KEY (PlayerID) REFERENCES Reference.Players(PlayerID),
+    CONSTRAINT FK_LPS_Team FOREIGN KEY (TeamID) REFERENCES Reference.Teams(TeamID)
+);
+GO
+
+CREATE TABLE Live.GoalieReports
+(
+    SnapshotRunID       BIGINT NOT NULL,
+    GameDate            DATE NOT NULL,
+    TeamID              INT NOT NULL,
+    NHLGameID           INT NULL,
+    PuckUTC             DATETIME2(0) NULL,
+    ExternalPlayerID    VARCHAR(50) NULL,
+    RawPlayerName       VARCHAR(200) NULL,
+    PlayerID            BIGINT NULL,
+    Strength            VARCHAR(30) NULL,
+    NewsCreatedAt       DATETIME2(3) NULL,
+    NewsSourceName      VARCHAR(200) NULL,
+    NewsSourceUrl       VARCHAR(500) NULL,
+    CONSTRAINT PK_LiveGoalieReports PRIMARY KEY (SnapshotRunID, GameDate, TeamID),
+    CONSTRAINT FK_LGR_Run FOREIGN KEY (SnapshotRunID) REFERENCES Live.SnapshotRuns(SnapshotRunID),
+    CONSTRAINT FK_LGR_Team FOREIGN KEY (TeamID) REFERENCES Reference.Teams(TeamID),
+    CONSTRAINT FK_LGR_Player FOREIGN KEY (PlayerID) REFERENCES Reference.Players(PlayerID)
 );
 GO
 

@@ -30,6 +30,7 @@ from datetime import date, datetime, timedelta
 from nhl_pipeline import config, db
 from nhl_pipeline.api import field_map
 from nhl_pipeline.api import play_by_play as api_play_by_play
+from nhl_pipeline.ingest import live_spells
 from nhl_pipeline.ingest import official_stats
 from nhl_pipeline.ingest import player_bio
 from nhl_pipeline.ingest import schedule as ingest_schedule
@@ -205,6 +206,15 @@ def main():
     except Exception:
         conn.rollback()
         log.exception("  FAILED player bio fetch -- continuing")
+
+    # The live season's injury spells, from the day's reports and who dressed (snapshot_live.py
+    # fills the Live schema). Derived and rebuilt whole, so it only logs on failure.
+    try:
+        live_spells.rebuild(cursor, season_id)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        log.exception("  FAILED live injury spells -- continuing")
 
     log.info("Done: %d game(s) processed, %d failure(s)", len(games_to_run), failures)
     sys.exit(1 if failures else 0)

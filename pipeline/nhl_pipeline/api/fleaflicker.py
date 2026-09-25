@@ -40,3 +40,27 @@ def get_players(league_id: int) -> list:
             break
         offset = following if following is not None else offset + _PAGE_SIZE
     return players
+
+
+def injuries(players: list) -> list:
+    """The listing's injured players, from `get_players`. Verified 2026-09-25 on league 12090
+    (1,320 players, 39 flagged): `proPlayer.injury` = {typeAbbreviaition (sic, Fleaflicker's
+    spelling), typeFull, severity, description}; types seen OUT and IR, severity OUT for both.
+    IR is the league's own designation, i.e. the one that makes a player IR-slot eligible."""
+    rows = []
+    for entry in players:
+        pro = entry["proPlayer"]
+        injury = pro.get("injury")
+        if not injury:
+            continue
+        rows.append({
+            "external_id": str(pro["id"]),
+            "name": pro["nameFull"],
+            "position": pro.get("position"),
+            "team_abbreviation": pro.get("proTeamAbbreviation"),
+            "type": injury.get("typeAbbreviaition") or injury.get("typeAbbreviation"),
+            "type_full": injury.get("typeFull"),
+            "severity": injury.get("severity"),
+            "description": injury.get("description"),
+        })
+    return rows

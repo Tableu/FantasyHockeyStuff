@@ -3,3 +3,4 @@ databaseCredentials.txt
 ProjectionSheets/
 __pycache__/
 *.pyc
+logs/
