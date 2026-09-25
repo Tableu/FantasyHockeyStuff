@@ -284,6 +284,20 @@ def consensus_board(external: pd.DataFrame, prior_board: pd.Series, scoreset,
     return board.sort_values(ascending=False)
 
 
+def source_board(external: pd.DataFrame, sources, prior_board: pd.Series, scoreset) -> pd.Series:
+    """A simulated leaguemate's values: the consensus of just the sources he reads.
+
+    The same per-stat mean as our board, over `sources` only, with no minimum -- he trusts what he
+    reads. A player none of them covers keeps last season's total, and so does every goalie when
+    his sources are skater-only (Laidlaw, Kubota, Bangers, Apples & Ginos): what a reader of those
+    rankings would fall back on.
+    """
+    chosen = external[external["source"].isin(list(sources))]
+    if chosen.empty:
+        raise ValueError(f"no projections from {sorted(sources)}")
+    return consensus_board(chosen, prior_board, scoreset, min_sources=1)
+
+
 def fit_position_scale(values: pd.Series, actual: pd.Series, sides, pool: dict) -> dict:
     """Per position, actual points over board points across each position's top `pool[side]`
     by the board: the factor that makes a position's board total match what it produced.

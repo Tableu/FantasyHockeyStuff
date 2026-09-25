@@ -20,6 +20,7 @@ import sys
 import pandas as pd
 
 import engine as engine_module
+import field as field_module
 import inputs
 import league as league_module
 import paths
@@ -83,6 +84,12 @@ def parse_args():
                         help="Playoffs: weight later rounds by P(reaching them), or count them flat")
     parser.add_argument("--z-source", choices=("closed_form", "sampled"), default=None,
                         help="Rung 4+: the matchup z from closed-form moments or sampled week totals")
+    parser.add_argument("--field", default=None,
+                        help="Opponent settings: a name in Settings/, or a path (default field.json)")
+    parser.add_argument("--opponent-board", choices=field_module.BOARDS, default=None,
+                        help="How non-VOR seats draft (field opponent_board)")
+    parser.add_argument("--opponent-sources", default=None,
+                        help="Sources each opponent reads, e.g. 2 or 1-3 (field sources_per_opponent)")
     parser.add_argument("--vor-values", choices=("own_model", "consensus"), default=None,
                         help="What the VOR board values players on (strategy draft.vor_values)")
     parser.add_argument("--workers", type=int, default=None,
@@ -169,9 +176,17 @@ def team_openers(data) -> dict:
 
 
 def vor_board(data, prior_season_name, scoreset, config, eligibility, strategy):
-    """Section 9 step 2's draft board: value over replacement, from what is knowable on draft day.
+    """Section 9 step 2's draft board: value over replacement on `board_values`, with each
+    position's replacement fixed before the draft."""
+    values = board_values(data, prior_season_name, scoreset, strategy)
+    return draft_module.vor_board(values[[p in eligibility for p in values.index]], config,
+                                  eligibility)
 
-    The values follow strategy draft.vor_values: `consensus`, the external sources alone, read
+
+def board_values(data, prior_season_name, scoreset, strategy):
+    """The season values our VOR draft is built on, from what is knowable on draft day.
+
+    They follow strategy draft.vor_values: `consensus`, the external sources alone, read
     through `inputs.load_external_projections` and so only if published before the opener; or
     `own_model`, our opening-week rest-of-season rows, a backtest reference only.
     """
@@ -191,8 +206,38 @@ def vor_board(data, prior_season_name, scoreset, config, eligibility, strategy):
             "own_model", scoreset, board, ros=data["ros"],
             prior_goalie_lines=inputs.load_goalie_starts(prior_season_name),
             opening_days=strategy.opening_days, team_openers=team_openers(data))
-    return draft_module.vor_board(values[[p in eligibility for p in values.index]], config,
-                                  eligibility)
+    return values
+
+
+# A simulated leaguemate's board, per (season, scoring, format, sources). Subsets repeat across
+# seats and replications, and building one runs a league draft for its replacement levels.
+_OPPONENT_BOARDS = {}
+
+
+def prepare_field(data, field_config, strategy) -> None:
+    """Put the opponents' settings, and the sources they read, where every worker finds them."""
+    data["field"] = field_config
+    if field_config.opponent_board == "source_subsets" and "external" not in data:
+        opener = data["projections"]["game_date"].min()
+        data["external"] = inputs.load_external_projections(data["season"], opener,
+                                                            strategy.undated_sources)
+
+
+def opponent_board(data, scoreset, config, eligibility, replication, seat) -> pd.Series:
+    """The VOR board of the leaguemate in `seat`: the consensus of the 1-3 sources he reads."""
+    external = data["external"]
+    sources = field_module.draw_sources(external["source"].unique(),
+                                        data["field"].sources_per_opponent, replication, seat)
+    key = (data["season"], scoreset.name, config.name, sources)
+    board = _OPPONENT_BOARDS.get(key)
+    if board is None:
+        last = data["prior"][scoreset.name][0]
+        last.index = last.index.astype(int)
+        values = draft_module.source_board(external, sources, last, scoreset)
+        board = draft_module.vor_board(values[[p in eligibility for p in values.index]], config,
+                                       eligibility)
+        _OPPONENT_BOARDS[key] = board
+    return board
 
 
 def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, verbose_weeks,
@@ -215,11 +260,23 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
     boards = {m.team_index: vor for m in field if m.draft_board == "vor"}
     if boards and vor is None:
         raise SystemExit("a VOR-drafting rung is seated but no VOR board was built")
+    ours = set(boards)                         # the VOR-drafting seats: our draft policy
+    starters_first = ours if strategy.fill_starters_first else set()
+    caps = ({seat: strategy.draft_max_goalies for seat in ours}
+            if strategy.draft_max_goalies is not None else {})
+    fielded = data.get("field")
+    if fielded is not None and fielded.opponent_board == "source_subsets":
+        for m in field:
+            if m.draft_board != "vor":
+                boards[m.team_index] = opponent_board(data, scoreset, config, eligibility,
+                                                      replication, m.team_index)
+                caps[m.team_index] = fielded.max_goalies
     return season.run({int(k): float(v) for k, v in board.items()},
                       {int(k): float(v) for k, v in rate.items()},
                       {int(k): float(v) for k, v in forward.items()},
                       boards={s: {int(k): float(v) for k, v in b.items()}
-                              for s, b in boards.items()})
+                              for s, b in boards.items()},
+                      goalie_caps=caps or None, starters_first=starters_first)
 
 
 # One replication per task, in a pool of processes. Each worker receives the season's inputs once,
@@ -331,9 +388,13 @@ def main():
     strategy = load_strategy(args)
     params, streams = strategy.adddrop, strategy.streaming
     log.info("strategy: %s", strategy.name)
+    field_config = field_module.with_overrides(field_module.load(args.field), args.opponent_board,
+                                               args.opponent_sources)
+    prepare_field(data, field_config, strategy)
+    log.info("field: %s", field_config.describe())
     report = {"season": args.season, "league": config.name, "strategy": strategy.name,
               "rungs": list(rungs), "replications": args.replications, "results": {},
-              "vor_values": strategy.vor_values}
+              "vor_values": strategy.vor_values, "field": field_config.describe()}
     if 5 in rungs:
         report["adddrop"] = params.describe()
         log.info("rung 5 add/drop: %s", params.describe())

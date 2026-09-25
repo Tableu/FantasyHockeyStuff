@@ -41,6 +41,8 @@
   "draft": {
     "vor_values": "consensus",
     "min_sources": 3,
-    "undated_sources": "include"
+    "undated_sources": "include",
+    "fill_starters_first": false,
+    "max_goalies": null
   }
 }

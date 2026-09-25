@@ -48,6 +48,7 @@ import numpy as np
 import pandas as pd
 
 import engine as engine_module
+import field as field_module
 import headroom
 import inputs
 import ladder
@@ -116,6 +117,9 @@ def main():
     p.add_argument("--workers", type=int, default=None,
                    help="Processes (default: ladder.default_workers)")
     p.add_argument("--which", default="draft,transactions,availability")
+    p.add_argument("--opponent-board", choices=field_module.BOARDS, default=None)
+    p.add_argument("--opponent-sources", default=None)
+    p.add_argument("--tag", default=None, help="Suffix for the output doc")
     args = p.parse_args()
     which = set(args.which.split(","))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s",
@@ -126,8 +130,10 @@ def main():
         raise SystemExit(f"{tune.FINAL_SEASON} is the final holdout; measure ceilings on another season")
 
     shipped = load_strategy(None)
+    fielded = field_module.with_overrides(field_module.load(), args.opponent_board,
+                                          args.opponent_sources)
     ctx = tune.Context(args.season, args.prior_season or tune.previous(args.season), args.league,
-                       args.weights, shipped, args.workers)
+                       args.weights, shipped, args.workers, field_config=fielded)
     base = ctx.base(args.replications)
     results = {}
 
@@ -297,7 +303,8 @@ def write(args, ctx, base, results):
         lines += ["", "With the feed, every seat gains (the view is shared): rungs 2 / 5 / 6 "
                   + " / ".join(f"{o[r][0]:+.1f} ± {o[r][1]:.1f}" for r in (2, 5, 6))
                   + " points a week."]
-    out = paths.ensure(paths.DOCS_DIR) / f"ceilings-{args.season}-{'-'.join(sorted(results))}.md"
+    tag = f"-{args.tag}" if args.tag else ""
+    out = paths.ensure(paths.DOCS_DIR) / f"ceilings-{args.season}-{'-'.join(sorted(results))}{tag}.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines[2:]))
     print(f"-> {out}")

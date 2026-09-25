@@ -54,6 +54,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+import field as field_module
 import inputs
 import ladder
 import league as league_module
@@ -147,7 +148,8 @@ def code_hash() -> str:
 class Context:
     """Everything a run needs, loaded once per season and format."""
 
-    def __init__(self, season, prior_season, league_name, scoring, strategy, workers):
+    def __init__(self, season, prior_season, league_name, scoring, strategy, workers,
+                 field_config=None):
         self.season, self.league_name, self.scoring = season, league_name, scoring
         self.shipped = strategy
         self.config = league_module.load(league_name)
@@ -165,6 +167,8 @@ class Context:
                                                                       self.scoreset, strategy)}
         self.data["vor"] = {self.scoreset.name: ladder.vor_board(
             self.data, prior_season, self.scoreset, self.config, self.eligibility, strategy)}
+        self.field = field_config or field_module.load()
+        ladder.prepare_field(self.data, self.field, strategy)
         self.workers = workers
         self.code = code_hash()
         self.cache = paths.ensure(paths.REPORTS_DIR / "tune")
@@ -172,6 +176,7 @@ class Context:
     def key(self, candidate, replications) -> str:
         payload = {"params": params_of(candidate), "season": self.season,
                    "league": self.league_name, "scoring": self.scoring,
+                   "field": self.field.describe(),
                    "replications": replications, "code": self.code}
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 

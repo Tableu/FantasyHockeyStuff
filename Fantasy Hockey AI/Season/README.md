@@ -430,6 +430,33 @@ The same work found one eligibility collision: Carolina's Sebastian Aho was list
 name with the Islanders' defenceman, which put him third on the VOR board. Forward/defence mixes are
 now rejected like skater/goalie ones (`inputs._side`).
 
+### Against a realistic room
+
+Every non-VOR seat used to draft from last season's totals, a naive autodraft, so the numbers above
+are against naive drafters. Since 2026-09-24 opponents draft by value over replacement on the
+consensus of 1-3 of the season's sources each, at most 4 goalies (`Settings/field.json`,
+`field.py`). On 2024-25, 14-team points, 8 drafts:
+
+| opponents draft by | our board over theirs (17 - 7) | perfect board over ours |
+|---|---|---|
+| last season's totals | **+6.2 ± 1.4** | +2.6 ± 1.7 |
+| 1 source each | +1.8 ± 3.1 | +2.7 ± 1.9 |
+| 3 sources each | -0.4 ± 1.8 | **+4.2 ± 1.1** |
+| 1-3 sources each (the default) | +3.4 ± 2.7 | +5.7 ± 2.8 |
+
+Most of the old VOR edge was naive opponents. Against a room reading the same rankers, averaging all
+of them is worth a few points a week at most, and the draft has more headroom than it did. Our
+static board waits on goalies in this room -- to about round 17, because its replacement levels
+assume a league drafting like us -- and the orchestrator streams the weak pair it ends with.
+
+None of seven draft refinements beat the static board, seat-paired on 2024-25 in all four formats
+(`docs/ladder-league_field-*-2024-25.md`, `docs/ceilings-2024-25-draft-*.md` for the room itself):
+a replacement level re-read at every pick from the room's pace (it hoarded goalies until given
+roster rules: -3.1 / +1.2 / +0.4 / -1.5 with them), fill-starters-first with a goalie cap (+0.2 /
++2.6 / +0.6 / -1.0), a replacement weight below 1 (flat to -4.4) and bench weights (best +1.3 ±
+1.0 pooled). The dynamic level and the two weights were removed; fill-starters-first and the cap
+stay as settings, off.
+
 ## Section 11: tuning on 2024-25
 
 `tune.py` searches the shipped manager's add/drop and streaming values on **2024-25**, so 2025-26

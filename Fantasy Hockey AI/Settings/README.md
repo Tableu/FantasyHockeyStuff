@@ -8,9 +8,11 @@ has, or how far ahead a manager looks -- they all read from here.
 scoring/        what each stat is worth                 read by Projections, Simulation, Season  (--weights)
 rosters/        slots, rules, schedule, draft, playoffs read by Season                           (--league)
 strategy.json   how the managers decide                 read by Season, handed to Decisions      (--strategy)
+field.json      how the simulated opponents draft       read by Season                           (--field)
 ```
 
-The first two are what the league imposes; `strategy.json` is what a manager chooses.
+The first two are what the league imposes; `strategy.json` is what a manager chooses; `field.json`
+is what the backtest assumes about everyone else.
 
 To set up your league, copy the closest file in each folder, edit it, and pass its name:
 
@@ -153,6 +155,8 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | `draft` | `vor_values` | `consensus` | what the VOR draft board values players on: `consensus`, the external sources' preseason projections alone (the only values a real draft has), or `own_model`, our opening-week rest-of-season rows (a backtest reference; they need the season's own games) |
 | | `min_sources` | 3 | sources a player needs for the consensus; below it he keeps last season's total, or his thin consensus if he has none |
 | | `undated_sources` | `include` | a source with no publish date (Dom's 2025-26 sheet; every 2026-27 file today) is used, or dropped with `exclude`; logged either way |
+| | `fill_starters_first` | false | while our roster cannot fill every starting slot, a player who would fill one ranks ahead of one who would not |
+| | `max_goalies` | null | our seats never draft more goalies than this (null: no cap) |
 
 ### Where the values come from
 
@@ -178,8 +182,39 @@ was not touched.
   `Season/README.md`): it ranks value over replacement better than our model or last season in
   every format and scoring, and drafting by it beats the last-season board with the orchestrator
   in all four. Our model's rows cannot be built before a real season, so it is not a live option.
+- **`draft.fill_starters_first` and `max_goalies` are off** (2026-09-24): with each other and with a
+  draft-time replacement level (since removed), seat-paired on 2024-25 against the realistic field,
+  none cleared the noise in any format (the combination: +0.2 / +2.6 / +0.6 / -1.0 points a week).
+  So are a replacement weight and a bench weight, tried and removed.
 - **`goalie_start_share_prior`**: deliberately not "who started last game", which has an AUC of
   0.520 over all candidates.
 
 The goalie prior is shared by every seat, because the naive P(start) is part of the view the
 engine builds for all of them, so a field must carry one strategy. The engine checks this.
+
+## field.json
+
+What the backtest assumes about the other managers in the league -- not a rule of the league and
+not our strategy, so kept apart from both. Read by `Season/field.py`; like every file here, every
+key is required.
+
+| key | value | meaning |
+|---|---|---|
+| `opponent_board` | `source_subsets` | how every seat that is not ours drafts: `source_subsets` (below), or `last_season`, the old naive autodraft from last season's fantasy totals, which reproduces every earlier result exactly |
+| `sources_per_opponent` | [1, 3] | each opponent seat reads between this many of the season's external projection sources, drawn equally, seeded by (replication, seat) so paired runs face the same room |
+| `opponent_max_goalies` | 4 | an opponent never drafts more goalies than this |
+
+**An opponent's board** is the consensus of just the sources it reads (the same per-stat mean as
+ours, a stat a source omits skipped, one source enough), scored with the league's file, then value
+over replacement against a league drafting by those values -- fixed before the draft, as ours is. A
+player none of its sources covers keeps last season's total; so does every goalie for a reader of
+skater-only sources. ADP is deliberately not used: it is built for standard formats, and this
+league's hits and blocks make its values different.
+
+**Why:** a real leaguemate reads one to three rankers, not every source, and the room agrees on the
+stars and disagrees deeper -- an opponent's rank differs from ours by a median 1 spot in our top 20,
+7 in 21-100 and 17 in 101-200. The goalie cap is there because without it a reader of one
+goalie-rich source was handed goalies by the rest of the room (4-5 in 6 picks). Against this room
+our consensus board's edge falls from +6.2 to +3.4 +/- 2.7 points a week, and a perfect board is
+worth +5.7 +/- 2.8 instead of +2.6 (`Season/README.md`, section 9 step 2).
+

@@ -31,6 +31,10 @@ season-level result rather than as an error:
     candidate       a tuning candidate that differs from the shipped system in more than the
                     tuned parameters, or reaches seats that are not its own
     tune guard      section 11 tuning on the final holdout
+    opponents       a simulated leaguemate whose board is not his sources' consensus, whose draw
+                    differs between paired runs, or who drafts past his goalie cap
+    our draft rules starters-first leaving a starting slot uncovered after as many picks as there
+                    are slots, or our goalie cap exceeded
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
 
     python verify.py
@@ -1110,6 +1114,126 @@ def check_tune_guard() -> str:
     return "tune.py --season 2025-26 refused without --final"
 
 
+def check_opponents() -> str:
+    """Opponent boards (`field.py`, source subsets): seeded by (replication, seat) alone, exactly
+    their sources' consensus, last season for goalies when the sources are skater-only; our seats
+    keep the full board; and a draft respects the opponents' goalie cap."""
+    import draftroom
+    import field as field_module
+    import ladder
+
+    from decisionlayer import draft as draft_module
+
+    season = "2024-25"
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    strategy = _strategy()
+    data = inputs.load_season(season)
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    data["prior"] = {scoreset.name: ladder.prior_season("2023-24", scoreset, strategy)}
+    fielded = field_module.with_overrides(field_module.load(), "source_subsets")
+    ladder.prepare_field(data, fielded, strategy)
+    external = data["external"]
+    names = external["source"].unique()
+
+    # Seeded by (replication, seat) alone: the same draw every time, different across seats.
+    draws = {(r, s): field_module.draw_sources(names, fielded.sources_per_opponent, r, s)
+             for r in range(3) for s in range(config.teams)}
+    again = {(r, s): field_module.draw_sources(list(reversed(names)), fielded.sources_per_opponent,
+                                               r, s) for r in range(3) for s in range(config.teams)}
+    assert draws == again, "an opponent's sources depend on more than (replication, seat)"
+    assert len(set(draws.values())) > config.teams, "opponents all read the same sources"
+    assert all(1 <= len(d) <= 3 for d in draws.values()), "a draw outside 1-3 sources"
+
+    # A board is its sources' consensus; a skater-only reader keeps last season for goalies.
+    last = data["prior"][scoreset.name][0]
+    last.index = last.index.astype(int)
+    subset = ("Scott Cullen", "Steve Laidlaw")
+    values = draft_module.source_board(external, subset, last, scoreset)
+    lines = draft_module.consensus_values(external[external["source"].isin(subset)], scoreset)
+    covered = lines.set_index("player_id")["value"]
+    assert (values[covered.index] == covered).all(), "a board is not its sources' consensus"
+    skater_only = draft_module.source_board(external, ("Steve Laidlaw",), last, scoreset)
+    goalies = [p for p in last.index if "G" in eligibility.get(p, ())]
+    assert (skater_only[goalies] == last[goalies]).all(), "a skater-only reader priced goalies"
+
+    # A draft: our seats on the full board, opponents on theirs and within the goalie cap.
+    rungs = (2, 5, 6, 17)
+    seated = managers_module.build_field(config, scoreset, strategy, rungs=rungs, replication=0)
+    ours = ladder.vor_board(data, "2023-24", scoreset, config, eligibility, strategy)
+    boards, caps = {}, {}
+    for m in seated:
+        if m.draft_board == "vor":
+            boards[m.team_index] = ours
+        else:
+            boards[m.team_index] = ladder.opponent_board(data, scoreset, config, eligibility, 0,
+                                                         m.team_index)
+            caps[m.team_index] = fielded.max_goalies
+    state = state_module.LeagueState(config, sorted(eligibility), eligibility)
+    draftroom.run(state, config, last, eligibility, replication=0, boards=boards,
+                  block=len(rungs), goalie_caps=caps)
+    most = max(sum("G" in eligibility.get(p, ()) for p in state.teams[s].roster) for s in caps)
+    assert most <= fielded.max_goalies, f"an opponent drafted {most} goalies"
+    return (f"{len(set(draws.values()))} distinct source draws over 3 drafts, reproducible; boards "
+            f"are their sources' consensus; skater-only readers keep last season for goalies; "
+            f"opponents drafted at most {most} goalies (cap {fielded.max_goalies})")
+
+
+def check_our_draft_rules() -> str:
+    """With fill-starters-first our first `active` picks form a full legal lineup, and our seats
+    never pass their goalie cap, drafting against the realistic field."""
+    import draftroom
+    import field as field_module
+    import ladder
+
+    from decisionlayer import slots as slots_module
+
+    season = "2024-25"
+    config = league_module.load()
+    scoreset = simlayer.load_scoreset("points-league")
+    strategy = _strategy()
+    data = inputs.load_season(season)
+    universe = pd.concat([data["projections"][["player_id", "position"]],
+                          data["goalie_candidates"][["player_id", "position"]]]
+                         ).drop_duplicates("player_id")
+    eligibility = inputs.load_eligibility(config, universe)
+    data["prior"] = {scoreset.name: ladder.prior_season("2023-24", scoreset, strategy)}
+    fielded = field_module.with_overrides(field_module.load(), "source_subsets")
+    ladder.prepare_field(data, fielded, strategy)
+    board = ladder.vor_board(data, "2023-24", scoreset, config, eligibility, strategy)
+    cap, worst_goalies, checked = 4, 0, 0
+    for replication in range(3):
+        seated = managers_module.build_field(config, scoreset, strategy, rungs=(2, 5, 6, 17),
+                                            replication=replication)
+        ours = {m.team_index for m in seated if m.draft_board == "vor"}
+        boards, caps = {seat: board for seat in ours}, {seat: cap for seat in ours}
+        for m in seated:
+            if m.team_index not in ours:
+                boards[m.team_index] = ladder.opponent_board(data, scoreset, config, eligibility,
+                                                             replication, m.team_index)
+                caps[m.team_index] = fielded.max_goalies
+        state = state_module.LeagueState(config, sorted(eligibility), eligibility)
+        draftroom.run(state, config, data["prior"][scoreset.name][0], eligibility,
+                      replication=replication, boards=boards, block=4, goalie_caps=caps,
+                      starters_first=ours)
+        for seat in ours:
+            roster = state.teams[seat].roster
+            first = roster[:config.active]
+            filled = slots_module.matching_size(first, config.slot_order(), eligibility,
+                                                config.accepts)
+            assert filled == config.active, (f"seat {seat}: its first {config.active} picks fill "
+                                             f"only {filled} starting slots")
+            goalies = sum("G" in eligibility.get(p, ()) for p in roster)
+            assert goalies <= cap, f"seat {seat} drafted {goalies} goalies (cap {cap})"
+            worst_goalies = max(worst_goalies, goalies)
+            checked += 1
+    return (f"{checked} of our rosters over 3 drafts: the first {config.active} picks fill all "
+            f"{config.active} starting slots; at most {worst_goalies} goalies (cap {cap})")
+
+
 def check_no_clobber() -> str:
     """A scored build aimed elsewhere leaves every file under Projections/models/ untouched.
 
@@ -1164,7 +1288,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("playoff objective", check_playoff_objective),
           ("no clobber", check_no_clobber),
           ("first week", check_first_week), ("candidate", check_candidate),
-          ("tune guard", check_tune_guard),
+          ("tune guard", check_tune_guard), ("opponents", check_opponents),
+          ("our draft rules", check_our_draft_rules),
           ("modules", check_modules)]
 
 

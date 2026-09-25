@@ -47,6 +47,8 @@ LEAGUE_CONFIG = ROSTERS_DIR / "league.json"
 # against scoring/ and rosters/, what the league imposes. A --strategy name is looked up here.
 STRATEGY_DIR = SETTINGS_DIR
 STRATEGY_CONFIG = STRATEGY_DIR / "strategy.json"
+# The simulated opponents: how the managers who are not ours draft (field.py).
+FIELD_CONFIG = SETTINGS_DIR / "field.json"
 
 # The Monte Carlo layer's two fitted files, read by `simlayer.py` so that nothing here has to
 # import Simulation's own `paths` module -- which it cannot, because this one shadows it.
@@ -148,6 +150,11 @@ def scoreset(name: str) -> Path:
 def strategy_config(name: str) -> Path:
     path = Path(name)
     return path if path.exists() else STRATEGY_DIR / f"{path.stem}.json"
+
+
+def field_config(name: str) -> Path:
+    path = Path(name)
+    return path if path.exists() else SETTINGS_DIR / f"{path.stem}.json"
 
 
 def league_config(name: str) -> Path:

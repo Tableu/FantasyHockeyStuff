@@ -1,0 +1,9 @@
+{
+  "description": "How the simulated opponents behave -- assumptions about the other managers, not our strategy (strategy.json) and not the league's rules (rosters/). Read by Season (field.py). opponent_board: 'last_season' drafts every non-VOR seat from last season's fantasy totals (a naive autodraft); 'source_subsets' gives each such seat its own board, the consensus of a random 1-3 of the season's external projection sources, drafted by value over replacement. opponent_max_goalies: an opponent never drafts more goalies than this -- a leaguemate knows a goalie past his starters is a bench player, and without a cap one who rates goalies above the room kept being handed them (4-5 in 6 picks).",
+  "opponent_board": "source_subsets",
+  "sources_per_opponent": [
+    1,
+    3
+  ],
+  "opponent_max_goalies": 4
+}
