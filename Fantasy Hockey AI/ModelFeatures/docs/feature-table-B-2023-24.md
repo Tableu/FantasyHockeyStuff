@@ -450,24 +450,24 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `target_shp` | 76.7% | Target: his actual shp in this game. |
 | `target_ixg` | 76.7% | Target: his actual ixg in this game. |
 | `target_played` | 100.0% | Target: did he take a shift in this game. |
-| `mate1_points_p60_l20` | 50.0% | That line-mate's own points p60 l20. |
-| `mate1_ixg_all_p60_l20` | 50.0% | That line-mate's own ixg all p60 l20. |
-| `mate1_shots_p60_l20` | 50.0% | That line-mate's own shots p60 l20. |
+| `mate1_points_p60_l20` | 49.9% | That line-mate's own points p60 l20. |
+| `mate1_ixg_all_p60_l20` | 49.9% | That line-mate's own ixg all p60 l20. |
+| `mate1_shots_p60_l20` | 49.9% | That line-mate's own shots p60 l20. |
 | `mate2_points_p60_l20` | 48.2% | That line-mate's own points p60 l20. |
 | `mate2_ixg_all_p60_l20` | 48.2% | That line-mate's own ixg all p60 l20. |
 | `mate2_shots_p60_l20` | 48.2% | That line-mate's own shots p60 l20. |
-| `partner_blocks_p60_l20` | 24.8% | The defence partner's own blocks p60 l20. |
-| `partner_points_p60_l20` | 24.8% | The defence partner's own points p60 l20. |
+| `partner_blocks_p60_l20` | 24.7% | The defence partner's own blocks p60 l20. |
+| `partner_points_p60_l20` | 24.7% | The defence partner's own points p60 l20. |
 | `linemates_points_p60_l20` | 50.2% | Mean of both line-mates' points p60 l20. |
 | `linemates_ixg_all_p60_l20` | 50.2% | Mean of both line-mates' ixg all p60 l20. |
 | `linemates_shots_p60_l20` | 50.2% | Mean of both line-mates' shots p60 l20. |
 | `opp_goalie_player_id` | 99.8% | The goalie the candidate is expected to face. |
-| `goalie_sv_pct_l10` | 89.0% | That goalie's save percentage over the previous 10 games played, entering this game. |
-| `goalie_gsax_per_shot_l10` | 89.0% | His goals saved above expected per shot over the previous 10 games played. |
-| `goalie_gp_l10` | 89.0% | Games he had played in the previous 10 games played. |
-| `goalie_sv_pct_std` | 89.0% | That goalie's save percentage over the season to date, entering this game. |
-| `goalie_gsax_per_shot_std` | 89.0% | His goals saved above expected per shot over the season to date. |
-| `goalie_gp_std` | 89.0% | Games he had played in the season to date. |
+| `goalie_sv_pct_l10` | 97.6% | That goalie's save percentage over the previous 10 games played, entering this game. |
+| `goalie_gsax_per_shot_l10` | 97.6% | His goals saved above expected per shot over the previous 10 games played. |
+| `goalie_gp_l10` | 97.6% | Games he had played in the previous 10 games played. |
+| `goalie_sv_pct_std` | 97.6% | That goalie's save percentage over the season to date, entering this game. |
+| `goalie_gsax_per_shot_std` | 97.6% | His goals saved above expected per shot over the season to date. |
+| `goalie_gp_std` | 97.6% | Games he had played in the season to date. |
 | `line_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |
 | `pair_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |
 | `pp_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |

@@ -66,7 +66,9 @@ def load_team_games(cursor, season_ids: list) -> dict:
         FROM Lineups.GameLineups l
         JOIN Game.Games g ON g.GameID = l.GameID
         WHERE g.SeasonID IN ({placeholders})
-        ORDER BY l.TeamID, g.GameDate, g.NHLGameID
+        -- PlayerID too: the order a game's players come back in is the order perturb() draws for
+        -- them, and without it a variant-B build was not reproducible (8% of rows differed).
+        ORDER BY l.TeamID, g.GameDate, g.NHLGameID, l.PlayerID
         """,
         *season_ids,
     )

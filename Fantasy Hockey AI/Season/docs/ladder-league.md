@@ -7,30 +7,19 @@ third of them decisively or it is not paying for itself. This is what the harnes
 
 Phase 1 replays **the real 2025-26 season**: outcomes are the actual stat lines, not samples, so
 there is no Monte Carlo noise in these numbers. One mixed twelve-team league, four clones of each
-rung, double round robin over 26 matchup weeks.
+rung, double round robin over 21 matchup weeks.
 
 
 ## points-league
 
-| rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.239 | 143.938 | 0.745 | 0.820 | 0.000 | 1384.714 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 2 | start-everyone | 0.477 | 169.163 | 0.908 | 0.964 | 37.643 | 78.714 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.605 | 189.046 | 0.855 | 0.945 | 89.964 | 121.750 | 177.857 | 6.179 | 0.580 | 2.766 | 0.000 | nan | nan |
-| 4 | full-system | 0.679 | 195.159 | 0.913 | 0.949 | 50.929 | 75.607 | 182.000 | 8.250 | 0.610 | 3.793 | 0.000 | nan | nan |
+| rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | claims won | claims lost | move hit rate | gain / move | rentals | rental hit | rental gain |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | start-everyone | 0.313 | 170.091 | 0.886 | 0.959 | 36.643 | 81.929 | 0.000 | 0.000 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
+| 5 | full-system-adddrop[H=3 m=1 rate=ros claim=0] | 0.439 | 184.522 | 0.911 | 0.971 | 18.964 | 81.500 | 16.964 | 5.179 | 4.179 | 0.143 | 0.747 | 7.534 | 0.000 | nan | nan |
+| 7 | orchestrated[H=3 m=1 rate=ros claim=0 k=2 r=2 lam=2 ms=0 claim] | 0.592 | 199.212 | 0.921 | 0.975 | 12.393 | 81.464 | 105.429 | 5.679 | 9.143 | 1.286 | 0.698 | 5.902 | 80.643 | 0.675 | 2.730 |
+| 17 | orchestrated[H=3 m=1 rate=ros claim=0 k=2 r=2 lam=2 ms=0 claim][vor draft] | 0.656 | 206.881 | 0.923 | 0.976 | 11.143 | 80.464 | 106.429 | 6.750 | 10.107 | 1.893 | 0.681 | 5.402 | 79.893 | 0.686 | 2.849 |
 
-Attention alone (rung 2 over rung 1) is worth **+25.2 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **19.9 points a week** at 178 moves spent. The modelling stack (rung 4 over rung 3) is worth **+6.1 points a week** (+6.1 +/- 3.5, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +26.0 +/- 2.9 points a week.
-
-## banger-league
-
-| rung | strategy | win rate | points / week | games started | decision eff. | empty slots | wasted slots | moves | forced drops | move hit rate | gain / move | rentals | rental hit | rental gain |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | autodraft-forget | 0.174 | 231.263 | 0.728 | 0.802 | 0.000 | 1394.929 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 2 | start-everyone | 0.445 | 281.471 | 0.911 | 0.975 | 22.286 | 91.214 | 0.000 | 0.000 | nan | nan | 0.000 | nan | nan |
-| 3 | schedule-streamer | 0.703 | 327.342 | 0.898 | 0.966 | 46.464 | 101.679 | 180.357 | 5.214 | 0.624 | 6.006 | 0.000 | nan | nan |
-| 4 | full-system | 0.677 | 326.385 | 0.906 | 0.961 | 42.143 | 95.179 | 182.000 | 7.679 | 0.632 | 6.746 | 0.000 | nan | nan |
-
-Attention alone (rung 2 over rung 1) is worth **+50.2 points a week**, and it costs no transactions at all. The seven-move acquisition budget (rung 3 over rung 2) buys **45.9 points a week** at 180 moves spent. The modelling stack (rung 4 over rung 3) is worth **-1.0 points a week** (-1.0 +/- 3.5, **not distinguishable from zero** -- the gap is smaller than the spread across seats). Section 16 asks whether it clears rung 3 decisively: it **does not clear it**. Against rung 2, which never touches the wire, rung 4 is +44.8 +/- 5.4 points a week.
+Rung 5 against rung 2, which never touches the wire: **+15.1 points a week** (+15.1 +/- 3.2, clear of the noise). Streaming on top of the upgrades (rung 7 over 5): **+14.5 points a week** (+14.5 +/- 1.9, clear of the noise). Rung 7 against rung 2: **+29.6 points a week** (+29.6 +/- 2.7, clear of the noise). Drafting by value over replacement, in-season manager held at rung 7 (rung 17 over 7): **+7.5 points a week** (+7.5 +/- 2.7, clear of the noise).
 
 
 ## Reading the table

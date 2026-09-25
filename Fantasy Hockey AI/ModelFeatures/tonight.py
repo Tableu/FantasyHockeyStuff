@@ -44,7 +44,6 @@ _DFO_POSITION = {"c": "C", "lw": "L", "rw": "R", "ld": "D", "rd": "D", "g": "G"}
 _TEAM_STAT_COLUMNS = ["shots_for", "shots_against", "goals_for", "goals_against", "xgf", "xga",
                       "hits_for", "hits_against", "blocks_for", "blocks_against", "pim_for", "pp_goals",
                       "skater_toi", "pp_opportunities", "penalties_taken"]
-_GOALIE_STAT_COLUMNS = ["shots_against", "saves", "goals_against", "xga", "gsax"]
 
 
 # ---------- live inputs ----------
@@ -164,7 +163,7 @@ def build(cursor, game_date: dt.date, at: dt.datetime) -> dict:
                for team_id, players in injured_by_team.items() for p in players}
     spells = store.merge_spells(spells, overlay)
 
-    lineup_rows, context_rows, placeholder_team_games, placeholder_goalies = [], [], [], []
+    lineup_rows, context_rows, placeholder_team_games = [], [], []
     for g in games.itertuples():
         game_id = -int(g.nhl_game_id)   # not in Game.Games yet; negative so it can never collide
         for team_id, opp_id, is_home in ((g.home_team_id, g.away_team_id, 1), (g.away_team_id, g.home_team_id, 0)):
@@ -199,10 +198,6 @@ def build(cursor, game_date: dt.date, at: dt.datetime) -> dict:
                                            "team_id": team_id, "opp_team_id": opp_id, "is_home": is_home,
                                            **{c: float("nan") for c in _TEAM_STAT_COLUMNS},
                                            "is_placeholder": True})
-            if chosen is not None:
-                placeholder_goalies.append({"game_id": game_id, "game_date": game_date, "season_id": season_id,
-                                            "player_id": chosen, "team_id": team_id,
-                                            **{c: float("nan") for c in _GOALIE_STAT_COLUMNS}})
 
     lineup = lineup_features._typed(pd.DataFrame(lineup_rows))
     tonight = {
@@ -213,8 +208,6 @@ def build(cursor, game_date: dt.date, at: dt.datetime) -> dict:
                                "home_team_id": games["home_team_id"], "away_team_id": games["away_team_id"],
                                "home_score": float("nan"), "away_score": float("nan"),
                                "start_time_utc": games["start_time_utc"]}),
-        "goalie_games": pd.DataFrame(placeholder_goalies, columns=["game_id", "game_date", "season_id",
-                                                                    "player_id", "team_id"] + _GOALIE_STAT_COLUMNS),
         "spells": overlay,
     }
     candidates = (lineup.loc[lineup["position"].isin(SKATER_POSITIONS),

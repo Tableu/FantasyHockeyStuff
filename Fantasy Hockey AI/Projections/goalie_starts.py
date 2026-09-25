@@ -104,6 +104,15 @@ def _candidates(season: str) -> pd.DataFrame:
     for column in ("injured_at_lockout", "feat_starting_goalie", "label_dressed",
                    "label_starting_goalie"):
         lineup[column] = lineup[column].fillna(False).astype(bool)
+    # Only goalies knowable before the game: dressed in the lookback, or on the injury report. The
+    # lineup table also carries anyone who actually dressed (so its labels cover him) -- a call-up
+    # appearing from nowhere, whose mere presence told the model he played (620 on 2026-01-15:
+    # no lookback, and he started). Live, such a goalie reaches P(start) only through a pre-game
+    # chart, which is fair; history cannot tell those apart, so they are left out of training.
+    knowable = (lineup["games_dressed_lookback"] > 0) | lineup["injured_at_lockout"]
+    log.info("%s: %d goalie candidates, %d not knowable before the game (dropped)",
+             season, len(lineup), int((~knowable).sum()))
+    lineup = lineup[knowable]
 
     starts = pd.read_parquet(paths.FEATURES_DIR / f"goalie_starts_{season}.parquet",
                              columns=["game_id", "team_id", "player_id", "is_starter",

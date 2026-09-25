@@ -481,12 +481,12 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `linemates_ixg_all_p60_l20` | 51.1% | Mean of both line-mates' ixg all p60 l20. |
 | `linemates_shots_p60_l20` | 51.1% | Mean of both line-mates' shots p60 l20. |
 | `opp_goalie_player_id` | 99.7% | The goalie the candidate is expected to face. |
-| `goalie_sv_pct_l10` | 44.2% | That goalie's save percentage over the previous 10 games played, entering this game. |
-| `goalie_gsax_per_shot_l10` | 44.2% | His goals saved above expected per shot over the previous 10 games played. |
-| `goalie_gp_l10` | 44.2% | Games he had played in the previous 10 games played. |
-| `goalie_sv_pct_std` | 44.2% | That goalie's save percentage over the season to date, entering this game. |
-| `goalie_gsax_per_shot_std` | 44.2% | His goals saved above expected per shot over the season to date. |
-| `goalie_gp_std` | 44.2% | Games he had played in the season to date. |
+| `goalie_sv_pct_l10` | 99.7% | That goalie's save percentage over the previous 10 games played, entering this game. |
+| `goalie_gsax_per_shot_l10` | 99.7% | His goals saved above expected per shot over the previous 10 games played. |
+| `goalie_gp_l10` | 99.7% | Games he had played in the previous 10 games played. |
+| `goalie_sv_pct_std` | 99.7% | That goalie's save percentage over the season to date, entering this game. |
+| `goalie_gsax_per_shot_std` | 99.7% | His goals saved above expected per shot over the season to date. |
+| `goalie_gp_std` | 99.7% | Games he had played in the season to date. |
 | `line_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |
 | `pair_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |
 | `pp_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |

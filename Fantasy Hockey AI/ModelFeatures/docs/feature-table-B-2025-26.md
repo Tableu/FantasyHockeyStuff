@@ -32,7 +32,7 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `label_starting_goalie` | 100.0% | Target: did he actually start (goalies only). |
 | `label_in_spell` | 100.0% | Label: inside an injury spell on the game date (realized absence, first game included). |
 | `feat_mate1_id` | 49.5% | Line-mate / defence-partner player id from the source lineup. |
-| `feat_mate2_id` | 48.2% | Line-mate / defence-partner player id from the source lineup. |
+| `feat_mate2_id` | 48.1% | Line-mate / defence-partner player id from the source lineup. |
 | `feat_partner_id` | 24.4% | Line-mate / defence-partner player id from the source lineup. |
 | `source_game_id` | 97.4% | The player's most recent game before this one, whose history feeds every window. |
 | `source_game_date` | 97.4% | Date of that game. Asserted strictly earlier than game_date. |
@@ -469,24 +469,24 @@ Each feature is computable at the daily lineup lock: see `features/base.py` for 
 | `target_shp` | 75.4% | Target: his actual shp in this game. |
 | `target_ixg` | 75.4% | Target: his actual ixg in this game. |
 | `target_played` | 100.0% | Target: did he take a shift in this game. |
-| `mate1_points_p60_l20` | 49.4% | That line-mate's own points p60 l20. |
-| `mate1_ixg_all_p60_l20` | 49.4% | That line-mate's own ixg all p60 l20. |
-| `mate1_shots_p60_l20` | 49.4% | That line-mate's own shots p60 l20. |
-| `mate2_points_p60_l20` | 47.6% | That line-mate's own points p60 l20. |
-| `mate2_ixg_all_p60_l20` | 47.6% | That line-mate's own ixg all p60 l20. |
-| `mate2_shots_p60_l20` | 47.6% | That line-mate's own shots p60 l20. |
+| `mate1_points_p60_l20` | 49.3% | That line-mate's own points p60 l20. |
+| `mate1_ixg_all_p60_l20` | 49.3% | That line-mate's own ixg all p60 l20. |
+| `mate1_shots_p60_l20` | 49.3% | That line-mate's own shots p60 l20. |
+| `mate2_points_p60_l20` | 47.5% | That line-mate's own points p60 l20. |
+| `mate2_ixg_all_p60_l20` | 47.5% | That line-mate's own ixg all p60 l20. |
+| `mate2_shots_p60_l20` | 47.5% | That line-mate's own shots p60 l20. |
 | `partner_blocks_p60_l20` | 24.2% | The defence partner's own blocks p60 l20. |
 | `partner_points_p60_l20` | 24.2% | The defence partner's own points p60 l20. |
 | `linemates_points_p60_l20` | 49.5% | Mean of both line-mates' points p60 l20. |
 | `linemates_ixg_all_p60_l20` | 49.5% | Mean of both line-mates' ixg all p60 l20. |
 | `linemates_shots_p60_l20` | 49.5% | Mean of both line-mates' shots p60 l20. |
 | `opp_goalie_player_id` | 99.7% | The goalie the candidate is expected to face. |
-| `goalie_sv_pct_l10` | 88.5% | That goalie's save percentage over the previous 10 games played, entering this game. |
-| `goalie_gsax_per_shot_l10` | 88.5% | His goals saved above expected per shot over the previous 10 games played. |
-| `goalie_gp_l10` | 88.5% | Games he had played in the previous 10 games played. |
-| `goalie_sv_pct_std` | 88.5% | That goalie's save percentage over the season to date, entering this game. |
-| `goalie_gsax_per_shot_std` | 88.5% | His goals saved above expected per shot over the season to date. |
-| `goalie_gp_std` | 88.5% | Games he had played in the season to date. |
+| `goalie_sv_pct_l10` | 97.5% | That goalie's save percentage over the previous 10 games played, entering this game. |
+| `goalie_gsax_per_shot_l10` | 97.5% | His goals saved above expected per shot over the previous 10 games played. |
+| `goalie_gp_l10` | 97.5% | Games he had played in the previous 10 games played. |
+| `goalie_sv_pct_std` | 97.5% | That goalie's save percentage over the season to date, entering this game. |
+| `goalie_gsax_per_shot_std` | 97.5% | His goals saved above expected per shot over the season to date. |
+| `goalie_gp_std` | 97.5% | Games he had played in the season to date. |
 | `line_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |
 | `pair_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |
 | `pp_known` | 100.0% | The source lineup knew his unit, as opposed to leaving it unknown. |

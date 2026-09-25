@@ -51,6 +51,27 @@ def _mate_rates(base: pd.DataFrame, frame: pd.DataFrame, id_column: str, rate_co
     return frame.merge(lookup, on=["game_id", "team_id", id_column], how="left")
 
 
+def attach_goalie_form(frame: pd.DataFrame, goalies: pd.DataFrame) -> pd.DataFrame:
+    """The expected opposing starter's form from his games strictly before the target date, in
+    the same season -- whether or not he ends up playing (see base.goalie_history)."""
+    left = frame.reset_index(drop=True)
+    left["_row"] = range(len(left))
+    known = left[left["opp_goalie_player_id"].notna()].copy()
+    known["opp_goalie_player_id"] = known["opp_goalie_player_id"].astype("int64")
+    right = goalies.rename(columns={"player_id": "opp_goalie_player_id"}).copy()
+    right["opp_goalie_player_id"] = right["opp_goalie_player_id"].astype("int64")
+    right["goalie_source_date"] = pd.to_datetime(right["goalie_source_date"])
+    right["season_id"] = right["season_id"].astype(known["season_id"].dtype)
+    merged = pd.merge_asof(
+        known.sort_values("game_date", kind="mergesort"),
+        right.sort_values("goalie_source_date", kind="mergesort"),
+        left_on="game_date", right_on="goalie_source_date", by=["opp_goalie_player_id", "season_id"],
+        direction="backward", allow_exact_matches=False)
+    form = [c for c in right.columns if c.startswith("goalie_") and c != "goalie_source_date"]
+    out = left.merge(merged[["_row"] + form], on="_row", how="left").drop(columns="_row")
+    return out
+
+
 def assemble(base: pd.DataFrame, goalies: pd.DataFrame, lineup: pd.DataFrame) -> pd.DataFrame:
     """One row per (game, team, skater candidate, copy): base features + lineup features."""
     goalie_starts = starting_goalies(lineup)
@@ -90,8 +111,7 @@ def assemble(base: pd.DataFrame, goalies: pd.DataFrame, lineup: pd.DataFrame) ->
         goalie_starts.rename(columns={"team_id": "opp_team_id"}),
         on=["game_id", "opp_team_id", "copy_index"], how="left",
     )
-    goalie_form = goalies.drop(columns=["team_id"]).rename(columns={"player_id": "opp_goalie_player_id"})
-    frame = frame.merge(goalie_form, on=["game_id", "opp_goalie_player_id"], how="left")
+    frame = attach_goalie_form(frame, goalies)
 
     # "No unit" vs "unit unknown": feat_dressed says whether the source lineup knew him at all.
     known = frame["feat_dressed"].fillna(False).astype(bool)

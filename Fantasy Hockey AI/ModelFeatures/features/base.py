@@ -182,28 +182,33 @@ def team_context(cursor, season_ids: list, player_facts: pd.DataFrame, tonight: 
 
 
 def goalie_history(cursor, season_ids: list, tonight: dict | None = None) -> pd.DataFrame:
-    """Rolling save performance per (game, goalie), entering that game. Joined onto the row's
-    own game, so the ordinary shift-by-one applies (tonight's expected starters are added as
-    placeholder rows by the live build)."""
+    """Rolling save performance per goalie as of the end of each game he played, for an as-of
+    join onto a target date (assemble.py) -- the player family's pattern (shift=0 here, the join
+    excludes the target date).
+
+    It used to be joined on the target game's own row with a shift, which exists only for a
+    goalie who played that game: the expected opposing starter's form was present when he did
+    play and missing when he did not, so the missingness told the skater models who started
+    (193 of 480 rows on one replayed date). As of the date, it is there either way."""
     goalies = extract.goalie_games(cursor, season_ids)
     if tonight is not None:
-        goalies = pd.concat([_before(goalies, tonight), tonight["goalie_games"]], ignore_index=True)
+        goalies = _before(goalies, tonight)
     goalies["game_date"] = pd.to_datetime(goalies["game_date"])
     goalies = goalies.sort_values(["player_id", "game_date", "game_id"], kind="mergesort").reset_index(drop=True)
 
     keys = ["player_id", "season_id"]
     cols = ["shots_against", "saves", "goals_against", "xga", "gsax"]
-    rolled = rolling.rolling_sums(goalies, keys, cols, windows=(10,), how="sum", shift=1)
-    played = rolling.games_played(goalies, keys, windows=(10,), shift=1)
+    rolled = rolling.rolling_sums(goalies, keys, cols, windows=(10,), how="sum", shift=0)
+    played = rolling.games_played(goalies, keys, windows=(10,), shift=0)
 
-    frame = pd.concat([goalies[["game_id", "player_id", "team_id"]], rolled, played], axis=1)
+    frame = pd.concat([goalies[["player_id", "season_id", "game_date"]], rolled, played], axis=1)
     for suffix in ("l10", rolling.SEASON_TO_DATE):
         shots = frame[f"shots_against_{suffix}"].where(lambda s: s > 0)
         frame[f"goalie_sv_pct_{suffix}"] = frame[f"saves_{suffix}"] / shots
         frame[f"goalie_gsax_per_shot_{suffix}"] = frame[f"gsax_{suffix}"] / shots
         frame[f"goalie_gp_{suffix}"] = frame[f"gp_{suffix}"]
-    keep = ["game_id", "player_id", "team_id"] + [c for c in frame.columns if c.startswith("goalie_")]
-    return frame[keep]
+    keep = ["player_id", "season_id", "game_date"] + [c for c in frame.columns if c.startswith("goalie_")]
+    return frame[keep].rename(columns={"game_date": "goalie_source_date"})
 
 
 def _before(frame: pd.DataFrame, tonight: dict) -> pd.DataFrame:
