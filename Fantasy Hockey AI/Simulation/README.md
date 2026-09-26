@@ -31,6 +31,8 @@ validate.py       the calibration report                             -> docs/cal
 validate_goalies.py  the goalie sampler against real starts       -> reports/goalie_validation_<season>.json
 games_played.py   season games played / started, a distribution    -> reports/games_played_<kind>_<season>.json
                   (season level, for boom/bust -- docs/games-played.md; reads ModelFeatures' season history)
+rate_error.py     season rate shock per stat, correlated          -> reports/rate_error_<season>.json
+                  (Poisson x log-normal shock around a projection -- docs/rate-error.md)
 ```
 
 ## Running it
