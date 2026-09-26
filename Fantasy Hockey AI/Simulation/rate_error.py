@@ -49,6 +49,7 @@ K_GRID = (0, 10, 20, 40, 60, 80, 120, 160, 240, 320, 480)
 MIN_GP = 10                    # a season with fewer games says little about a rate
 REGULAR_GP = 20                # who sets the position's mean rate
 L2 = 1e-3
+EVIDENCE_FLOOR = float(np.log1p(5.0 * 0.25 * 48 / 12.0))
 NODES, WEIGHTS = np.polynomial.hermite_e.hermegauss(32)
 LOG_WEIGHTS = np.log(WEIGHTS / WEIGHTS.sum())
 
@@ -170,7 +171,10 @@ def covariate_frame(projected: pd.DataFrame, players: pd.DataFrame) -> pd.DataFr
 
 def design(frame: pd.DataFrame, stat: str) -> tuple:
     a = frame["age"].to_numpy()
-    evidence = np.log1p(frame[f"wgp_{stat}"].to_numpy() / 12.0)     # 12 = 5+4+3: one season
+    # 12 = 5+4+3: one season. Floored at the least any modelled player has (a quarter of a
+    # 48-game season, weight 5): a rookie with no games behind his projection would otherwise sit
+    # at -5, far outside the fit, and draw shocks of 5-8 on the log scale.
+    evidence = np.maximum(np.log1p(frame[f"wgp_{stat}"].to_numpy() / 12.0), EVIDENCE_FLOOR)
     level = np.log(np.maximum(frame[f"proj_{stat}"].to_numpy(), 1e-4)
                    / np.maximum(frame[f"prior_{stat}"].to_numpy(), 1e-4))
     cols = {
@@ -248,7 +252,21 @@ def fit_stat(frame: pd.DataFrame, stat: str, simple: bool = False) -> dict:
         theta[1:p] = 0.0
         theta[p + 1:] = 0.0
     return {"names": names, "beta": theta[:p].tolist(), "gamma": theta[p:].tolist(),
+            "ranges": {n: [float(X[:, j].min()), float(X[:, j].max())]
+                       for j, n in enumerate(names)},
             "rows": int(len(d)), "negloglik": float(res.fun)}
+
+
+def clip_to_fit(X: np.ndarray, names: list, params: dict) -> np.ndarray:
+    """Every covariate held inside the range the fit saw. A consensus projecting a player's PPP
+    at 0.001 sits at log(proj / position mean) = -7, where the fit never looked and its spread
+    reaches exp(5); clamped, he is treated as the lowest projection the history holds."""
+    ranges = params.get("ranges")
+    if not ranges:
+        return X
+    lo = np.array([ranges[n][0] for n in names])
+    hi = np.array([ranges[n][1] for n in names])
+    return np.clip(X, lo, hi)
 
 
 def shock(params: dict, frame: pd.DataFrame, stat: str) -> tuple:
@@ -256,6 +274,7 @@ def shock(params: dict, frame: pd.DataFrame, stat: str) -> tuple:
     X, names = design(frame, stat)
     if names != params["names"]:
         raise ValueError("fitted covariates differ from this design")
+    X = clip_to_fit(X, names, params)
     return X @ np.array(params["beta"]), np.exp(np.clip(X @ np.array(params["gamma"]), -6, 3))
 
 

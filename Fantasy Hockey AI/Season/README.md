@@ -39,6 +39,8 @@ engine.py     the day loop: lock, resolve, accumulate by week
 ladder.py     CLI                                          -> reports/ladder_<season>.json
 report.py     the results as prose                         -> docs/ladder-<config>.md
 compare.py    two formats against each other, paired
+boom_bust.py  boom/bust odds vs the pick spent: room drafts, par  -> reports/boom_bust_<season>_<scoring>.*
+              (season draws from Simulation/season_spread.py -- docs/boom-bust.md)
 verify.py     the eighteen checks that have to pass before a number means anything
 ```
 

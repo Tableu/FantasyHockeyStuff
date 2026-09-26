@@ -33,6 +33,8 @@ games_played.py   season games played / started, a distribution    -> reports/ga
                   (season level, for boom/bust -- docs/games-played.md; reads ModelFeatures' season history)
 rate_error.py     season rate shock per stat, correlated          -> reports/rate_error_<season>.json
                   (Poisson x log-normal shock around a projection -- docs/rate-error.md)
+season_spread.py  whole seasons drawn: games x consensus rates x shocks (skaters, goalies)
+                  (import-safe; Season/boom_bust.py builds par and the odds on it)
 ```
 
 ## Running it
