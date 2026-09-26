@@ -12,8 +12,9 @@ as `platform_ids.parquet`, which is how the draft assistant names a Fleaflicker 
 Certified, Trainee or Goalie) -- as `injury_risk.parquet`, which the draft window shows as 🩹, and
 each player's latest `Live.PlayerStatus` row -- the pipeline's merge of the Fleaflicker, ESPN and
 Daily Faceoff injury reports (OUT, SUSP, DTD, ACTIVE; a game-time decision; IR-eligible) -- as
-`injury_status.parquet`, the draft window's Status column. pipeline/run_live_snapshot.cmd reruns
-this after each injury and line-chart snapshot, so that file follows the reports.
+`injury_status.parquet`, the draft window's Status column. The plan window's snapshot step
+(Live/planpass.py) reruns this after each injury and line-chart snapshot, so that file follows the
+reports.
 
 `player_teams.parquet` is the team each player is signed with, per season: his open
 `Reference.PlayerTeamHistory` stint (pipeline/import_player_teams.py, from his NHL page, daily at

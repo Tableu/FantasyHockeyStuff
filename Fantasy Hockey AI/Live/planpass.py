@@ -2,7 +2,9 @@
 window). Nothing here is scheduled -- a pass runs when one of them asks.
 
     snapshots(kinds)   fresh injury / line-chart / starting-goalie reports into the Live schema
-                       (pipeline/snapshot_live.py -- the same job Task Scheduler runs)
+                       (pipeline/snapshot_live.py -- not scheduled: this is the only thing that
+                       runs it), then, after injuries or lines, the merged status re-exported for
+                       the draft window's Status column (ModelFeatures/build_players.py)
     tonight(day)       tonight's rows and projections (ModelFeatures/build_tonight.py, then
                        Projections/project_tonight.py)
     read_league(...)   the league as its platform shows it now (or a snapshot file)
@@ -49,6 +51,8 @@ def snapshots(kinds=SNAPSHOT_KINDS, echo=print, force_goalies=False) -> None:
     for kind in kinds:
         command = ["snapshot_live.py", "--kind", kind] + (["--force"] if kind == "goalies" and force_goalies else [])
         _run(command, PIPELINE, echo, f"snapshot {kind}")
+    if {"injuries", "lines"} & set(kinds):
+        _run(["build_players.py"], MODEL_FEATURES, echo, "injury status export")
 
 
 class NoGames(Exception):
