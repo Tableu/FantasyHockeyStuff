@@ -41,6 +41,7 @@ report.py     the results as prose                         -> docs/ladder-<confi
 compare.py    two formats against each other, paired
 boom_bust.py  boom/bust odds vs the pick spent: room drafts, par  -> reports/boom_bust_<season>_<scoring>.*
               (season draws from Simulation/season_spread.py -- docs/boom-bust.md)
+boom_bust_check.py  grades those odds at real ADP, actual seasons       -> docs/boom-bust-check.md
 verify.py     the eighteen checks that have to pass before a number means anything
 ```
 
