@@ -9,10 +9,12 @@ The same board and matching as `draft_assistant.py` (read only; it never submits
 tkinter window instead of the terminal:
 
 - **Rankings**: every player on the board, by value over replacement, with his projected line in
-  every stat the league scores; the Pos cell is coloured by position, the Tier cell by tier and
-  OFF/POG on a red-white-blue scale (the aggregate workbook's shading). Click a column header to sort by it; filter by position, by
-  "fills one of my open slots", or by name; taken players are hidden (greyed when "show taken" is
-  ticked). Reset view puts the sort, filter, search and "show taken" back.
+  every stat the league scores and today's injury report (Status: IR, OUT, SUSP, DTD or GTD, from
+  the last injury snapshot, read when the board is built). The Pos cell is coloured by position,
+  the Tier cell by tier and OFF/POG on a red-white-blue scale (the aggregate workbook's shading).
+  Click a column header to sort by it; filter by position, by "fills one of my open slots", or by
+  name; taken players are hidden (greyed when "show taken" is ticked). Reset view puts the sort,
+  filter, search and "show taken" back.
 - **Draft board**: rounds down, teams across in draft order, each pick coloured by position, the
   pick on the clock highlighted and your column marked.
 - **⚙ Settings**: a popup laid out like the aggregate workbook's Settings sheet -- whose positions
@@ -55,7 +57,8 @@ MINE_COLOUR = "#1d4ed8"
 FILTERS = ("All", "C", "LW", "RW", "F (C/LW/RW)", "D", "G", "Fills my slot")
 
 COLUMNS = [  # (key, heading, width, anchor)
-    ("rank", "#", 44, "e"), ("injury", "\U0001fa79", 50, "center"), ("player", "Player", 170, "w"),
+    ("rank", "#", 44, "e"), ("injury", "\U0001fa79", 50, "center"), ("status", "Status", 54, "center"),
+    ("player", "Player", 170, "w"),
     ("team", "Team", 50, "center"),
     ("positions", "Pos", 64, "center"), ("value", "Value", 60, "e"), ("vor", "VOR", 56, "e"),
     ("tier", "Tier", 80, "center"), ("periph_pct", "Periph %", 66, "e"),
@@ -83,6 +86,10 @@ ADP_NAMES = {"espn": "ESPN", "yahoo": "Yahoo", "fantrax": "Fantrax", "fleaflicke
 # Certified, Goalie, Trainee -- the goalies are listed apart, with no tier of their own.
 INJURY_ORDER = {"Certified": 0, "Goalie": 1, "Trainee": 2}
 INJURY_LETTER = {"Certified": "C", "Trainee": "T", "Goalie": "G"}      # shown as 🩹 C / T / G
+# Today's injury report (draft_board.status_labels), most serious first, and its cell's colour.
+STATUS_ORDER = {"IR": 0, "OUT": 1, "SUSP": 2, "DTD": 3, "GTD": 4}
+STATUS_COLOURS = {"IR": "#f4a3a3", "OUT": "#f8c4c4", "SUSP": "#e0c8f5", "DTD": "#fde68a",
+                  "GTD": "#fef3c7"}
 DESCENDING = {"value", "vor", "periph_pct", "sources", "off", "pog", "gp", "goals", "assists",
               "ppp", "shp", "hits", "blocks", "shots", "pim", "wins", "ot_losses", "shutouts", "saves"}
 
@@ -404,7 +411,8 @@ class DraftWindow:
         follow the scoring and playoff settings, so they are re-laid after each rebuild."""
         self.schedule = [c for c in SCHEDULE_HEADINGS if c in self.a.board.columns]
         self.stats = [c for c in STAT_HEADINGS if c in self.a.board.columns]
-        self.columns = ([c for c in COLUMNS if c[0] != "injury" or "injury" in self.a.board.columns]
+        self.columns = ([c for c in COLUMNS
+                         if c[0] not in ("injury", "status") or c[0] in self.a.board.columns]
                         + [(c, SCHEDULE_HEADINGS[c], 50, "e") for c in self.schedule]
                         + [(c, STAT_HEADINGS[c], 50, "e") for c in self.stats])
         keys = [c[0] for c in self.columns]
@@ -665,6 +673,7 @@ class DraftWindow:
             injury = r.get("injury")
             out.append({"pid": pid, "rank": r["rank"], "player": r["player"],
                         "injury": injury if isinstance(injury, str) else None,
+                        "status": r["status"] if isinstance(r.get("status"), str) else None,
                         "periph_pct": r.get("periph_pct"),
                         "team": r["team"] if pd.notna(r["team"]) else "",
                         "positions": r["positions"], "value": r["value"], "vor": r["vor"],
@@ -701,6 +710,8 @@ class DraftWindow:
         def sort_value(r):
             if key == "injury":
                 return INJURY_ORDER.get(r[key], len(INJURY_ORDER))
+            if key == "status":
+                return STATUS_ORDER.get(r[key], len(STATUS_ORDER))
             if key == "tier":      # by the first-listed group's tier, then value within it
                 return int(r[key].split()[0][1:]), -r["value"]
             return (not r[key]) if isinstance(r[key], bool) else r[key]
@@ -710,6 +721,7 @@ class DraftWindow:
 
         keys = [c[0] for c in self.columns]
         pos_col, tier_col = keys.index("positions"), keys.index("tier")
+        status_col = keys.index("status") if "status" in keys else None
         scales = {keys.index(c): _scale_points(self.a.board[c]) for c in self.schedule}
         data, taken, colours = [], [], {}     # colours: bg -> [(row, col)]
         for i, r in enumerate(rows):
@@ -717,6 +729,7 @@ class DraftWindow:
                 "rank": r["rank"],
                 "injury": f"\U0001fa79 {INJURY_LETTER.get(r['injury'], '?')}" if r["injury"] else "",
                 "player": r["player"], "team": r["team"], "positions": r["positions"],
+                "status": r["status"] or "",
                 "value": _num(r["value"], 1), "vor": _num(r["vor"], 1), "tier": r["tier"] or "",
                 "periph_pct": "" if pd.isna(r["periph_pct"]) else f"{r['periph_pct']:.0f}%",
                 "sources": r["sources"], "adp": _num(r["adp"], 1),
@@ -734,6 +747,8 @@ class DraftWindow:
                 v = r[keys[col]]
                 if points is not None and pd.notna(v):
                     colours.setdefault(_scale_colour(v, *points), []).append((i, col))
+            if status_col is not None and r["status"] in STATUS_COLOURS:
+                colours.setdefault(STATUS_COLOURS[r["status"]], []).append((i, status_col))
             if r["tier"]:
                 n = int(r["tier"].split()[0][1:])
                 colours.setdefault(TIER_COLOURS[(n - 1) % len(TIER_COLOURS)],

@@ -14,6 +14,10 @@ either: ADP is printed beside the board only to answer "will he last to my next 
 what it forecasts. Every row says what its value rests on, so a fallback is never mistaken for a
 projection.
 
+`team` is the team a player is signed with, from his NHL page (pipeline/import_player_teams.py),
+where the database has it; FA when his page has no team and marks him inactive (unsigned); else
+the projections' most common team. `team_source` says which (NHL, FA, projections).
+
 With `--playoffs START END` (the fantasy playoff weeks) it also counts each player's team's
 off-night games and playoff games, as the aggregate workbook's Schedule Info sheet does
 (`schedule_counts`).
@@ -82,6 +86,15 @@ def schedule_counts(season, playoff_start, playoff_end) -> pd.DataFrame:
     teams = pd.read_parquet(paths.teams()).set_index("team_id")["team"]
     counts.index = counts.index.map(teams)
     return counts
+
+
+def status_labels(status: pd.DataFrame) -> pd.Series:
+    """Per player, his current injury report as the draft window shows it: IR (out and on the
+    league's IR), OUT, SUSP, DTD, GTD (active but a game-time decision); none when active."""
+    status = status.set_index("player_id")
+    label = status["status"].where(status["status"] != "ACTIVE")
+    label = label.mask(label.isna() & status["gtd"], "GTD")
+    return label.mask(status["status"].eq("OUT") & status["ir_eligible"], "IR").dropna()
 
 
 def peripheral_share(board, scoreset) -> pd.Series:
@@ -191,6 +204,20 @@ def build(season, prior_season, league_name, scoring, draft_date, strategy, elig
     basis[sources == 0] = "last season (no source)"
     team_id = (external.groupby("player_id")["team_id"]
                .agg(lambda s: s.mode().iloc[0] if s.notna().any() else pd.NA))
+    # The team he is signed with (his NHL page, pipeline/import_player_teams.py) where known;
+    # the projections' most common team otherwise, which is only as current as the sources.
+    team_source = pd.Series("projections", index=team_id.index)
+    unsigned = pd.Index([])
+    if livepaths.player_teams().exists():
+        signed = pd.read_parquet(livepaths.player_teams())
+        signed = signed[signed["season"] == season].set_index("player_id")["team_id"]
+        team_id = team_id.reindex(team_id.index.union(signed.index))
+        team_source = team_source.reindex(team_id.index).fillna("projections")
+        team_id.loc[signed.index] = signed
+        team_source.loc[signed.index] = "NHL"
+        # No team on his page and not active there: unsigned (FA), not the projections' team.
+        players_active = pd.read_parquet(paths.players()).set_index("player_id")["active"]
+        unsigned = players_active.index[~players_active].difference(signed.index)
 
     def against(p):
         slots = [s for s in eligibility[p] if s in levels]
@@ -199,7 +226,9 @@ def build(season, prior_season, league_name, scoring, draft_date, strategy, elig
     board = pd.DataFrame({
         "rank": range(1, len(vor) + 1),
         "player": players["name"].reindex(vor.index).to_numpy(),
-        "team": team_id.reindex(vor.index).map(teams).to_numpy(),
+        "team": team_id.reindex(vor.index).map(teams).where(~vor.index.isin(unsigned), "FA").to_numpy(),
+        "team_source": team_source.reindex(vor.index).fillna("projections")
+                       .where(~vor.index.isin(unsigned), "FA").to_numpy(),
         "positions": ["/".join(sorted(eligibility[p], key="C LW RW D G".split().index))
                       for p in vor.index],
         "value": eligible.reindex(vor.index).round(1).to_numpy(),
@@ -216,6 +245,10 @@ def build(season, prior_season, league_name, scoring, draft_date, strategy, elig
         risk = pd.read_parquet(livepaths.injury_risk())
         risk = risk[risk["season"] == season].groupby("player_id")["tier"].agg("/".join)
         board["injury"] = board.index.map(risk)
+    if livepaths.injury_status().exists():
+        # Today's merged injury reports (Fleaflicker, ESPN, Daily Faceoff), as of the last
+        # snapshot. Shown, never used: the value is the full season's either way.
+        board["status"] = board.index.map(status_labels(pd.read_parquet(livepaths.injury_status())))
     if playoffs is not None:
         counts = schedule_counts(season, *playoffs)
         board["off"] = board["team"].map(counts["off"]).astype("Int64")

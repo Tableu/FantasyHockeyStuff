@@ -28,6 +28,17 @@ def injury_risk() -> Path:
     return season_paths.FEATURES_DIR / "injury_risk.parquet"
 
 
+def injury_status() -> Path:
+    """Each player's latest merged injury report (Live.PlayerStatus, build_players.py)."""
+    return season_paths.FEATURES_DIR / "injury_status.parquet"
+
+
+def player_teams() -> Path:
+    """The team each player is signed with, per season (Reference.PlayerTeamHistory's open
+    stints, from his NHL page; build_players.py)."""
+    return season_paths.FEATURES_DIR / "player_teams.parquet"
+
+
 def platform_ids() -> Path:
     """A fantasy platform's own player id -> player_id, per season (ModelFeatures/build_players.py)."""
     return season_paths.FEATURES_DIR / "platform_ids.parquet"
