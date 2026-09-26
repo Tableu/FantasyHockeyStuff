@@ -485,6 +485,48 @@ CREATE TABLE Stats.PlayerSeasonStats
 );
 GO
 
+-- Stats.SeasonTotals: the NHL.com stats reports' season line, one row per player per season
+-- (summed across teams), 2000-01 on -- see nhl_pipeline/ingest/season_totals.py. Hits/Blocks
+-- are NULL before 2005-06 (not tracked).
+CREATE TABLE Stats.SeasonTotals
+(
+    SeasonID            INT NOT NULL,
+    PlayerID            BIGINT NOT NULL,
+    IsGoalie            BIT NOT NULL,
+    PositionCode        VARCHAR(5) NULL,
+    TeamAbbrevs         VARCHAR(40) NULL,
+    GamesPlayed         SMALLINT NOT NULL,
+    Goals               SMALLINT NULL,
+    Assists             SMALLINT NULL,
+    Points              SMALLINT NULL,
+    PowerPlayGoals      SMALLINT NULL,
+    PowerPlayPoints     SMALLINT NULL,
+    ShortHandedGoals    SMALLINT NULL,
+    ShortHandedPoints   SMALLINT NULL,
+    Shots               SMALLINT NULL,
+    Hits                SMALLINT NULL,
+    Blocks              SMALLINT NULL,
+    PenaltyMinutes      SMALLINT NULL,
+    TOIPerGameSeconds   DECIMAL(8,2) NULL,
+    GamesStarted        SMALLINT NULL,
+    Wins                SMALLINT NULL,
+    Losses              SMALLINT NULL,
+    OTLosses            SMALLINT NULL,
+    Ties                SMALLINT NULL,
+    Shutouts            SMALLINT NULL,
+    GoalsAgainst        SMALLINT NULL,
+    ShotsAgainst        SMALLINT NULL,
+    Saves               SMALLINT NULL,
+    TOISeconds          INT NULL,
+    ImportedAt          DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_SeasonTotals PRIMARY KEY (SeasonID, PlayerID),
+    CONSTRAINT FK_SeasonTotals_Season FOREIGN KEY (SeasonID)
+        REFERENCES Reference.Seasons(SeasonID),
+    CONSTRAINT FK_SeasonTotals_Player FOREIGN KEY (PlayerID)
+        REFERENCES Reference.Players(PlayerID)
+);
+GO
+
 -- ============================================================================
 -- 4. Analytics schema
 -- ============================================================================
