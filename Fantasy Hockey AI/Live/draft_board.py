@@ -28,6 +28,7 @@ reports/<league>/draft_board_<season>_<scoring>.csv, and .md with the top of the
 
 import argparse
 import datetime as dt
+import json
 import logging
 import sys
 
@@ -40,6 +41,7 @@ import inputs
 import league as league_module
 import paths
 import simlayer
+import boom_bust
 from decisionlayer import draft as draft_module
 from decisionlayer import load_strategy
 
@@ -256,6 +258,10 @@ def build(season, prior_season, league_name, scoring, draft_date, strategy, elig
     stats = stat_lines(board, external, prior_season, scoreset)
     board = board.join(stats)
     board["periph_pct"] = peripheral_share(board, scoreset)
+    odds = boom_bust_odds(season, scoreset, config)
+    if odds is not None:
+        board = board.join(odds.table[list(odds.COLUMNS)].round(
+            {"room_pick": 1, "boom_pct": 3, "bust_pct": 3, "p10": 0, "p90": 0, "exp_gp": 1}))
     for path in sorted(paths.FEATURES_DIR.glob(f"fantasy_adp_*_{season}.parquet")):
         platform = path.name[len("fantasy_adp_"):-len(f"_{season}.parquet")]
         adp = pd.read_parquet(path).set_index("player_id")["adp"]
@@ -264,6 +270,44 @@ def build(season, prior_season, league_name, scoring, draft_date, strategy, elig
              scoring, config.eligibility_platform, len(board),
              {s: round(v, 1) for s, v in levels.items()}, board["basis"].value_counts().to_dict())
     return board, levels, config, eligibility
+
+
+def _same_weights(a: dict, b: dict) -> bool:
+    nonzero = lambda d: {k: round(float(v), 6) for k, v in d.items() if float(v)}
+    return nonzero(a) == nonzero(b)
+
+
+def boom_bust_odds(season, scoreset, config):
+    """The saved boom/bust run (Season/boom_bust.py) for this season and scoring -- found by the
+    scoring file's weights, so the draft window's saved copy of the same scoring still matches --
+    when its room
+    matches the league's teams and rounds; None otherwise, and the board simply goes without.
+    Its columns: `room_pick` (the median pick in 200 simulated drafts of realistic opponents),
+    `boom_pct` / `bust_pct` at that pick (P(realized VOR >= par one round earlier) / P(< par one
+    round later)), `p10` / `p90` season points and `exp_gp`, from 5,000 simulated seasons.
+    Read the odds comparatively: a player at 25% bust is safer than one at 60% at the same
+    pick (Season/docs/boom-bust-check.md)."""
+    odds = scoring = None
+    for run in sorted(paths.REPORTS_DIR.glob(f"boom_bust_{season}_*_meta.json")):
+        name = run.name[len(f"boom_bust_{season}_"):-len("_meta.json")]
+        if not paths.scoreset(name).exists():
+            continue
+        weights = json.loads(paths.scoreset(name).read_text())
+        if (_same_weights(weights.get("skaters", {}), scoreset.skaters)
+                and _same_weights(weights.get("goalies", {}), scoreset.goalies)):
+            odds, scoring = boom_bust.load_odds(season, name), name
+            break
+    if odds is None:
+        log.info("no boom/bust run for %s under %s's weights -- run Season/boom_bust.py "
+                 "--season %s --scoring <file>", season, scoreset.name, season)
+        return None
+    if not odds.fits(config.teams, config.teams * config.roster_size):
+        log.warning("boom/bust run for %s %s is for another room (%s picks); not shown", season,
+                    scoring, len(odds.par))
+        return None
+    log.info("boom/bust odds from the run of %s (%s drafts, %s seasons)",
+             odds.meta["draft_date"], odds.meta["drafts"], odds.meta["draws"])
+    return odds
 
 
 def to_markdown(board: pd.DataFrame, top: int) -> str:

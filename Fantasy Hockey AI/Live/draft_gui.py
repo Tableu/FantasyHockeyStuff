@@ -8,7 +8,9 @@
 The same board and matching as `draft_assistant.py` (read only; it never submits a pick), in a
 tkinter window instead of the terminal:
 
-- **Rankings**: every player on the board, by value over replacement, with his projected line in
+- **Rankings**: every player on the board, by value over replacement, with his boom and bust odds
+  were you to take him at your next pick (Season/boom_bust.py's saved run -- read them
+  comparatively; hidden when the settings' scoring or room differ from the run), his projected line in
   every stat the league scores and today's injury report (Status: IR, OUT, SUSP, DTD or GTD, from
   the last injury snapshot, read when the board is built). The Pos cell is coloured by position,
   the Tier cell by tier and OFF/POG on a red-white-blue scale (the aggregate workbook's shading).
@@ -61,6 +63,7 @@ COLUMNS = [  # (key, heading, width, anchor)
     ("player", "Player", 170, "w"),
     ("team", "Team", 50, "center"),
     ("positions", "Pos", 64, "center"), ("value", "Value", 60, "e"), ("vor", "VOR", 56, "e"),
+    ("boom", "Boom", 70, "e"), ("bust", "Bust", 70, "e"),
     ("tier", "Tier", 80, "center"), ("periph_pct", "Periph %", 66, "e"),
     ("sources", "Src", 40, "e"),
     ("adp", "ADP", 136, "e"), ("gone", "By next pick", 90, "center"),
@@ -90,7 +93,7 @@ INJURY_LETTER = {"Certified": "C", "Trainee": "T", "Goalie": "G"}      # shown a
 STATUS_ORDER = {"IR": 0, "OUT": 1, "SUSP": 2, "DTD": 3, "GTD": 4}
 STATUS_COLOURS = {"IR": "#f4a3a3", "OUT": "#f8c4c4", "SUSP": "#e0c8f5", "DTD": "#fde68a",
                   "GTD": "#fef3c7"}
-DESCENDING = {"value", "vor", "periph_pct", "sources", "off", "pog", "gp", "goals", "assists",
+DESCENDING = {"value", "vor", "boom", "periph_pct", "sources", "off", "pog", "gp", "goals", "assists",
               "ppp", "shp", "hits", "blocks", "shots", "pim", "wins", "ot_losses", "shutouts", "saves"}
 
 
@@ -412,7 +415,8 @@ class DraftWindow:
         self.schedule = [c for c in SCHEDULE_HEADINGS if c in self.a.board.columns]
         self.stats = [c for c in STAT_HEADINGS if c in self.a.board.columns]
         self.columns = ([c for c in COLUMNS
-                         if c[0] not in ("injury", "status") or c[0] in self.a.board.columns]
+                         if (c[0] not in ("injury", "status") or c[0] in self.a.board.columns)
+                         and (c[0] not in ("boom", "bust") or self.a.odds is not None)]
                         + [(c, SCHEDULE_HEADINGS[c], 50, "e") for c in self.schedule]
                         + [(c, STAT_HEADINGS[c], 50, "e") for c in self.stats])
         keys = [c[0] for c in self.columns]
@@ -663,6 +667,9 @@ class DraftWindow:
     def rows(self):
         a, s = self.a, self.state
         out = []
+        # Boom and bust were he taken at your next pick (at his room pick once you have none left).
+        odds = (a.odds.at(a.board.index, self.next_overall)
+                if a.odds is not None and self.next_overall is not None else None)
         for pid, r in a.board.iterrows():
             taken = pid in s["taken"]
             fills = (not taken and self.gap > 0
@@ -677,6 +684,8 @@ class DraftWindow:
                         "periph_pct": r.get("periph_pct"),
                         "team": r["team"] if pd.notna(r["team"]) else "",
                         "positions": r["positions"], "value": r["value"], "vor": r["vor"],
+                        "boom": odds.at[pid, "boom"] if odds is not None else r.get("boom_pct"),
+                        "bust": odds.at[pid, "bust"] if odds is not None else r.get("bust_pct"),
                         "tier": r.get("tier") or None,
                         "fills": fills, "sources": r["sources"],
                         "adp": adp, "gone": gone,
@@ -731,6 +740,8 @@ class DraftWindow:
                 "player": r["player"], "team": r["team"], "positions": r["positions"],
                 "status": r["status"] or "",
                 "value": _num(r["value"], 1), "vor": _num(r["vor"], 1), "tier": r["tier"] or "",
+                "boom": "" if r.get("boom") is None or pd.isna(r.get("boom")) else f"{100 * r['boom']:.0f}%",
+                "bust": "" if r.get("bust") is None or pd.isna(r.get("bust")) else f"{100 * r['bust']:.0f}%",
                 "periph_pct": "" if pd.isna(r["periph_pct"]) else f"{r['periph_pct']:.0f}%",
                 "sources": r["sources"], "adp": _num(r["adp"], 1),
                 "gone": "likely gone" if r["gone"] else "",
@@ -766,6 +777,8 @@ class DraftWindow:
         for k, heading, *_ in self.columns:
             if k == "adp":
                 heading = f"ADP {self._adp_name(self.a.adp_platform)}"
+            if k in ("boom", "bust") and self.next_overall is not None:
+                heading = f"{heading} @{self.next_overall}"
             arrow = (" ▼" if self.sort_reverse ^ (k in DESCENDING) else " ▲") \
                 if k == key else ""
             headings.append(heading + arrow)

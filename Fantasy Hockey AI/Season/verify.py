@@ -34,6 +34,9 @@ season-level result rather than as an error:
     opponents       a simulated leaguemate whose board is not his sources' consensus, whose draw
                     differs between paired runs, or who drafts past his goalie cap
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
+    boom bust       boom/bust odds outside [0, 1], a par curve that rises, season draws or room
+                    drafts that differ between two runs with one seed, or the saved-run reader
+                    disagreeing with the table it was saved beside
 
     python verify.py
 """
@@ -1212,6 +1215,39 @@ def check_no_clobber() -> str:
     return f"scored build wrote {len(wrote)} files to its own directory; {len(before)} files in models/ unchanged"
 
 
+def check_boom_bust(drafts=3, draws=300) -> str:
+    import boom_bust as bb
+    from dataclasses import replace
+
+    config = replace(league_module.load(), eligibility_platform="fleaflicker")
+    scoreset = simlayer.load_scoreset("points-league")
+    weights = __import__("json").loads(paths.scoreset("points-league").read_text())
+    field = __import__("field").load()
+    external, last, values, eligibility = bb.board_inputs(
+        SEASON, bb.previous(SEASON), config, scoreset, _strategy(), pd.Timestamp("2025-10-07"))
+    rooms = bb.room_drafts(external, last, values, eligibility, config, scoreset, field, drafts)
+    again = bb.room_drafts(external, last, values, eligibility, config, scoreset, field, drafts)
+    assert rooms == again, "two room drafts with the same replications differ"
+    points, games, index, _ = bb.season_draws(SEASON, weights, draws, seed=7)
+    points2, _, _, _ = bb.season_draws(SEASON, weights, draws, seed=7)
+    assert np.array_equal(points, points2), "season draws differ under one seed"
+    vor = bb.realized_vor(points, index, values, eligibility, rooms)
+    par = bb.par_curve(vor, index, rooms, config.teams * config.roster_size)
+    assert np.all(np.diff(par) <= 1e-9), "the par curve rises"
+    odds = [bb.odds_at(vor[:, j], 20, par, config.teams) for j in range(0, len(index), 25)]
+    assert all(0 <= b <= 1 and 0 <= x <= 1 for b, x in odds), "odds outside [0, 1]"
+    saved = bb.load_odds(SEASON, "points-league")
+    checked = 0
+    if saved is not None:
+        table = saved.table.dropna(subset=["room_pick"]).head(40)
+        for pid, row in table.iterrows():
+            got = saved.at([pid], row["room_pick"]).iloc[0]
+            assert abs(got["boom"] - row["boom_pct"]) < 1e-9 and abs(got["bust"] - row["bust_pct"]) < 1e-9,                 f"reader and table disagree for {pid}"
+            checked += 1
+    return (f"{drafts} rooms and {draws} seasons repeat exactly; par never rises "
+            f"({par[0]:.0f} -> {par[-1]:.0f}); odds in [0, 1]; reader matches {checked} saved rows")
+
+
 def check_modules() -> str:
     import decisionlayer
 
@@ -1235,7 +1271,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("no clobber", check_no_clobber),
           ("first week", check_first_week), ("candidate", check_candidate),
           ("tune guard", check_tune_guard), ("opponents", check_opponents),
-          ("modules", check_modules)]
+          ("boom bust", check_boom_bust), ("modules", check_modules)]
 
 
 def main():

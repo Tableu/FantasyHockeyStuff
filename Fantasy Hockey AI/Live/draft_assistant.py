@@ -17,8 +17,9 @@ league's scoring never reaches another.
 pick. The board is `draft_board.py`'s: value over replacement on the external sources' consensus,
 on Fleaflicker's positions for this league (`import_fantasy_fleaflicker.py`), fixed before the
 draft. Each redraw shows who is on the clock and how many picks until yours, the best available by
-VOR, whether each would fill one of your open starting slots, and ADP beside it -- used only for
-"is he likely gone before your next pick", which is what ADP forecasts.
+VOR, his boom and bust odds were you to take him at your next pick (`Season/boom_bust.py`'s saved
+run; read them comparatively), whether each would fill one of your open starting slots, and ADP
+beside it -- used only for "is he likely gone before your next pick", which is what ADP forecasts.
 
 A pick is named by Fleaflicker's own player id (`Fantasy.PlatformPlayerIDs`, exported by
 `ModelFeatures/build_players.py`), with an exact-name fallback; anything still unmatched is listed,
@@ -54,6 +55,10 @@ log = logging.getLogger("draft-assistant")
 # workbook's; the league file does not define it, so it is added here. F/D is its UTIL(F/D).
 ROSTER_SLOTS = ("C", "LW", "RW", "W", "F", "D", "F/D", "G")
 EXTRA_SLOT_POSITIONS = {"W": ["LW", "RW"]}
+
+
+def _pct(x) -> str:
+    return "" if x is None or pd.isna(x) else f"{100 * x:.0f}%"
 
 
 class Assistant:
@@ -125,6 +130,9 @@ class Assistant:
             tier_gap_z=self.tier_gap_z())
         self.eligibility_platform = platform
         self.slot_order = self.config.slot_order()
+        # Boom/bust at any pick (Season/boom_bust.py's saved run), when it matches this scoring
+        # and room; None hides the columns, e.g. after the window changes the scoring.
+        self.odds = draft_board.boom_bust_odds(self.args.season, self.scoreset(), self.config)
 
     def league_config(self):
         """The league file's config with the saved roster settings (teams, slots, bench) on it."""
@@ -214,16 +222,23 @@ class Assistant:
 
         next_overall = s["mine"][0]["overall"] if s["mine"] else None
         available = self.board[[p not in s["taken"] for p in self.board.index]]
+        shown = available.head(self.args.top)
+        odds = (self.odds.at(shown.index, next_overall)
+                if self.odds is not None and next_overall is not None else None)
+        at = f" at #{next_overall}" if odds is not None else ""
         lines += ["## Best available", "",
-                  f"| # | player | team | pos | value | VOR | fills a slot | sources | basis | ADP ({self.adp_platform}) | by your next pick |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|"]
-        for i, (pid, r) in enumerate(available.head(self.args.top).iterrows(), 1):
+                  f"| # | player | team | pos | value | VOR | boom{at} | bust{at} | fills a slot | sources | basis | ADP ({self.adp_platform}) | by your next pick |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for i, (pid, r) in enumerate(shown.iterrows(), 1):
             fills = draft_module._improves(roster, pid, self.config, self.eligibility, gap) if gap > 0 else False
             adp = r.get(f"adp_{self.adp_platform}")
             likely = ("likely gone" if next_overall is not None and pd.notna(adp)
                       and adp < next_overall else "")
+            boom = odds.at[pid, "boom"] if odds is not None else r.get("boom_pct")
+            bust = odds.at[pid, "bust"] if odds is not None else r.get("bust_pct")
             lines.append(f"| {i} | {r['player']} | {r['team'] if pd.notna(r['team']) else ''} | "
                          f"{r['positions']} | {r['value']:.0f} | {r['vor']:.0f} | "
+                         f"{_pct(boom)} | {_pct(bust)} | "
                          f"{'yes' if fills else ''} | {r['sources']} | {r['basis']} | "
                          f"{'' if pd.isna(adp) else f'{adp:.0f}'} | {likely} |")
         lines += ["", "## Your roster", ""]

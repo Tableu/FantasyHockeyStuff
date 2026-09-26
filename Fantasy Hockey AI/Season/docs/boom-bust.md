@@ -1,8 +1,10 @@
 # Boom and bust odds: the season simulator and the par curve
 
 Step 3 of the boom/bust plan (`~/.claude/plans/boom-bust-odds.md`). Built 2026-09-26. Step 4
-(the calibration check against 2025-26 ADP) is not run yet. **These odds are unvalidated
-until it is.**
+passed (`docs/boom-bust-check.md`). Step 5 put the odds on the draft board, the assistant and
+the draft window (Live/README.md): at the median room pick on the board, at your next pick
+in the assistant and the window. The margin stays one round and the odds are read
+comparatively (the user's call, 2026-09-26).
 
 ## Pieces
 
