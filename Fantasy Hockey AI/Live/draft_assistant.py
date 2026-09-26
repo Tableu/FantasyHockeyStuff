@@ -121,7 +121,8 @@ class Assistant:
         self.board, self.levels, self.config, self.eligibility = draft_board.build(
             self.args.season, self.prior, self.args.rules, self.args.weights,
             pd.Timestamp(self.args.draft_date), self.strategy, eligibility_platform=platform,
-            playoffs=self.playoffs, config=self.league_config(), scoreset=self.scoreset())
+            playoffs=self.playoffs, config=self.league_config(), scoreset=self.scoreset(),
+            tier_gap_z=self.tier_gap_z())
         self.eligibility_platform = platform
         self.slot_order = self.config.slot_order()
 
@@ -145,6 +146,10 @@ class Assistant:
             "name": "draft-window",
             "skaters": {k: float(v) for k, v in scoring["skaters"].items() if float(v)},
             "goalies": {k: float(v) for k, v in scoring["goalies"].items() if float(v)}})
+
+    def tier_gap_z(self):
+        """The saved Tier Gap Z-Score, or the aggregate workbook's default."""
+        return float(self.overrides.get("tier_gap_z", draft_board.TIER_GAP_Z))
 
     def save_overrides(self):
         """The draft window's Save as default: into the league's registry file."""

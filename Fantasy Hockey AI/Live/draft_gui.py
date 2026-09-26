@@ -9,8 +9,9 @@ The same board and matching as `draft_assistant.py` (read only; it never submits
 tkinter window instead of the terminal:
 
 - **Rankings**: every player on the board, by value over replacement, with his projected line in
-  every stat the league scores. Click a column header to sort by it; filter by position, by "fills
-  one of my open slots", or by name; taken players are hidden (greyed when "show taken" is
+  every stat the league scores; the Pos cell is coloured by position, the Tier cell by tier and
+  OFF/POG on a red-white-blue scale (the aggregate workbook's shading). Click a column header to sort by it; filter by position, by
+  "fills one of my open slots", or by name; taken players are hidden (greyed when "show taken" is
   ticked). Reset view puts the sort, filter, search and "show taken" back.
 - **Draft board**: rounds down, teams across in draft order, each pick coloured by position, the
   pick on the clock highlighted and your column marked.
@@ -33,6 +34,7 @@ import tkinter as tk
 from tkinter import ttk
 
 import pandas as pd
+from tksheet import Sheet
 
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import draft_assistant as da
@@ -40,6 +42,14 @@ from decisionlayer import draft as draft_module
 
 POSITION_COLOURS = {"C": "#cfe2ff", "LW": "#d1f0d8", "RW": "#fde2c4", "D": "#e6d8f5",
                     "G": "#f8d0d6"}
+# The aggregate workbook's TIER shading (TIER_SHADING_PALETTE), by tier number, cycling after 10.
+TIER_COLOURS = ("#d9f0d4", "#d1e0f7", "#fcf0c4", "#fcd9ba", "#f7cccc", "#e3d4f2", "#ccede8",
+                "#e0e0e0", "#e6d9bf", "#f2cce6")
+TAKEN_BG, TAKEN_FG = "#f3f4f6", "#9ca3af"
+TABLE_FONT = ("Segoe UI", 9, "normal")
+# The aggregate workbook's OFF and POG colour scale (Player Values): the column's minimum light
+# red, its median white, its maximum blue, blended in between.
+SCALE_LOW, SCALE_MID, SCALE_HIGH = "#ea9999", "#ffffff", "#4285f4"
 CLOCK_COLOUR = "#fff3a0"
 MINE_COLOUR = "#1d4ed8"
 FILTERS = ("All", "C", "LW", "RW", "F (C/LW/RW)", "D", "G", "Fills my slot")
@@ -48,9 +58,9 @@ COLUMNS = [  # (key, heading, width, anchor)
     ("rank", "#", 44, "e"), ("injury", "\U0001fa79", 50, "center"), ("player", "Player", 170, "w"),
     ("team", "Team", 50, "center"),
     ("positions", "Pos", 64, "center"), ("value", "Value", 60, "e"), ("vor", "VOR", 56, "e"),
-    ("periph_pct", "Periph %", 66, "e"),
+    ("tier", "Tier", 80, "center"), ("periph_pct", "Periph %", 66, "e"),
     ("sources", "Src", 40, "e"),
-    ("adp", "ADP", 84, "e"), ("gone", "By next pick", 90, "center"),
+    ("adp", "ADP", 136, "e"), ("gone", "By next pick", 90, "center"),
 ]
 # The aggregate workbook's schedule columns (draft_board.schedule_counts), when the playoff weeks
 # are known: games on nights with 8 or fewer NHL games through the fantasy playoffs, and games
@@ -67,7 +77,8 @@ SKATER_SCORING = (("goals", "G"), ("assists", "A"), ("ppp", "PPP"), ("shp", "SHP
                   ("shots", "SOG"), ("hits", "HIT"), ("blocks", "BLK"), ("pim", "PIM"))
 GOALIE_SCORING = (("wins", "W"), ("losses", "L"), ("goals_against", "GA"), ("saves", "SV"),
                   ("shutouts", "SO"), ("ot_losses", "OTL"))
-ADP_NAMES = {"espn": "ESPN", "yahoo": "Yahoo", "fantrax": "Fantrax", "fleaflicker": "Fleaflicker"}
+ADP_NAMES = {"espn": "ESPN", "yahoo": "Yahoo", "fantrax": "Fantrax", "fleaflicker": "Fleaflicker",
+             "oldtimehockey": "Old Time Hockey"}
 # Dobber's Band-Aid Boys (draft_board: `injury`), as the aggregate workbook's 🩹 column. Sorted
 # Certified, Goalie, Trainee -- the goalies are listed apart, with no tier of their own.
 INJURY_ORDER = {"Certified": 0, "Goalie": 1, "Trainee": 2}
@@ -78,6 +89,26 @@ DESCENDING = {"value", "vor", "periph_pct", "sources", "off", "pog", "gp", "goal
 
 def _num(x, digits=0):
     return "" if x is None or pd.isna(x) else f"{x:.{digits}f}"
+
+
+def _scale_points(column):
+    """A column's (min, median, max) over the whole board, as the workbook's scale reads it; None
+    for an empty column."""
+    values = column.dropna().astype(float)
+    return None if values.empty else (values.min(), values.median(), values.max())
+
+
+def _blend(a, b, t):
+    rgb = [round(int(a[i:i + 2], 16) + (int(b[i:i + 2], 16) - int(a[i:i + 2], 16)) * t)
+           for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(rgb)
+
+
+def _scale_colour(v, low, mid, high):
+    """SCALE_LOW at `low`, SCALE_MID at `mid`, SCALE_HIGH at `high`, linear in between."""
+    if v <= mid:
+        return _blend(SCALE_LOW, SCALE_MID, 1.0 if mid == low else (v - low) / (mid - low))
+    return _blend(SCALE_MID, SCALE_HIGH, 1.0 if high == mid else (v - mid) / (high - mid))
 
 
 class DraftWindow:
@@ -99,7 +130,6 @@ class DraftWindow:
         style = ttk.Style(root)
         if "vista" in style.theme_names():
             style.theme_use("vista")
-        style.configure("Treeview", rowheight=22)
         style.configure("Big.TLabel", font=("Segoe UI", 12, "bold"))
         style.configure("Warn.TLabel", foreground="#b91c1c", font=("Segoe UI", 10, "bold"))
 
@@ -153,7 +183,8 @@ class DraftWindow:
           shows -- both apply as soon as they are picked;
         - Playoffs Schedule: the fantasy playoffs' first and last day (OFF and POG);
         - Roster Settings: teams and the slots per team (UTIL(F/D) is this league's F/D);
-        - Scoring: the points per stat, skaters and goalies (0 = not scored).
+        - Scoring: the points per stat, skaters and goalies (0 = not scored);
+        - VORP Tier Settings: the Tier Gap Z-Score -- how big a drop in value starts a new tier.
 
         Apply rebuilds the board for this session; Save as default also writes it into the
         league's Settings/leagues/ file, which the draft tools start from next time. League defaults
@@ -234,11 +265,24 @@ class DraftWindow:
                   foreground=muted, wraplength=260).grid(row=len(SKATER_SCORING) + 1, column=0,
                                                          columnspan=4, sticky="w", pady=(6, 0))
 
+        tiers = ttk.LabelFrame(outer, text="VORP Tier Settings", padding=10)
+        tiers.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Label(tiers, text="Tier Gap Z-Score", font=bold).grid(row=0, column=0, sticky="w",
+                                                                  padx=(0, 6))
+        self.tier_gap_z = tk.StringVar()
+        ttk.Entry(tiers, textvariable=self.tier_gap_z, width=6, justify="right").grid(
+            row=0, column=1, sticky="w")
+        ttk.Label(tiers, text="A new tier starts where the drop in value to the next player at "
+                              "the position is more than the average drop plus this many standard "
+                              "deviations. Lower gives more tiers.",
+                  foreground=muted, wraplength=460).grid(row=1, column=0, columnspan=2,
+                                                         sticky="w", pady=(4, 0))
+
         self.settings_status = tk.StringVar()
         ttk.Label(outer, textvariable=self.settings_status, foreground=muted,
-                  wraplength=460).grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+                  wraplength=460).grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
         buttons = ttk.Frame(outer)
-        buttons.grid(row=4, column=0, columnspan=2, sticky="e", pady=(8, 0))
+        buttons.grid(row=5, column=0, columnspan=2, sticky="e", pady=(8, 0))
         ttk.Button(buttons, text="League defaults", command=self.settings_defaults).pack(
             side="left", padx=(0, 6))
         ttk.Button(buttons, text="Apply", command=self.settings_apply).pack(side="left", padx=(0, 6))
@@ -247,13 +291,14 @@ class DraftWindow:
         ttk.Button(buttons, text="Close", command=win.destroy).pack(side="left")
         win.bind("<Escape>", lambda _: win.destroy())
 
-        self._fill_settings(self.a.playoffs, self.a.config, self.a.scoreset())
+        self._fill_settings(self.a.playoffs, self.a.config, self.a.scoreset(),
+                            self.a.tier_gap_z())
         win.update_idletasks()
         x = self.root.winfo_rootx() + self.root.winfo_width() - win.winfo_reqwidth() - 40
         y = self.root.winfo_rooty() + 50
         win.geometry(f"+{max(x, 0)}+{y}")
 
-    def _fill_settings(self, playoffs, config, scoreset):
+    def _fill_settings(self, playoffs, config, scoreset, tier_gap_z):
         for var, day in zip(self.playoff_vars, playoffs or ("", "")):
             var.set(pd.Timestamp(day).strftime("%Y-%m-%d") if day != "" else "")
         self.roster_vars["teams"].set(str(config.teams))
@@ -262,6 +307,7 @@ class DraftWindow:
             self.roster_vars[slot].set(str(config.active_slots.get(slot, 0)))
         for (side, key), var in self.scoring_vars.items():
             var.set(f"{scoreset.weights(side).get(key, 0.0):g}")
+        self.tier_gap_z.set(f"{tier_gap_z:g}")
         self._update_roster_total()
 
     def _update_roster_total(self):
@@ -295,6 +341,12 @@ class DraftWindow:
                 return float(text)
             except ValueError:
                 raise ValueError(f"{side} {key}: a number, not {text!r}") from None
+
+        text = self.tier_gap_z.get().strip()
+        try:
+            tier_gap_z = float(text)
+        except ValueError:
+            raise ValueError(f"Tier Gap Z-Score: a number, not {text!r}") from None
         return {
             "playoffs": playoffs,
             "roster": {"teams": whole("teams"), "bench": whole("bench"),
@@ -302,6 +354,7 @@ class DraftWindow:
             "scoring": {side: {key: number(side, key) for key, _ in quantities}
                         for side, quantities in (("skaters", SKATER_SCORING),
                                                  ("goalies", GOALIE_SCORING))},
+            "tier_gap_z": tier_gap_z,
         }
 
     def settings_apply(self) -> bool:
@@ -326,7 +379,7 @@ class DraftWindow:
             return False
         self._set_columns()
         self.refresh()
-        levels = ", ".join(f"{s} {v:.0f}" for s, v in self.a.levels.items())
+        levels = ", ".join(f"{s} {v:.1f}" for s, v in self.a.levels.items())
         self.settings_status.set(f"Applied. {self.a.config.teams} teams, "
                                  f"{self.a.config.roster_size}-man rosters; replacement {levels}.")
         return True
@@ -342,7 +395,8 @@ class DraftWindow:
     def settings_defaults(self):
         """The league and scoring files and the platform's playoff weeks, back in the fields and
         applied (not saved: Save as default does that)."""
-        self._fill_settings(self.a.default_playoffs, self.a.base_config, self.a.base_scoreset)
+        self._fill_settings(self.a.default_playoffs, self.a.base_config, self.a.base_scoreset,
+                            da.draft_board.TIER_GAP_Z)
         self.settings_apply()
 
     def _set_columns(self):
@@ -350,37 +404,55 @@ class DraftWindow:
         follow the scoring and playoff settings, so they are re-laid after each rebuild."""
         self.schedule = [c for c in SCHEDULE_HEADINGS if c in self.a.board.columns]
         self.stats = [c for c in STAT_HEADINGS if c in self.a.board.columns]
-        self.columns = (COLUMNS + [(c, SCHEDULE_HEADINGS[c], 50, "e") for c in self.schedule]
+        self.columns = ([c for c in COLUMNS if c[0] != "injury" or "injury" in self.a.board.columns]
+                        + [(c, SCHEDULE_HEADINGS[c], 50, "e") for c in self.schedule]
                         + [(c, STAT_HEADINGS[c], 50, "e") for c in self.stats])
         keys = [c[0] for c in self.columns]
-        self.tree.delete(*self.tree.get_children())
-        self.tree["displaycolumns"] = "#all"      # Tk refuses new columns while old ones display
-        self.tree.configure(columns=keys)
-        for key, heading, width, anchor in self.columns:
-            self.tree.heading(key, text=heading, command=lambda k=key: self.sort_by(k))
-            self.tree.column(key, width=width, minwidth=width, anchor=anchor, stretch=False)
-        self.tree["displaycolumns"] = ([k for k in keys if k != "injury"]
-                                       if "injury" not in self.a.board.columns else keys)
+        self.sheet.set_sheet_data([[""] * len(keys)], reset_col_positions=True, redraw=False)
+        self.sheet.headers([heading for _, heading, *_ in self.columns], redraw=False)
+        self.sheet.set_column_widths([width for _, _, width, _ in self.columns])
+        self.sheet.align_columns({i: anchor for i, (*_, anchor) in enumerate(self.columns)},
+                                 align_header=True, redraw=False)
         if self.sort_key not in keys:
             self.sort_key, self.sort_reverse = "rank", False
 
     def _build_rankings(self):
         frame = ttk.Frame(self.tabs)
         self.tabs.add(frame, text="Rankings")
-        self.tree = ttk.Treeview(frame, columns=(), show="headings", selectmode="browse")
+        # A read-only spreadsheet (tksheet): unlike a ttk.Treeview it colours single cells.
+        self.sheet = Sheet(frame, show_row_index=False, show_top_left=False, font=TABLE_FONT,
+                           header_font=("Segoe UI", 9, "bold"), default_row_height=22,
+                           table_bg="white")
+        self.sheet.enable_bindings("single_select", "row_select", "column_width_resize",
+                                   "arrowkeys", "copy")
+        self.row_pids = []
+        self._header_press = None
+        self.sheet.bind("<ButtonPress-1>", self._header_down, add="+")
+        self.sheet.bind("<ButtonRelease-1>", self._header_up, add="+")
+        self.sheet.bind("<Double-Button-1>", self._double_click, add="+")
+        self.sheet.pack(fill="both", expand=True)
         self._set_columns()
-        for pos, colour in POSITION_COLOURS.items():
-            self.tree.tag_configure(pos, background=colour)
-        self.tree.tag_configure("taken", foreground="#9ca3af", background="#f3f4f6")
-        self.tree.tag_configure("gone", foreground="#6b7280")
-        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
-        across = ttk.Scrollbar(frame, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=scroll.set, xscrollcommand=across.set)
-        across.pack(side="bottom", fill="x")
-        scroll.pack(side="right", fill="y")
-        self.tree.pack(side="left", fill="both", expand=True)
+
+    def _double_click(self, event):
+        """Tk sends a second quick click as a double-click, not a press: on a header it is still
+        a click (sorting the other way); on a row in --manual it picks the player."""
+        self._header_down(event)
         if self.args.manual:
-            self.tree.bind("<Double-1>", self.pick_selected)
+            self.pick_selected(event)
+
+    def _header_down(self, event):
+        self._header_press = ((event.x_root, self.sheet.identify_column(event))
+                              if self.sheet.identify_region(event) == "header" else None)
+
+    def _header_up(self, event):
+        """A click on a header sorts by its column; a drag (resizing a column) does not."""
+        press, self._header_press = self._header_press, None
+        if (press is None or press[1] is None or self.sheet.identify_region(event) != "header"
+                or abs(event.x_root - press[0]) > 3
+                or self.sheet.identify_column(event) != press[1]):
+            return
+        if press[1] < len(self.columns):
+            self.sort_by(self.columns[press[1]][0])
 
     def _build_board(self):
         outer = ttk.Frame(self.tabs)
@@ -482,11 +554,16 @@ class DraftWindow:
             return da.manual_cells(self.board_json, self.manual_picks)
         return self.cells
 
-    def pick_selected(self, _event=None):
-        chosen = self.tree.selection()
-        if not chosen:
+    def pick_selected(self, event=None):
+        if event is not None and self.sheet.identify_region(event) != "table":
             return
-        pid = int(chosen[0])
+        row = self.sheet.identify_row(event) if event is not None else None
+        if row is None:
+            chosen = self.sheet.get_currently_selected()
+            row = chosen.row if chosen else None
+        if row is None or row >= len(self.row_pids):
+            return
+        pid = self.row_pids[row]
         if pid in self.state["taken"] or self.state["clock"] is None:
             return
         self.manual_picks.append((pid, self.a.names.get(pid, str(pid))))
@@ -518,8 +595,8 @@ class DraftWindow:
         self.show_taken.set(False)
         self.search.set("")
         self.fill_rankings()
-        self.tree.yview_moveto(0)
-        self.tree.xview_moveto(0)
+        self.sheet.set_yview(0)
+        self.sheet.set_xview(0)
 
     def undo(self):
         self.manual_picks = self.manual_picks[:-1]
@@ -556,7 +633,7 @@ class DraftWindow:
         for pid in roster:
             row = a.board.loc[pid] if pid in a.board.index else None
             self.roster_box.insert("end", f"{a.names.get(pid, pid)}"
-                                   + (f"  ({row['positions']}, VOR {row['vor']:.0f})"
+                                   + (f"  ({row['positions']}, VOR {row['vor']:.1f})"
                                       if row is not None else ""))
         self.recent_box.delete(0, "end")
         for c in reversed(s["made"][-10:]):
@@ -591,6 +668,7 @@ class DraftWindow:
                         "periph_pct": r.get("periph_pct"),
                         "team": r["team"] if pd.notna(r["team"]) else "",
                         "positions": r["positions"], "value": r["value"], "vor": r["vor"],
+                        "tier": r.get("tier") or None,
                         "fills": fills, "sources": r["sources"],
                         "adp": adp, "gone": gone,
                         "taken": taken, **{c: r[c] for c in self.schedule + self.stats}})
@@ -623,33 +701,61 @@ class DraftWindow:
         def sort_value(r):
             if key == "injury":
                 return INJURY_ORDER.get(r[key], len(INJURY_ORDER))
+            if key == "tier":      # by the first-listed group's tier, then value within it
+                return int(r[key].split()[0][1:]), -r["value"]
             return (not r[key]) if isinstance(r[key], bool) else r[key]
         present = sorted((r for r in rows if not blank(r)), key=sort_value,
                          reverse=self.sort_reverse ^ (key in DESCENDING))
         rows = present + [r for r in rows if blank(r)]       # blanks last either way
 
-        self.tree.delete(*self.tree.get_children())
-        for r in rows:
+        keys = [c[0] for c in self.columns]
+        pos_col, tier_col = keys.index("positions"), keys.index("tier")
+        scales = {keys.index(c): _scale_points(self.a.board[c]) for c in self.schedule}
+        data, taken, colours = [], [], {}     # colours: bg -> [(row, col)]
+        for i, r in enumerate(rows):
+            text = {
+                "rank": r["rank"],
+                "injury": f"\U0001fa79 {INJURY_LETTER.get(r['injury'], '?')}" if r["injury"] else "",
+                "player": r["player"], "team": r["team"], "positions": r["positions"],
+                "value": _num(r["value"], 1), "vor": _num(r["vor"], 1), "tier": r["tier"] or "",
+                "periph_pct": "" if pd.isna(r["periph_pct"]) else f"{r['periph_pct']:.0f}%",
+                "sources": r["sources"], "adp": _num(r["adp"], 1),
+                "gone": "likely gone" if r["gone"] else "",
+                **{c: _num(r[c]) for c in self.schedule},
+                **{c: _num(r[c], 1) for c in self.stats}}
+            data.append([text[k] for k in keys])
+            if r["taken"]:
+                taken.append(i)
+                continue
             first = str(r["positions"]).split("/")[0]
-            tags = ("taken",) if r["taken"] else ((first,) if first in POSITION_COLOURS else ())
-            if r["gone"]:
-                tags += ("gone",)
-            self.tree.insert("", "end", iid=str(r["pid"]), tags=tags, values=(
-                r["rank"],
-                f"\U0001fa79 {INJURY_LETTER.get(r['injury'], '?')}" if r["injury"] else "",
-                r["player"], r["team"], r["positions"], _num(r["value"]),
-                _num(r["vor"]), "" if pd.isna(r["periph_pct"]) else f"{r['periph_pct']:.0f}%",
-                r["sources"],
-                _num(r["adp"], 1),
-                "likely gone" if r["gone"] else "",
-                *[_num(r[c]) for c in self.schedule],
-                *[_num(r[c], 1 if c in ("shp", "shutouts") else 0) for c in self.stats]))
+            if first in POSITION_COLOURS:
+                colours.setdefault(POSITION_COLOURS[first], []).append((i, pos_col))
+            for col, points in scales.items():
+                v = r[keys[col]]
+                if points is not None and pd.notna(v):
+                    colours.setdefault(_scale_colour(v, *points), []).append((i, col))
+            if r["tier"]:
+                n = int(r["tier"].split()[0][1:])
+                colours.setdefault(TIER_COLOURS[(n - 1) % len(TIER_COLOURS)],
+                                   []).append((i, tier_col))
+        self.row_pids = [r["pid"] for r in rows]
+
+        sheet = self.sheet
+        sheet.dehighlight_all(redraw=False)
+        sheet.set_sheet_data(data, reset_col_positions=False, redraw=False)
+        if taken:
+            sheet.highlight_rows(taken, bg=TAKEN_BG, fg=TAKEN_FG, redraw=False)
+        for bg, cells in colours.items():
+            sheet.highlight_cells(cells=cells, bg=bg, redraw=False)
+        headings = []
         for k, heading, *_ in self.columns:
             if k == "adp":
                 heading = f"ADP {self._adp_name(self.a.adp_platform)}"
             arrow = (" ▼" if self.sort_reverse ^ (k in DESCENDING) else " ▲") \
                 if k == key else ""
-            self.tree.heading(k, text=heading + arrow)
+            headings.append(heading + arrow)
+        sheet.headers(headings, redraw=False)
+        sheet.refresh()
 
     def sort_by(self, key):
         self.sort_reverse = not self.sort_reverse if key == self.sort_key else False

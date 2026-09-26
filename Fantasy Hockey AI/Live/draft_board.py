@@ -45,6 +45,10 @@ POSITION_CODES = {"LW": "L", "RW": "R"}      # Reference.Players carries a few p
 # power-play and short-handed points built from them). `periph_pct` is their share of his points.
 PERIPHERALS = ("hits", "blocks", "shots", "pim")
 OFF_NIGHT_MAX_GAMES = 8     # the aggregate workbook's off night: a date with 8 or fewer NHL games
+# The aggregate workbook's TIER groups (its VorpAll sheets), as its letters, in the order it lists
+# a multi-position player's tiers, and its default Tier Gap Z-Score (Settings!C24).
+TIER_GROUPS = (("C", "C"), ("LW", "L"), ("RW", "R"), ("D", "D"), ("G", "G"))
+TIER_GAP_Z = 1.0
 
 
 def previous(season: str) -> str:
@@ -91,6 +95,27 @@ def peripheral_share(board, scoreset) -> pd.Series:
     return share.where(board["positions"].ne("G") & board["goals"].notna()).round(0)
 
 
+def tiers(board, z=TIER_GAP_Z) -> pd.Series:
+    """The aggregate workbook's TIER column: per position group, the group's values best first;
+    a gap between neighbours bigger than the group's mean gap + `z` standard deviations starts a
+    new tier. The mean is over the n - 1 gaps, the deviation divides by n - 1 too, as the
+    workbook's formulas do. A multi-position player gets each group's tier, "C2 L1"."""
+    positions = board["positions"].str.split("/")
+    labels = pd.Series([[] for _ in board.index], index=board.index)
+    for slot, letter in TIER_GROUPS:
+        values = board.loc[positions.map(lambda p: slot in p), "value"].dropna()
+        values = values.sort_values(ascending=False, kind="stable")
+        gaps = -values.diff().iloc[1:].to_numpy()
+        if len(gaps):
+            mean = gaps.mean()
+            threshold = mean + z * ((((gaps - mean) ** 2).sum() / len(gaps)) ** 0.5)
+            breaks = (gaps > threshold).cumsum()
+        tier = [1] + [1 + int(b) for b in breaks] if len(gaps) else [1] * len(values)
+        for pid, t in zip(values.index, tier):
+            labels[pid].append(f"{letter}{t}")
+    return labels.map(" ".join)
+
+
 def stat_lines(board, external, prior_season, scoreset) -> pd.DataFrame:
     """Every stat the league scores, as a season line per board player, plus games played: the
     consensus line for a player valued on it, last season's totals for one valued on last season
@@ -125,13 +150,13 @@ def stat_lines(board, external, prior_season, scoreset) -> pd.DataFrame:
 
 
 def build(season, prior_season, league_name, scoring, draft_date, strategy, eligibility_platform=None,
-          playoffs=None, config=None, scoreset=None):
+          playoffs=None, config=None, scoreset=None, tier_gap_z=TIER_GAP_Z):
     """The board, the replacement levels, the league config and the eligibility map. Positions come
     from `eligibility_platform` when given (the league's own platform -- Fleaflicker for league
     12090), else from the league config's. With `playoffs` (first day, last day of the fantasy
     playoffs) the board also has `off` and `pog`, the player's team's `schedule_counts`. `config` and
     `scoreset`, when given, stand in for the named league and scoring files (the draft window's
-    own roster and scoring settings)."""
+    own roster and scoring settings). `tier_gap_z` is the TIER column's gap size (`tiers`)."""
     from dataclasses import replace
 
     config = config if config is not None else league_module.load(league_name)
@@ -184,6 +209,7 @@ def build(season, prior_season, league_name, scoring, draft_date, strategy, elig
         "basis": basis.to_numpy(),
     }, index=vor.index)
     board.index.name = "player_id"
+    board["tier"] = tiers(board, tier_gap_z)
     if livepaths.injury_risk().exists():
         # Dobber's Band-Aid Boys tier (Certified, Trainee, Goalie), blank when not listed. Shown,
         # never used: the value is the projections' either way.
