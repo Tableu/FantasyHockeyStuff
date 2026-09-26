@@ -24,21 +24,43 @@ log = logging.getLogger("ingest.player_backfill")
 
 
 def backfill_unresolved_names(cursor, unresolved_table: str) -> dict:
-    cursor.execute(f"SELECT DISTINCT RawName FROM {unresolved_table} WHERE CandidatePlayerIDs IS NULL")
-    names = [row.RawName for row in cursor.fetchall()]
+    """A name matched in the NHL search is added to Reference.Players under its NHL id -- unless
+    that id is already there under another spelling (Anton Silaev for Silayev, Joseph for Joe
+    Veleno): then the name becomes that source's alias for the existing player, and its
+    unresolved row goes. The existing row is never renamed after one source's spelling."""
+    alias_table = unresolved_table.replace("UnresolvedPlayerNames", "PlayerNameAliases")
+    cursor.execute(f"SELECT DISTINCT RawName, SourceID FROM {unresolved_table} WHERE CandidatePlayerIDs IS NULL")
+    # A blank RawName (one projection row has none) is skipped: the search refuses an empty q.
+    rows = [(row.RawName, row.SourceID) for row in cursor.fetchall() if (row.RawName or "").strip()]
+    cursor.execute("SELECT NHLPlayerID, PlayerID FROM Reference.Players WHERE NHLPlayerID IS NOT NULL")
+    known = {r.NHLPlayerID: r.PlayerID for r in cursor.fetchall()}
 
-    counts = {"added": 0, "still_unresolved": 0}
-    for raw_name in names:
-        match = player_search.find_exact_match(raw_name)
+    counts = {"added": 0, "aliased": 0, "still_unresolved": 0}
+    player_ids = set()      # every player added or aliased, returned as counts["player_ids"]
+    matches = {}
+    for raw_name, source_id in rows:
+        if raw_name not in matches:
+            matches[raw_name] = player_search.find_exact_match(raw_name)
+        match = matches[raw_name]
         if match is None:
             counts["still_unresolved"] += 1
+            continue
+
+        existing = known.get(match["nhl_player_id"])
+        if existing is not None:
+            db.upsert(cursor, alias_table, {"SourceID": source_id, "RawName": raw_name},
+                      {"PlayerID": existing})
+            player_ids.add(existing)
+            cursor.execute(f"DELETE FROM {unresolved_table} WHERE SourceID = ? AND RawName = ?",
+                           source_id, raw_name)
+            counts["aliased"] += 1
             continue
 
         # FirstName/LastName left unset (unlike ingest.draft/ingest.teams_players, which both
         # have a real first/last split to write) -- the NHL search result only ever gives a
         # combined "name" string, and splitting it ourselves would mangle any multi-word last
         # name, so this is a deliberate gap, not an oversight.
-        db.upsert_get_id(
+        known[match["nhl_player_id"]] = db.upsert_get_id(
             cursor, "Reference.Players", "PlayerID",
             {"NHLPlayerID": match["nhl_player_id"]},
             {
@@ -48,10 +70,13 @@ def backfill_unresolved_names(cursor, unresolved_table: str) -> dict:
                 "WeightLbs": match["weight_lbs"],
             },
         )
+        player_ids.add(known[match["nhl_player_id"]])
         counts["added"] += 1
 
     log.info(
-        "%s: added %d player(s) via NHL search, %d still unresolved (of %d candidate name(s))",
-        unresolved_table, counts["added"], counts["still_unresolved"], len(names),
+        "%s: added %d player(s) via NHL search, %d aliased to an existing player, "
+        "%d still unresolved (of %d candidate name(s))",
+        unresolved_table, counts["added"], counts["aliased"], counts["still_unresolved"], len(rows),
     )
+    counts["player_ids"] = player_ids
     return counts

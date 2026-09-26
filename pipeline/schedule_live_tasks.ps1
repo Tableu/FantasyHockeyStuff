@@ -8,6 +8,8 @@
 #                               (exits without fetching once every game that day has started)
 #   FantasyHockey-NightlyIngest 04:00 daily               run_daily.py: last night's games, lineups,
 #                               season totals, then the live injury spells
+#   FantasyHockey-PlayerTeams   05:00 daily               import_player_teams.py: new signings, then
+#                               each projected / league-pool player's NHL team (~12 min)
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File schedule_live_tasks.ps1
 #         powershell -ExecutionPolicy Bypass -File schedule_live_tasks.ps1 -Remove
@@ -17,7 +19,7 @@ param([switch]$Remove)
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $runner = Join-Path $here "run_live_snapshot.cmd"
 $names = "FantasyHockey-LiveInjuries", "FantasyHockey-LiveLines", "FantasyHockey-LiveGoalies",
-    "FantasyHockey-NightlyIngest"
+    "FantasyHockey-NightlyIngest", "FantasyHockey-PlayerTeams"
 
 foreach ($name in $names) {
     if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
@@ -55,3 +57,12 @@ Register-ScheduledTask -TaskName "FantasyHockey-NightlyIngest" -Action $nightly 
     -Trigger (New-ScheduledTaskTrigger -Daily -At 04:00) -Settings $nightlySettings `
     -Description "Fantasy Hockey AI nightly ingest: pipeline\run_daily.py" | Out-Null
 Write-Output "Registered FantasyHockey-NightlyIngest"
+
+# Player teams: about 1,500 NHL player pages at the client's pacing, ~12 minutes.
+$teams = New-ScheduledTaskAction -Execute (Join-Path $here "run_player_teams.cmd") -WorkingDirectory $here
+$teamsSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
+    -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName "FantasyHockey-PlayerTeams" -Action $teams `
+    -Trigger (New-ScheduledTaskTrigger -Daily -At 05:00) -Settings $teamsSettings `
+    -Description "Fantasy Hockey AI player teams: pipeline\import_player_teams.py" | Out-Null
+Write-Output "Registered FantasyHockey-PlayerTeams"

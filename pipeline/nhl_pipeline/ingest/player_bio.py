@@ -41,9 +41,10 @@ def players_to_fetch(cursor, refetch: bool = False, played_only: bool = False) -
     return [(r.PlayerID, r.NHLPlayerID) for r in cursor.fetchall()]
 
 
-def sync_player_bio(cursor, player_id: int, nhl_player_id: int) -> dict | None:
-    """Fetch, archive and apply one player's bio. Returns the fields written, or None when the
-    endpoint has no such player (404)."""
+def fetch_landing(cursor, player_id: int, nhl_player_id: int) -> dict | None:
+    """Fetch one player's landing payload and archive its bio, draft and team keys
+    (field_map.PLAYER_LANDING_KEYS). Returns those keys, or None when the endpoint has no such
+    player (404). Shared with ingest.player_teams, which reads the same page for his team."""
     try:
         payload = player_landing.get_player_landing(nhl_player_id)
     except requests.HTTPError as error:
@@ -55,9 +56,23 @@ def sync_player_bio(cursor, player_id: int, nhl_player_id: int) -> dict | None:
     db.upsert(cursor, "Ingestion.RawPlayerResponses",
               {"NHLPlayerID": nhl_player_id, "EndpointType": ENDPOINT},
               {"RawJSON": json.dumps(kept), "RetrievedAt": datetime.now(timezone.utc)})
+    return kept
+
+
+def apply_bio(cursor, player_id: int, kept: dict) -> dict:
+    """Write the bio columns a landing payload has (never a null over a known value)."""
     fields = field_map.player_bio_fields(kept)
     if fields:
         assignments = ", ".join(f"{column} = ?" for column in fields)
         cursor.execute(f"UPDATE Reference.Players SET {assignments} WHERE PlayerID = ?",
                        *fields.values(), player_id)
     return fields
+
+
+def sync_player_bio(cursor, player_id: int, nhl_player_id: int) -> dict | None:
+    """Fetch, archive and apply one player's bio. Returns the fields written, or None when the
+    endpoint has no such player (404)."""
+    kept = fetch_landing(cursor, player_id, nhl_player_id)
+    if kept is None:
+        return None
+    return apply_bio(cursor, player_id, kept)

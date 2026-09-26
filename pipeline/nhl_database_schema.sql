@@ -147,6 +147,12 @@ CREATE TABLE Reference.PlayerTeamHistory
 );
 GO
 
+-- The team a player is signed with (ingest/player_teams.py, from his NHL landing page): at most
+-- one open stint (EndDate NULL) per player per season.
+CREATE UNIQUE INDEX UX_PTH_OpenStint ON Reference.PlayerTeamHistory (PlayerID, SeasonID)
+    WHERE EndDate IS NULL;
+GO
+
 CREATE TABLE Reference.Situations
 (
     SituationID         INT IDENTITY(1,1) NOT NULL,

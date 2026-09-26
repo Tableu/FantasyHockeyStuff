@@ -14,7 +14,9 @@ _session = requests.Session()
 _retry = Retry(
     total=3,
     backoff_factor=1.0,
-    status_forcelist=(500, 502, 503, 504),
+    # 429: api-web.nhle.com rate-limits bursts (seen on the team roster endpoint after ~30
+    # calls); urllib3 waits out its Retry-After before retrying.
+    status_forcelist=(429, 500, 502, 503, 504),
     allowed_methods=("GET",),
 )
 _session.mount("https://", HTTPAdapter(max_retries=_retry))

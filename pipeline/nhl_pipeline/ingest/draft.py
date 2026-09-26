@@ -6,9 +6,8 @@ instead of creating a duplicate -- and is exactly why several 2026 draft picks s
 unresolved names in Projections.UnresolvedPlayerNames until this is run (see
 import_projections.py): they simply didn't have a PlayerID yet.
 
-Team/roster affiliation (Reference.PlayerTeamHistory) is intentionally out of scope here,
-same as ingest.teams_players.sync_players() -- team association is captured per-event once
-the player actually appears in ingested game data.
+Team/roster affiliation is not recorded here: the team a player is signed with
+(Reference.PlayerTeamHistory) comes from his NHL page, ingest/player_teams.py.
 """
 
 import logging

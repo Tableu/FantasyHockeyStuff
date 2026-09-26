@@ -19,10 +19,9 @@ def sync_teams(cursor, home_side: dict, away_side: dict) -> dict:
 def sync_players(cursor, roster_spots: list) -> dict:
     """Upserts every player on both rosters for the game. Returns {NHLPlayerID: PlayerID}.
 
-    Player <-> team affiliation (Reference.PlayerTeamHistory) is intentionally out of scope
-    for V1 -- the report's own "Recommended V1 Implementation" section scopes V1 to a single
-    game working end-to-end, and team association is already captured per-event via the
-    TeamID recorded on Plays/Shots/Goals/Shifts.
+    Player <-> team affiliation is not recorded here: per game it is the TeamID on
+    Plays/Shots/Goals/Shifts, and the team a player is signed with today
+    (Reference.PlayerTeamHistory) comes from his NHL page, ingest/player_teams.py.
     """
     result = {}
     for spot in roster_spots:

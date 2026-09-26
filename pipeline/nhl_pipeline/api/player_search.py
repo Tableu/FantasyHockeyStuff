@@ -23,12 +23,21 @@ def find_exact_match(full_name: str, team_abbrev: str | None = None) -> dict | N
     ingest.draft (a draft pick, which has a team_abbrev to disambiguate same-named players
     with) and ingest.player_backfill (a bare unresolved name, no team context) -- the two
     "has a real NHL id, hasn't dressed for an ingested game yet" resolution paths, so a fix to
-    the matching logic (accents, suffixes, whitespace) only ever has to happen once."""
-    candidates = [
-        field_map.player_search_result_fields(r)
-        for r in search_player(full_name)
-        if (r.get("name") or "").strip().lower() == full_name.strip().lower()
-    ]
+    the matching logic (accents, suffixes, whitespace) only ever has to happen once.
+
+    The search ranks a full name loosely: "Roger McQueen" returns ten other Rogers and not him,
+    while "McQueen" returns him (checked 2026-09-26). So when the full name finds no exact
+    match, the last name alone is searched too -- still keeping only exact full-name matches."""
+    wanted = full_name.strip().lower()
+
+    def exact(results):
+        return [field_map.player_search_result_fields(r) for r in results
+                if (r.get("name") or "").strip().lower() == wanted]
+
+    candidates = exact(search_player(full_name))
+    last_name = full_name.strip().split()[-1] if full_name.strip() else ""
+    if not candidates and last_name and last_name.lower() != wanted:
+        candidates = exact(search_player(last_name, limit=50))
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1 and team_abbrev:
