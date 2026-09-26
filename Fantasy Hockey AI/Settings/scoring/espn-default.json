@@ -1,0 +1,12 @@
+{
+  "name": "espn-default",
+  "description": "ESPN's standard head-to-head points scoring for fantasy hockey (public leagues use it). Source: espn.com 'Which fantasy hockey league is right for you?' (story id 34491407), read 2026-09-25. Re-check against a real league's mSettings once one is joined.",
+  "skaters": {
+    "goals": 2.0, "assists": 1.0, "ppp": 0.5, "shp": 0.5,
+    "shots": 0.1, "hits": 0.1, "blocks": 0.5
+  },
+  "goalies": {
+    "wins": 4.0, "goals_against": -2.0, "saves": 0.2,
+    "shutouts": 3.0, "ot_losses": 1.0
+  }
+}

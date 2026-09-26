@@ -1,0 +1,84 @@
+{
+  "name": "espn-default",
+  "description": "PROVISIONAL ESPN public league (default settings), 2026-09-25: ESPN's roster, move limit, waiver and playoff defaults are not published (espn.com story 34491407 covers scoring only), so this copies the Fleaflicker 12090 league's roster and rules (league.json) and uses ESPN's own position eligibility. Pair it with Settings/scoring/espn-default.json. Replace from the joined league's mSettings. Known ESPN differences not modelled here: add/drop, waiver and IR moves lock at the day's first game; a healthy player on IR blocks adds.",
+  "teams": 14,
+  "active_slots": {
+    "C": 2,
+    "LW": 2,
+    "RW": 2,
+    "F": 1,
+    "D": 4,
+    "F/D": 1,
+    "G": 2
+  },
+  "bench": 4,
+  "ir": 2,
+  "moves_per_week": 7,
+  "moves_carry_over": false,
+  "waiver_days": 2,
+  "ties": "split",
+  "schedule": {
+    "type": "round_robin",
+    "regular_season_weeks": 24,
+    "regular_season_weeks_by_season": {
+      "2025-26": 21
+    },
+    "week_starts_on": "MON",
+    "min_first_week_games": 20
+  },
+  "draft": {
+    "type": "snake",
+    "order": "lottery",
+    "keepers": 0
+  },
+  "playoffs": {
+    "teams": 6,
+    "byes": 2,
+    "rounds": 3,
+    "weeks_per_round": 1,
+    "seeding": "record",
+    "tiebreak": "points_for"
+  },
+  "eligibility_platform": "espn",
+  "eligibility_season": "2026-27",
+  "slot_positions": {
+    "C": [
+      "C"
+    ],
+    "LW": [
+      "LW"
+    ],
+    "RW": [
+      "RW"
+    ],
+    "D": [
+      "D"
+    ],
+    "G": [
+      "G"
+    ],
+    "F": [
+      "C",
+      "LW",
+      "RW"
+    ],
+    "F/D": [
+      "C",
+      "LW",
+      "RW",
+      "D"
+    ]
+  },
+  "rules": {
+    "lineup_lock": "daily",
+    "waivers": "rolling",
+    "ir_eligible": "injured",
+    "move_cost": {
+      "add": 1,
+      "claim": 1,
+      "drop": 0,
+      "ir_stash": 0,
+      "ir_activate": 0
+    }
+  }
+}
