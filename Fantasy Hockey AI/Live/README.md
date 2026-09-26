@@ -38,6 +38,7 @@ python draft_gui.py --league espn-la --standalone --slot 1  # a live ESPN draft:
 python draft_assistant.py --league espn --slot 10           # an unreadable draft: type picks
 python draft_gui.py                                         # the window
 python plan_gui.py                                          # today's plan (league beagles)
+python plan_gui.py --league espn-la                        # today's plan for the ESPN league
 python plan_gui.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --now "2026-09-29 23:30"
 python run_live.py --make-fake                              # fixtures/beagles/fake_league.json
 python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh
@@ -50,6 +51,13 @@ with no player until the draft is over (espn-la, 2026-09-26: 0 picks at 2.5 minu
 the moment it finished), and ESPN re-draws the pick order when the draft starts. So a live ESPN
 draft runs `--standalone --slot <your slot once the order is drawn>`, every pick double-clicked;
 the adapter reads the finished draft fine.
+
+**In season on ESPN** (`--league espn-la`) the runner reads rosters, IR, lineup slots and the
+matchup from ESPN, and who is on waivers until when (`Espn.waivers`, so an unrostered player on
+waivers is a claim, not an add), and moves used this week (each team's
+`transactionCounter.matchupAcquisitionTotals`). ESPN's settings can report no acquisition limit on
+a league that has one -- espn-la reports none and allows 6 a week -- so check the limit in
+`Settings/rosters/<league>.json` after `import_league_settings.py`.
 
 Plans are never scheduled -- they run when you open plan_gui.py (or call run_live.py). Task
 Scheduler keeps only the injury / line / goalie snapshots and the nightly ingest running, so the

@@ -13,7 +13,7 @@
   "strategy": null,
   "eligibility_platform": "espn",
   "adp_platform": "espn",
-  "active": false,
+  "active": true,
   "auth": null,
   "draft_window": {}
 }

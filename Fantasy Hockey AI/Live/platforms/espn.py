@@ -13,12 +13,19 @@ A public league answers anyone; a private one needs the owner's `espn_s2` and `S
     statId         decoded by matching 2025-26 season totals to our database (STAT_KEYS below):
                    skaters 85-100% exact, goalies 94-100%
     draft          mDraftDetail picks carry every pick slot before the draft (playerId -1 until
-                   made), so the whole snake order is known in advance
+                   made). But the order is re-drawn when the draft starts, and a live draft's
+                   picks stay -1 until it is over (public league 1747127466, 2026-09-26: 0 of
+                   them 2.5 minutes in, all 220 at the end) -- so a live ESPN draft runs
+                   --standalone, and only a finished one can be read
+    waivers        kona_player_info with an x-fantasy-filter on status WAIVERS: each player's
+                   waiverProcessDate (after the draft every undrafted player sits on waivers
+                   until the next midnight Pacific but one)
     transactions   mTransactions2 returned nothing for any scoring period, with or without an
-                   x-fantasy-filter header -- not read. That league has no acquisition limit, so
-                   nothing depends on it yet; a limited ESPN league needs this solved first.
+                   x-fantasy-filter header -- not read. Moves used this week come from mTeam's
+                   transactionCounter.matchupAcquisitionTotals instead ({matchup period: adds})
 """
 
+import datetime as dt
 import json
 
 import pandas as pd
@@ -141,6 +148,22 @@ class Espn:
     def roster(self, team_id: int) -> TeamRoster:
         return next(t for t in self.rosters() if t.team_id == team_id)
 
+    def waivers(self, limit: int = 3000) -> dict:
+        """{ESPN player id: the local date he clears waivers} for every player on waivers now; he
+        is a free agent from that date on."""
+        # ESPN refuses a limit without a sort (400); the owned share is its usual one.
+        flt = {"players": {"filterStatus": {"value": ["WAIVERS"]}, "limit": limit,
+                           "sortPercOwned": {"sortPriority": 1, "sortAsc": False}}}
+        r = requests.get(API.format(year=self.season, league_id=self.league_id),
+                         params={"view": "kona_player_info"}, cookies=self.cookies, timeout=30,
+                         headers={"User-Agent": "python-requests", "x-fantasy-filter": json.dumps(flt)})
+        r.raise_for_status()
+        players = r.json().get("players", [])
+        if len(players) >= limit:
+            raise RuntimeError(f"ESPN returned {limit} players on waivers, the limit: raise it")
+        return {p["id"]: dt.datetime.fromtimestamp(p["waiverProcessDate"] / 1000).date().isoformat()
+                for p in players if p.get("status") == "WAIVERS" and p.get("waiverProcessDate")}
+
     # ---------- the week ----------
 
     def matchup(self, team_id: int, day=None, period: int | None = None) -> Matchup | None:
@@ -160,10 +183,14 @@ class Espn:
         return None
 
     def moves_used(self, team_id: int, day=None) -> int:
-        if self.rules()["acquisition_limit"] is None:
-            return 0          # no limit in this league: nothing to count against
-        raise NotImplementedError("ESPN transactions are not readable yet (see the module docstring); "
-                                  "a league with an acquisition limit needs them")
+        """Acquisitions this matchup period: the team's transactionCounter.matchupAcquisitionTotals,
+        keyed by matchup period. `day` is accepted for the interface; the period is ESPN's current
+        one. (mSettings can report no limit on a league that has one -- espn-la reports
+        acquisitionLimit -1 with a 6-a-week limit -- so the limit itself comes from the rules file.)"""
+        period = str(self._get("mMatchupScore")["status"]["currentMatchupPeriod"])
+        team = next(t for t in self._get("mTeam")["teams"] if t["id"] == team_id)
+        totals = (team.get("transactionCounter") or {}).get("matchupAcquisitionTotals") or {}
+        return int(totals.get(period, 0))
 
     # ---------- the draft ----------
 

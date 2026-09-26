@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """Writes today's plan for my team: IR moves, adds and drops, claims, and tonight's lineup
-(live.py) for a registry league (`--league`, Settings/leagues/). Recommend-only -- the plan is a file; make the moves on Fleaflicker.
+(live.py) for a registry league (`--league`, Settings/leagues/). Recommend-only -- the plan is a file; make the moves on the platform (Fleaflicker, ESPN).
 
     reports/<league>/plans/plan_{date}_{HHMM}.md    the plan (and .json beside it)
     reports/<league>/plans/plan_latest.md            a copy of the newest one

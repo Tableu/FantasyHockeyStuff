@@ -5,7 +5,7 @@ view from today instead and hands it to the same manager, so live play and the b
 every decision rule:
 
     league      a LeagueSnapshot: the 14 rosters, IR, this week's moves, waivers, the matchup
-                -- from Fleaflicker after the draft, or from a JSON file (`--league-file`),
+                -- from the platform (Fleaflicker, ESPN) after the draft, or from a JSON file (`--league-file`),
                 which is how the runner is exercised before rosters exist (`make_fake_league`)
     tonight     Projections/reports/live/tonight_{date}.parquet (project_tonight.py): skater
                 p_plays and lambdas, goalie P(start) with the Daily Faceoff overrides
@@ -61,6 +61,7 @@ STATUS_DIR = paths.FEATURES_DIR.parent / "live"
 INJURED = ("OUT", "SUSP")
 DECISION_SIMS = 400
 FREE_AGENTS_SHOWN = 60
+PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
 
 
 def season_of(day: dt.date) -> str:
@@ -130,10 +131,17 @@ class LeagueSnapshot:
         opponent = None
         if matchup is not None and matchup.opponent_id is not None:
             opponent = next((i for i, t in enumerate(teams) if t["team_id"] == matchup.opponent_id), None)
+        # Who is on waivers and until when, where the platform says (ESPN); otherwise none.
+        waivers = {}
+        if hasattr(adapter, "waivers"):
+            for external_id, clears in adapter.waivers().items():
+                player_id = ids.get(external_id)
+                if player_id is not None:
+                    waivers[player_id] = clears
         return cls(teams=teams, me=me, opponent=opponent,
                    my_week_points=matchup.points if matchup else 0.0,
                    opponent_week_points=matchup.opponent_points if matchup else 0.0,
-                   lineup=lineup, waivers={},
+                   lineup=lineup, waivers=waivers,
                    source=f"{adapter.platform} league {adapter.league_id}"
                           + (f" (season {adapter.season})" if adapter.season else ""))
 
@@ -227,7 +235,11 @@ class LiveRunner:
 
         # The board's season totals as a rate per team game: the rest-of-season seed (skaters, as
         # the engine's `ros` is) and the per-game seed for everyone nothing has projected yet.
+        # An abbreviation can have two ids (UTA is 18 and 65; the schedule plays 18): take the one
+        # this season's schedule uses, or every Utah player looks like he has no games.
         teams = pd.read_parquet(paths.teams())
+        scheduled = set(team_games.index)
+        teams = teams.assign(plays=teams["team_id"].isin(scheduled)).sort_values("plays")
         abbreviation_to_id = dict(zip(teams["team"], teams["team_id"]))
         self.board_team = {int(p): abbreviation_to_id.get(t) for p, t in zip(self.board.index, self.board["team"])}
         per_game = {}
@@ -463,7 +475,8 @@ class LiveRunner:
         goalie_notes = rows[(rows["kind"] == "goalie") & rows["player_id"].isin(me.roster)]
         return {
             "generated_at": now.isoformat(timespec="minutes") + "Z", "game_date": self.day.isoformat(),
-            "league_source": snapshot.source, "team": snapshot.teams[snapshot.me]["name"],
+            "league_source": snapshot.source, "platform": PLATFORM_NAMES.get(self.league.platform, "the platform"),
+            "team": snapshot.teams[snapshot.me]["name"],
             "week": v.week, "moves_left": v.moves_left,
             "moves_used_before": before["moves_used"],
             "matchup_z": round(z, 2), "p_win": round(statistics.NormalDist().cdf(z), 3),
@@ -542,5 +555,5 @@ def render(plan: dict) -> str:
     if plan["problems"]:
         lines += ["## Problems", *[f"- {p}" for p in plan["problems"]], ""]
     lines += ["---", f"Rates are points per team game as the move was priced ({plan['rate_source']}). Sampler fit: {plan['sim_season']}. "
-              f"Recommend-only: make these moves on Fleaflicker yourself.", ""]
+              f"Recommend-only: make these moves on {plan.get('platform', 'the platform')} yourself.", ""]
     return "\n".join(lines)
