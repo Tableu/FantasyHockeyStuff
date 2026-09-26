@@ -174,7 +174,9 @@ class Espn:
 
     def draft_board(self) -> dict:
         """The draft in the shape Fleaflicker's FetchLeagueDraftBoard returns (what the draft tools
-        parse): every pick slot in order, the player once picked. Names are ours, via PlayerIds."""
+        parse): every pick slot in order, the player once picked. Names are ours, via PlayerIds.
+        Fetched fresh on every call: the draft tools poll it, and a cached copy froze the board."""
+        self._cache.pop("mDraftDetail", None)
         data = self._get("mDraftDetail")
         names = self.teams()
         ids = PlayerIds(self.platform)

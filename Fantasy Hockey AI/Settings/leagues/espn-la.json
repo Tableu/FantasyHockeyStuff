@@ -1,0 +1,19 @@
+{
+  "name": "espn-la",
+  "description": "ESPN public league 1747127466, 'Los Angeles Pro H2H Points League' (https://fantasy.espn.com/hockey/league?leagueId=1747127466). 10-team H2H points, snake. Team 5, Brian's Brilliant Team. Rules and scoring from import_league_settings.py.",
+  "platform": "espn",
+  "league_id": 1747127466,
+  "season": "2026-27",
+  "team": {
+    "id": 5,
+    "name": "Brian's Brilliant Team"
+  },
+  "rules": "espn-la",
+  "scoring": "espn-la",
+  "strategy": null,
+  "eligibility_platform": "espn",
+  "adp_platform": "espn",
+  "active": false,
+  "auth": null,
+  "draft_window": {}
+}

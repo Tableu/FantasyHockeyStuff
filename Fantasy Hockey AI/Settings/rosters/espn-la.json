@@ -1,0 +1,69 @@
+{
+  "name": "espn-la",
+  "description": "Generated from espn league 1747127466 (import_league_settings.py). Differs from the platform: lineup lock INDIVIDUAL_GAME (the harness locks daily); waivers WAIVERS_TRADITIONAL (the harness rolls them); no acquisition limit (written as 99 a week); at most 4 goalies rostered (not enforced by the harness).",
+  "teams": 10,
+  "active_slots": {
+    "F": 9,
+    "D": 5,
+    "G": 2,
+    "UTIL": 1
+  },
+  "bench": 5,
+  "ir": 1,
+  "moves_per_week": 99,
+  "moves_carry_over": false,
+  "waiver_days": 1,
+  "ties": "split",
+  "schedule": {
+    "type": "round_robin",
+    "regular_season_weeks": 23,
+    "week_starts_on": "MON",
+    "min_first_week_games": 20
+  },
+  "draft": {
+    "type": "snake",
+    "order": "lottery",
+    "keepers": 0
+  },
+  "playoffs": {
+    "teams": 4,
+    "byes": 0,
+    "rounds": 2,
+    "weeks_per_round": 1,
+    "seeding": "record",
+    "tiebreak": "points_for"
+  },
+  "eligibility_platform": "espn",
+  "eligibility_season": "2026-27",
+  "slot_positions": {
+    "F": [
+      "C",
+      "LW",
+      "RW"
+    ],
+    "D": [
+      "D"
+    ],
+    "G": [
+      "G"
+    ],
+    "UTIL": [
+      "C",
+      "LW",
+      "RW",
+      "D"
+    ]
+  },
+  "rules": {
+    "lineup_lock": "daily",
+    "waivers": "rolling",
+    "ir_eligible": "injured",
+    "move_cost": {
+      "add": 1,
+      "claim": 1,
+      "drop": 0,
+      "ir_stash": 0,
+      "ir_activate": 0
+    }
+  }
+}

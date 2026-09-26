@@ -33,7 +33,8 @@ share a name with one in Season/, Decisions/ or Simulation/ -- checked at import
 ```
 python draft_assistant.py                                   # follow the draft (league beagles)
 python draft_assistant.py --team 63341 --replay-season 2025 # rehearse on the 2025 draft
-python draft_assistant.py --league <an espn league>         # follow an ESPN draft (see leagues/)
+python draft_assistant.py --league <an espn league>         # an ESPN draft, once it is over (see below)
+python draft_gui.py --league espn-la --standalone --slot 1  # a live ESPN draft: double-click every pick
 python draft_assistant.py --league espn --slot 10           # an unreadable draft: type picks
 python draft_gui.py                                         # the window
 python plan_gui.py                                          # today's plan (league beagles)
@@ -43,6 +44,12 @@ python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.
 python run_live.py --date 2026-09-29 --platform-season 2025          # rehearse on 12090's 2025 rosters
 python run_live.py --window --refresh                       # in season: reads the league from Fleaflicker
 ```
+
+**ESPN drafts cannot be followed live.** ESPN's read API (`mDraftDetail`) lists every pick slot
+with no player until the draft is over (espn-la, 2026-09-26: 0 picks at 2.5 minutes in, all 220
+the moment it finished), and ESPN re-draws the pick order when the draft starts. So a live ESPN
+draft runs `--standalone --slot <your slot once the order is drawn>`, every pick double-clicked;
+the adapter reads the finished draft fine.
 
 Plans are never scheduled -- they run when you open plan_gui.py (or call run_live.py). Task
 Scheduler keeps only the injury / line / goalie snapshots and the nightly ingest running, so the

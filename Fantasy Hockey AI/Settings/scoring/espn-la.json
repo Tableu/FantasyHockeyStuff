@@ -1,0 +1,20 @@
+{
+  "name": "espn-la",
+  "description": "Generated from espn league 1747127466.",
+  "skaters": {
+    "shots": 0.1,
+    "hits": 0.1,
+    "blocks": 0.5,
+    "ppp": 0.5,
+    "shp": 0.5,
+    "assists": 1.0,
+    "goals": 2.0
+  },
+  "goalies": {
+    "goals_against": -2.0,
+    "saves": 0.2,
+    "ot_losses": 1.0,
+    "shutouts": 3.0,
+    "wins": 4.0
+  }
+}
