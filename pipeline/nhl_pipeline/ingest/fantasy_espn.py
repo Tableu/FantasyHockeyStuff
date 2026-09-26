@@ -29,6 +29,7 @@ import logging
 
 from nhl_pipeline import db, name_resolver
 from nhl_pipeline.api import espn_fantasy, field_map
+from nhl_pipeline.ingest.fantasy_fleaflicker import IDS_TABLE, ensure_ids_table
 
 log = logging.getLogger("ingest.fantasy_espn")
 
@@ -69,7 +70,12 @@ def sync_espn(cursor, year: int, season_id: int) -> dict:
         # would delete last run's real ADP for nothing gained.
         db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
-    counts = {"adp": 0, "positions": 0, "unresolved": 0}
+    # ESPN's own player ids too (Fantasy.PlatformPlayerIDs), so a live ESPN league's rosters and
+    # draft picks -- which arrive by those ids -- name a player exactly (Live/platforms/).
+    ensure_ids_table(cursor)
+    db.delete_where(cursor, IDS_TABLE, {"FantasyPlatformID": platform_id, "SeasonID": season_id})
+
+    counts = {"adp": 0, "positions": 0, "unresolved": 0, "ids": 0}
     for f in fields:
         if not f["full_name"]:
             continue
@@ -81,6 +87,13 @@ def sync_espn(cursor, year: int, season_id: int) -> dict:
         if player_id is None:
             counts["unresolved"] += 1
             continue
+
+        if f.get("espn_player_id") is not None:
+            db.upsert(cursor, IDS_TABLE,
+                      {"FantasyPlatformID": platform_id, "SeasonID": season_id,
+                       "ExternalPlayerID": str(f["espn_player_id"])},
+                      {"PlayerID": player_id})
+            counts["ids"] += 1
 
         if adp_is_live and f["average_draft_position"]:
             db.upsert(
@@ -102,7 +115,7 @@ def sync_espn(cursor, year: int, season_id: int) -> dict:
             counts["positions"] += 1
 
     log.info(
-        "ESPN: %d ADP row(s), %d position row(s), %d unresolved name(s)",
-        counts["adp"], counts["positions"], counts["unresolved"],
+        "ESPN: %d ADP row(s), %d position row(s), %d id(s), %d unresolved name(s)",
+        counts["adp"], counts["positions"], counts["ids"], counts["unresolved"],
     )
     return counts

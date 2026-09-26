@@ -19,7 +19,7 @@ Projections/project_tonight.py). `--now` (UTC) sets the moment the per-game lock
 within WINDOW_LEAD of now and that group has no plan yet (plan_{date}_w{HHMM}.md, the puck time),
 so Task Scheduler can call it every 15 minutes and each window is planned once, fresh:
 
-    python run_live.py --league beagles --window --refresh --league-file <snapshot>.json
+    python run_live.py --league beagles --window --refresh      # reads the league from Fleaflicker
 """
 
 import argparse
@@ -33,6 +33,7 @@ import sys
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import leagues
 import livepaths
+import platforms
 import paths
 import live
 
@@ -77,6 +78,8 @@ def main():
     parser.add_argument("--refresh", action="store_true", help="rebuild tonight's rows and projections first")
     parser.add_argument("--now", default=None, help="UTC moment for the per-game lock (default: now)")
     parser.add_argument("--window", action="store_true", help="plan only if a puck window opens within 30 min")
+    parser.add_argument("--platform-season", type=int, default=None,
+                        help="read the league as it stood in a past season (e.g. 2025) -- a rehearsal")
     args = parser.parse_args()
     day = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
     now = (dt.datetime.fromisoformat(args.now) if args.now
@@ -108,9 +111,13 @@ def main():
         if not args.league_file:
             return
 
-    if not args.league_file:
-        raise SystemExit("no league snapshot: pass --league-file (Fleaflicker rosters are read once the league has drafted)")
-    snapshot = live.LeagueSnapshot.load(args.league_file)
+    if args.league_file:
+        snapshot = live.LeagueSnapshot.load(args.league_file)
+    else:
+        adapter = platforms.for_league(league, season=args.platform_season)
+        if adapter is None:
+            raise SystemExit(f"{league.name} has no readable platform: pass --league-file")
+        snapshot = live.LeagueSnapshot.from_platform(adapter, league.team_id, day)
     plan = live.LiveRunner.plan(runner, snapshot, now)
 
     paths.ensure(plans_dir)

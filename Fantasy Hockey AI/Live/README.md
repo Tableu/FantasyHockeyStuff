@@ -11,6 +11,9 @@ draft_gui.py        the same in a window
 live.py             the live runner: the shipped manager on the real league (see its docstring)
 run_live.py         writes the day's plan (reports/plans/<league>/plan_{date}_*.md); --window per game
 leagues.py          the league registry (Settings/leagues/<name>.json): --league on every tool
+platforms/          read-only platform adapters: fleaflicker.py (draft board, rosters + IR, lineup
+                    slots, moves used this week, matchup, rules), standalone.py; espn.py once a
+                    league is joined. Platform ids -> PlayerIDs via platforms.PlayerIds
 seasonlayer.py      the one bridge into Season/ (league, state, view, schedule, inputs, ...)
 livepaths.py        Live's own locations (never named paths.py -- see seasonlayer.py)
 fixtures/           made-up leagues for exercising the tools before a league has rosters
@@ -29,6 +32,8 @@ python draft_assistant.py --league espn --slot 10           # unreadable draft (
 python draft_gui.py                                         # the window
 python run_live.py --make-fake                              # fixtures/beagles/fake_league.json
 python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh
+python run_live.py --date 2026-09-29 --platform-season 2025          # rehearse on 12090's 2025 rosters
+python run_live.py --window --refresh                       # in season: reads the league from Fleaflicker
 ```
 
 The in-season inputs come from the other folders: tonight's projections from

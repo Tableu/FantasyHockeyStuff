@@ -98,6 +98,41 @@ class LeagueSnapshot:
                    source=raw.get("source", f"file {Path(path).name}"))
 
 
+    @classmethod
+    def from_platform(cls, adapter, my_team_id: int, day: dt.date) -> "LeagueSnapshot":
+        """The league as its platform shows it now (platforms/): every roster and IR, my current
+        lineup slots, moves used this week, the matchup. Platform ids become our PlayerIDs through
+        `platforms.PlayerIds`; a player with none is logged and left out -- never guessed."""
+        import platforms
+
+        ids = platforms.PlayerIds(adapter.platform)
+        teams, me, unmatched = [], None, []
+        for index, team in enumerate(adapter.rosters()):
+            roster, missing = ids.resolve(team.roster)
+            ir, missing_ir = ids.resolve(team.ir)
+            unmatched += missing + missing_ir
+            if team.team_id == my_team_id:
+                me = index
+                lineup = {label: ids.resolve(players)[0] for label, players in team.lineup.items()
+                          if label not in ("BN", "IR")}
+            teams.append({"name": team.name, "team_id": team.team_id, "roster": roster, "ir": ir,
+                          "moves_used": adapter.moves_used(team.team_id, day)})
+        if me is None:
+            raise SystemExit(f"team {my_team_id} is not in this league's rosters")
+        if unmatched:
+            log.warning("%d rostered player(s) with no PlayerID, left out: %s", len(unmatched), unmatched)
+        matchup = adapter.matchup(my_team_id, day)
+        opponent = None
+        if matchup is not None and matchup.opponent_id is not None:
+            opponent = next((i for i, t in enumerate(teams) if t["team_id"] == matchup.opponent_id), None)
+        return cls(teams=teams, me=me, opponent=opponent,
+                   my_week_points=matchup.points if matchup else 0.0,
+                   opponent_week_points=matchup.opponent_points if matchup else 0.0,
+                   lineup=lineup, waivers={},
+                   source=f"{adapter.platform} league {adapter.league_id}"
+                          + (f" (season {adapter.season})" if adapter.season else ""))
+
+
 def make_fake_league(board: pd.DataFrame, config, eligibility, me: int, opponent: int, seed: int = 0,
                      my_name: str = "My team") -> dict:
     """A made-up league for exercising the runner before the draft: every seat drafts the

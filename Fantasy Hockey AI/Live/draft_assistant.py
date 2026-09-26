@@ -32,13 +32,15 @@ import logging
 import os
 import sys
 import time
-import urllib.request
 
 import pandas as pd
 
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import leagues
 import livepaths
+from platforms.fleaflicker import (configure_replay, fetch_board, picks_from, playoff_window,
+                                   team_id_for)
+from platforms.standalone import standalone_board
 import draft_board
 import league as league_module
 import paths
@@ -48,67 +50,11 @@ from decisionlayer import load_strategy
 from decisionlayer import slots as slots_module
 
 log = logging.getLogger("draft-assistant")
-API = "https://www.fleaflicker.com/api"
 PLATFORM = "Fleaflicker"     # the league's platform: picks arrive by its player ids
 # The aggregate workbook's roster slots, as this league's slot codes. W (a wing: LW or RW) is the
 # workbook's; the league file does not define it, so it is added here. F/D is its UTIL(F/D).
 ROSTER_SLOTS = ("C", "LW", "RW", "W", "F", "D", "F/D", "G")
 EXTRA_SLOT_POSITIONS = {"W": ["LW", "RW"]}
-
-
-# A rehearsal of the live path (--replay-season): every poll really reads Fleaflicker, but reads a
-# finished draft of this league (e.g. the 2025 one) and hides the picks not yet "made", revealing
-# one every `seconds` from `start` on -- so polling, parsing, matching and redraws all run as they
-# will on draft night.
-REPLAY = {"season": None, "seconds": 5.0, "start": 0, "t0": None}
-
-
-def configure_replay(season, seconds=5.0, start=0):
-    REPLAY.update(season=season, seconds=float(seconds), start=int(start), t0=None)
-
-
-def fetch_board(league_id: int) -> dict:
-    url = f"{API}/FetchLeagueDraftBoard?sport=NHL&league_id={league_id}"
-    if REPLAY["season"]:
-        url += f"&season={REPLAY['season']}"
-    with urllib.request.urlopen(url, timeout=20) as response:
-        board = json.load(response)
-    if REPLAY["season"]:
-        if REPLAY["t0"] is None:
-            REPLAY["t0"] = time.time()
-        made = REPLAY["start"] + int((time.time() - REPLAY["t0"]) / REPLAY["seconds"])
-        for row in board.get("rows", []):
-            for cell in row.get("cells", []):
-                if cell["slot"]["overall"] > made:
-                    cell.pop("player", None)
-    return board
-
-
-def playoff_window(league_id: int, weeks: int):
-    """First and last day of the league's fantasy playoffs: its last `weeks` scoring periods on
-    Fleaflicker's schedule (league 12090: weeks 24-26, 2027-03-15 to 2027-04-04)."""
-    url = f"{API}/FetchLeagueScoreboard?sport=NHL&league_id={league_id}"
-    with urllib.request.urlopen(url, timeout=20) as response:
-        periods = json.load(response)["eligibleSchedulePeriods"]
-
-    def day(bound):     # the period boundaries are early-morning UTC instants on the NHL's day
-        return dt.datetime.fromtimestamp(int(bound["startEpochMilli"]) / 1000,
-                                         dt.timezone(dt.timedelta(hours=-5))).date()
-    last = sorted(periods, key=lambda p: p["ordinal"])[-weeks:]
-    return pd.Timestamp(day(last[0]["low"])), pd.Timestamp(day(last[-1]["high"]))
-
-
-def picks_from(board_json: dict) -> list:
-    """Every pick cell in draft order: overall, round, team id, team name, and the picked player's
-    Fleaflicker id and name (None until he is picked)."""
-    cells = []
-    for row in board_json.get("rows", []):
-        for cell in row.get("cells", []):
-            player = (cell.get("player") or {}).get("proPlayer") or {}
-            cells.append({"overall": cell["slot"]["overall"], "round": cell["slot"]["round"],
-                          "team_id": cell["team"]["id"], "team": cell["team"]["name"],
-                          "fleaflicker_id": player.get("id"), "name": player.get("nameFull")})
-    return sorted(cells, key=lambda c: c["overall"])
 
 
 class Assistant:
@@ -304,38 +250,6 @@ class Assistant:
         print(text)
         livepaths.ensure(livepaths.REPORTS_DIR)
         (livepaths.REPORTS_DIR / "draft_assistant.md").write_text(text, encoding="utf-8")
-
-
-def team_id_for(board_json, name):
-    """A team by its name, or by its Fleaflicker team id (Burnaby Beagles is 63341; the id stays
-    the same across seasons while the name may not -- in 2025 it was One if by Landeskog)."""
-    for team in board_json.get("draftOrder", []):
-        if (team["name"].strip().lower() == name.strip().lower()
-                or str(team["id"]) == name.strip()):
-            return team["id"], team["name"]
-    names = ", ".join(t["name"] for t in board_json.get("draftOrder", []))
-    raise SystemExit(f"no team named {name!r} in this draft; teams: {names}")
-
-
-def standalone_board(teams: int, slot: int, rounds: int, order: str = "snake",
-                     my_name: str = "My team") -> dict:
-    """A draft board for a league the tools cannot read (ESPN, Yahoo, a room with no API), in the
-    shape Fleaflicker's FetchLeagueDraftBoard returns, so everything downstream -- picks_from,
-    team_id_for, manual_cells, the redraw -- runs unchanged. Seat `slot` (1-based) is mine; the
-    others are "Team N". `order` is "snake" (reverses every round) or "linear"."""
-    if not 1 <= slot <= teams:
-        raise SystemExit(f"--slot must be between 1 and {teams}")
-    seats = [{"id": seat, "name": my_name if seat == slot else f"Team {seat}"}
-             for seat in range(1, teams + 1)]
-    rows, overall = [], 0
-    for round_number in range(1, rounds + 1):
-        seats_this_round = seats if order == "linear" or round_number % 2 == 1 else seats[::-1]
-        cells = []
-        for team in seats_this_round:
-            overall += 1
-            cells.append({"slot": {"overall": overall, "round": round_number}, "team": team})
-        rows.append({"cells": cells})
-    return {"draftOrder": seats, "rows": rows}
 
 
 def add_standalone_arguments(p) -> None:

@@ -35,9 +35,13 @@ if str(SEASON_DIR) not in sys.path:
 
 def assert_no_collisions() -> None:
     """No module in Live/ may share a name with one in Season/, Decisions/ or Simulation/."""
-    mine = {p.stem for p in LIVE_DIR.glob("*.py")}
+    def names(folder):   # modules and packages alike: either one shadows a bare import
+        return ({p.stem for p in folder.glob("*.py")}
+                | {p.name for p in folder.iterdir() if (p / "__init__.py").exists()})
+
+    mine = names(LIVE_DIR)
     for sibling in ("Season", "Decisions", "Simulation"):
-        theirs = {p.stem for p in (LIVE_DIR.parent / sibling).glob("*.py")}
+        theirs = names(LIVE_DIR.parent / sibling)
         clash = mine & theirs
         if clash:
             raise RuntimeError(f"Live/ modules {sorted(clash)} shadow {sibling}/'s under the flat-module "
