@@ -162,10 +162,14 @@ def scoreset(name: str) -> Path:
     return path if path.exists() else SCORESETS_DIR / f"{path.stem}.json"
 
 
-def draft_window_settings() -> Path:
+def draft_window_settings(league: str = "league") -> Path:
     """The draft tools' own saved settings (the draft window's settings popup): positions, ADP,
-    playoff dates, roster and scoring for the live draft. Never read by the simulator."""
-    return SETTINGS_DIR / "draft_window.json"
+    playoff dates, roster and scoring for the live draft. Never read by the simulator. One file per
+    league (`--league`): they override the league and scoring files, so one league's saved scoring
+    must never reach another league's draft. The default league keeps its original file name."""
+    if league in (None, "league"):
+        return SETTINGS_DIR / "draft_window.json"
+    return SETTINGS_DIR / f"draft_window-{Path(str(league)).stem}.json"
 
 
 def strategy_config(name: str) -> Path:

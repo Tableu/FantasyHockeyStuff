@@ -3,6 +3,7 @@
 
     python draft_gui.py --team "Burnaby Beagles"            # follow the live draft
     python draft_gui.py --team "Burnaby Beagles" --manual   # the API is down: double-click to pick
+    python draft_gui.py --standalone --slot 10 --league espn-default --weights espn-default         --eligibility espn --adp espn                        # any platform (ESPN): double-click picks
 
 The same board and matching as `draft_assistant.py` (read only; it never submits a pick), in a
 tkinter window instead of the terminal:
@@ -676,7 +677,8 @@ class DraftWindow:
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--league-id", type=int, default=12090)
-    p.add_argument("--team", required=True, help="Your team's name as Fleaflicker shows it")
+    p.add_argument("--team", default=None,
+                   help="Your team's name as Fleaflicker shows it (required unless --standalone)")
     p.add_argument("--season", default="2026-27")
     p.add_argument("--prior-season", default=None)
     p.add_argument("--league", default="league")
@@ -692,15 +694,18 @@ def main():
                    help="Rehearse on a finished draft of this league, e.g. 2025 (use --team 63341)")
     p.add_argument("--replay-seconds", type=float, default=5.0, help="Seconds per replayed pick")
     p.add_argument("--replay-start", type=int, default=0, help="Picks already made when it starts")
+    da.add_standalone_arguments(p)
     args = p.parse_args()
+    if not args.standalone and not args.team:
+        p.error("--team is required (or use --standalone)")
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     print("Building the board...")
     if args.replay_season:
         da.configure_replay(args.replay_season, args.replay_seconds, args.replay_start)
     assistant = da.Assistant(args)
-    board_json = da.fetch_board(args.league_id)
-    my_team, my_name = da.team_id_for(board_json, args.team)
+    board_json = da.open_board(args, assistant)
+    my_team, my_name = da.team_id_for(board_json, args.team or "My team")
     root = tk.Tk()
     DraftWindow(root, assistant, args, board_json, my_team, my_name)
     root.mainloop()

@@ -4,6 +4,11 @@
     python draft_assistant.py --team "Burnaby Beagles"            # follow the live draft
     python draft_assistant.py --team "Burnaby Beagles" --once     # one snapshot, then exit
     python draft_assistant.py --team "Burnaby Beagles" --manual   # the API is down: type picks
+    python draft_assistant.py --standalone --slot 10 --league espn-default --weights espn-default         --eligibility espn --adp espn                              # any platform (ESPN): type picks
+
+`--standalone` needs no draft API at all: the pick order comes from --teams (default: the league
+file), --slot, --rounds (default: the roster size) and --order (snake). Saved draft-window settings
+are per league (Settings/draft_window-<league>.json), so one league's scoring never reaches another.
 
 **Read only.** It reads Fleaflicker's public draft board every `--poll` seconds and never submits a
 pick. The board is `draft_board.py`'s: value over replacement on the external sources' consensus,
@@ -45,9 +50,9 @@ ROSTER_SLOTS = ("C", "LW", "RW", "W", "F", "D", "F/D", "G")
 EXTRA_SLOT_POSITIONS = {"W": ["LW", "RW"]}
 
 
-def load_overrides() -> dict:
-    """The draft window's saved settings (paths.draft_window_settings), or {} if none are saved."""
-    path = paths.draft_window_settings()
+def load_overrides(league: str = "league") -> dict:
+    """The draft window's saved settings for `league` (paths.draft_window_settings), or {}."""
+    path = paths.draft_window_settings(league)
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
@@ -119,13 +124,14 @@ class Assistant:
         # and a command-line flag overrides both.
         self.base_config = league_module.load(args.league)
         self.base_scoreset = simlayer.load_scoreset(args.weights)
-        self.overrides = load_overrides()
+        self.overrides = load_overrides(args.league)
         self.default_playoffs = None
-        try:
-            self.default_playoffs = playoff_window(getattr(args, "league_id", 12090),
-                                                   self.base_config.playoff_weeks)
-        except Exception as error:                                   # noqa: BLE001 - optional
-            log.warning("no playoff weeks from Fleaflicker (%s)", error)
+        if not getattr(args, "standalone", False):   # standalone: no platform to ask
+            try:
+                self.default_playoffs = playoff_window(getattr(args, "league_id", 12090),
+                                                       self.base_config.playoff_weeks)
+            except Exception as error:                               # noqa: BLE001 - optional
+                log.warning("no playoff weeks from Fleaflicker (%s)", error)
         saved = self.overrides.get("playoffs")
         self.playoffs = (tuple(pd.Timestamp(d) for d in saved) if saved
                          else self.default_playoffs)
@@ -195,7 +201,7 @@ class Assistant:
             "goalies": {k: float(v) for k, v in scoring["goalies"].items() if float(v)}})
 
     def save_overrides(self):
-        path = paths.draft_window_settings()
+        path = paths.draft_window_settings(self.args.league)
         path.write_text(json.dumps(self.overrides, indent=2) + "\n", encoding="utf-8")
         return path
 
@@ -313,6 +319,50 @@ def team_id_for(board_json, name):
     raise SystemExit(f"no team named {name!r} in this draft; teams: {names}")
 
 
+def standalone_board(teams: int, slot: int, rounds: int, order: str = "snake",
+                     my_name: str = "My team") -> dict:
+    """A draft board for a league the tools cannot read (ESPN, Yahoo, a room with no API), in the
+    shape Fleaflicker's FetchLeagueDraftBoard returns, so everything downstream -- picks_from,
+    team_id_for, manual_cells, the redraw -- runs unchanged. Seat `slot` (1-based) is mine; the
+    others are "Team N". `order` is "snake" (reverses every round) or "linear"."""
+    if not 1 <= slot <= teams:
+        raise SystemExit(f"--slot must be between 1 and {teams}")
+    seats = [{"id": seat, "name": my_name if seat == slot else f"Team {seat}"}
+             for seat in range(1, teams + 1)]
+    rows, overall = [], 0
+    for round_number in range(1, rounds + 1):
+        seats_this_round = seats if order == "linear" or round_number % 2 == 1 else seats[::-1]
+        cells = []
+        for team in seats_this_round:
+            overall += 1
+            cells.append({"slot": {"overall": overall, "round": round_number}, "team": team})
+        rows.append({"cells": cells})
+    return {"draftOrder": seats, "rows": rows}
+
+
+def add_standalone_arguments(p) -> None:
+    """--standalone and its draft shape, shared by draft_assistant.py and draft_gui.py."""
+    p.add_argument("--standalone", action="store_true",
+                   help="Any platform: no draft API, you record picks (implies --manual); needs --slot")
+    p.add_argument("--slot", type=int, default=None, help="--standalone: your draft slot, 1-based")
+    p.add_argument("--teams", type=int, default=None, help="--standalone: teams (default: the league file)")
+    p.add_argument("--rounds", type=int, default=None,
+                   help="--standalone: rounds (default: the league's roster size)")
+    p.add_argument("--order", default="snake", choices=("snake", "linear"), help="--standalone: pick order")
+
+
+def open_board(args, assistant) -> dict:
+    """The draft board to follow: Fleaflicker's (live or replayed), or the standalone one."""
+    if not getattr(args, "standalone", False):
+        return fetch_board(args.league_id)
+    if args.slot is None:
+        raise SystemExit("--standalone needs --slot (your draft slot, 1-based)")
+    args.manual = True
+    config = assistant.config
+    return standalone_board(args.teams or config.teams, args.slot, args.rounds or config.roster_size,
+                            args.order, args.team or "My team")
+
+
 def manual_cells(board_json, picks):
     """The board's cells with the typed picks filled in, in order, as the API would show them."""
     cells = picks_from(board_json)
@@ -324,7 +374,8 @@ def manual_cells(board_json, picks):
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--league-id", type=int, default=12090)
-    p.add_argument("--team", required=True, help="Your team's name as Fleaflicker shows it")
+    p.add_argument("--team", default=None,
+                   help="Your team's name as Fleaflicker shows it (required unless --standalone)")
     p.add_argument("--season", default="2026-27")
     p.add_argument("--prior-season", default=None)
     p.add_argument("--league", default="league")
@@ -342,14 +393,17 @@ def main():
                    help="Rehearse on a finished draft of this league, e.g. 2025")
     p.add_argument("--replay-seconds", type=float, default=5.0, help="Seconds per replayed pick")
     p.add_argument("--replay-start", type=int, default=0, help="Picks already made when it starts")
+    add_standalone_arguments(p)
     args = p.parse_args()
+    if not args.standalone and not args.team:
+        p.error("--team is required (or use --standalone)")
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     if args.replay_season:
         configure_replay(args.replay_season, args.replay_seconds, args.replay_start)
     assistant = Assistant(args)
-    board_json = fetch_board(args.league_id)
-    my_team, my_name = team_id_for(board_json, args.team)
+    board_json = open_board(args, assistant)
+    my_team, my_name = team_id_for(board_json, args.team or "My team")
 
     if args.manual:
         picks = []
