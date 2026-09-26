@@ -19,7 +19,6 @@ moves are not transactions) -- the league's rule (Settings/rosters/league.json m
 
 import datetime as dt
 import json
-import time
 import urllib.request
 
 import pandas as pd
@@ -29,32 +28,14 @@ from platforms.base import Matchup, TeamRoster
 API = "https://www.fleaflicker.com/api"
 
 
-# A rehearsal of the live path (--replay-season): every poll really reads Fleaflicker, but reads a
-# finished draft of this league (e.g. the 2025 one) and hides the picks not yet "made", revealing
-# one every `seconds` from `start` on -- so polling, parsing, matching and redraws all run as they
-# will on draft night.
-REPLAY = {"season": None, "seconds": 5.0, "start": 0, "t0": None}
-
-
-def configure_replay(season, seconds=5.0, start=0):
-    REPLAY.update(season=season, seconds=float(seconds), start=int(start), t0=None)
-
-
-def fetch_board(league_id: int) -> dict:
+def fetch_board(league_id: int, season=None) -> dict:
+    """FetchLeagueDraftBoard, this season's or a past one's (`season`, e.g. 2025 -- what the
+    rehearsal replays, see base.Replay)."""
     url = f"{API}/FetchLeagueDraftBoard?sport=NHL&league_id={league_id}"
-    if REPLAY["season"]:
-        url += f"&season={REPLAY['season']}"
+    if season:
+        url += f"&season={season}"
     with urllib.request.urlopen(url, timeout=20) as response:
-        board = json.load(response)
-    if REPLAY["season"]:
-        if REPLAY["t0"] is None:
-            REPLAY["t0"] = time.time()
-        made = REPLAY["start"] + int((time.time() - REPLAY["t0"]) / REPLAY["seconds"])
-        for row in board.get("rows", []):
-            for cell in row.get("cells", []):
-                if cell["slot"]["overall"] > made:
-                    cell.pop("player", None)
-    return board
+        return json.load(response)
 
 
 def playoff_window(league_id: int, weeks: int):
@@ -115,6 +96,7 @@ class Fleaflicker:
     takes it; transactions do not (the endpoint refuses `season`), so they are always current."""
 
     platform = "fleaflicker"
+    platform_name = "Fleaflicker"       # its name in platform_ids.parquet
 
     def __init__(self, league_id: int, season=None):
         self.league_id = int(league_id)
@@ -122,6 +104,14 @@ class Fleaflicker:
 
     def _get(self, endpoint, **params):
         return _get(endpoint, league_id=self.league_id, **params)
+
+    # ---------- the draft ----------
+
+    def draft_board(self) -> dict:
+        return fetch_board(self.league_id, self.season)
+
+    def playoff_window(self, weeks: int):
+        return playoff_window(self.league_id, weeks)
 
     # ---------- rosters ----------
 
@@ -189,6 +179,8 @@ class Fleaflicker:
                 if since_ms is not None and when < since_ms:
                     return out
                 t = item["transaction"]
+                if "player" not in t:          # a traded draft pick: no player, never a move
+                    continue
                 out.append({"time_ms": when, "type": t.get("type"), "team_id": t["team"]["id"],
                             "player_id": t["player"]["proPlayer"]["id"]})
             offset = raw.get("resultOffsetNext")

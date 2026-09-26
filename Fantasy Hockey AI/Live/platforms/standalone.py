@@ -1,6 +1,23 @@
 """No platform: a draft board built from the pick order alone (the draft tools' --standalone)."""
 
 
+class Standalone:
+    """A draft source with no platform behind it: the board is the pick order, picks are recorded
+    by hand (the tools force --manual), and there are no playoff weeks or platform ids."""
+
+    platform = "standalone"
+    platform_name = None
+
+    def __init__(self, teams: int, slot: int, rounds: int, order: str = "snake", my_name: str = "My team"):
+        self.board = standalone_board(teams, slot, rounds, order, my_name)
+
+    def draft_board(self) -> dict:
+        return self.board
+
+    def playoff_window(self, weeks: int):
+        return None
+
+
 def standalone_board(teams: int, slot: int, rounds: int, order: str = "snake",
                      my_name: str = "My team") -> dict:
     """A draft board for a league the tools cannot read (ESPN, Yahoo, a room with no API), in the

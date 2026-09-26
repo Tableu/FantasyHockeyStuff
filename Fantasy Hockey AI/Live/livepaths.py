@@ -4,7 +4,7 @@ Shared data locations (ModelFeatures' features, Projections' reports, Settings/)
 Season/'s `paths`, which Live/ imports through `seasonlayer`. This module is named `livepaths`,
 not `paths`, so it can never shadow that one (see seasonlayer.py).
 
-    reports/    draft boards and daily plans (gitignored)
+    reports/<league>/   that league's draft boards, draft-assistant view and daily plans (gitignored)
     fixtures/   made-up leagues for exercising the tools before a league has rosters
 """
 
@@ -33,6 +33,11 @@ def platform_ids() -> Path:
     return season_paths.FEATURES_DIR / "platform_ids.parquet"
 
 
+def league_reports(league: str) -> Path:
+    """One league's outputs -- nothing one league writes can overwrite another's."""
+    return REPORTS_DIR / league
+
+
 def draft_board(season: str, league: str, scoring: str, suffix: str) -> Path:
-    return REPORTS_DIR / f"draft_board_{season}_{league}_{scoring}.{suffix}"
+    return league_reports(league) / f"draft_board_{season}_{scoring}.{suffix}"
 

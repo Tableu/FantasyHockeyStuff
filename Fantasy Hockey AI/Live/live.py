@@ -56,16 +56,21 @@ from decisionlayer import valuation as valuation_module
 
 log = logging.getLogger("live")
 
-PLANS_DIR = livepaths.REPORTS_DIR / "plans"
 TONIGHT_DIR = paths.PROJECTIONS_REPORTS / "live"
 STATUS_DIR = paths.FEATURES_DIR.parent / "live"
 INJURED = ("OUT", "SUSP")
 DECISION_SIMS = 400
+FREE_AGENTS_SHOWN = 60
 
 
 def season_of(day: dt.date) -> str:
     start = day.year if day.month >= 7 else day.year - 1
     return f"{start}-{(start + 1) % 100:02d}"
+
+
+def _note(x):
+    """A report's note, or None when there is none (a missing note arrives as NaN)."""
+    return None if x is None or (isinstance(x, float) and pd.isna(x)) else x
 
 
 # ---------- the league snapshot ----------
@@ -198,7 +203,7 @@ class LiveRunner:
         """`league` is a registry league (leagues.load): its rules, scoring, strategy and positions."""
         self.day = day
         self.league = league
-        self.plans_dir = PLANS_DIR / league.name
+        self.plans_dir = livepaths.league_reports(league.name) / "plans"
         self.season = season_of(day)
         self.strategy = load_strategy(league.strategy)
         self.scoreset = simlayer.load_scoreset(league.scoring)
@@ -282,7 +287,7 @@ class LiveRunner:
         week = self.calendar.week_of(day)
         phase = "playoffs" if week and week > self.regular_weeks else "regular"
 
-        def view():
+        def view(state=state):
             return view_module.SlateView(
                 day=day, week=week, config=self.config, calendar=self.calendar,
                 projections=skaters[[c for c in skaters.columns if not c.startswith(("target_", "label_"))]],
@@ -297,6 +302,9 @@ class LiveRunner:
                 rate_estimate=rate_estimate, ros_estimate=self.ros_seed)
 
         before = copy.deepcopy(state.teams[snapshot.me].__dict__)
+        # The league as it stands, kept apart: the window shows the roster and tonight's lineup
+        # before any move, and the moves as recommendations.
+        state_now = copy.deepcopy(state)
         manager = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
         manager.transactions(view())
         problems = []
@@ -306,7 +314,11 @@ class LiveRunner:
             problems.append(str(error))
         v = view()
         lineup, z = self._lineup(manager, v, snapshot, rows, now)
-        return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now)
+        # After the plan's own lineup, so the plan is what it would be without this extra solve.
+        lineup_now, _ = self._lineup(managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy),
+                                     view(state_now), snapshot, rows, now)
+        return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
+                              state_now, lineup_now)
 
     def _state(self, snapshot, day) -> state_module.LeagueState:
         if len(snapshot.teams) != self.config.teams:
@@ -378,7 +390,8 @@ class LiveRunner:
 
     # ---------- the plan ----------
 
-    def _describe(self, snapshot, state, before, manager, v, lineup, z, rows, status, problems, now) -> dict:
+    def _describe(self, snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
+                  state_now, lineup_now) -> dict:
         me = state.teams[snapshot.me]
         names = pd.read_parquet(paths.players()).set_index("player_id")["name"]
         teams = pd.read_parquet(paths.teams()).set_index("team_id")["team"]
@@ -407,21 +420,45 @@ class LiveRunner:
         dropped = [name(p) for p in before["roster"] + before["ir"]
                    if p not in me.roster and p not in me.ir and not any(m["drop"] == name(p) for m in moves)]
 
-        slots = []
-        for index, label in enumerate(self.slot_order):
-            p = lineup.assigned.get(index)
-            if p is None:
-                slots.append({"slot": label, "player": None})
-                continue
-            mu, sd = moments.get(p, (0.0, 0.0))
-            row = by_player.loc[p] if p in by_player.index else None
-            slots.append({"slot": label, "player": name(p), "mean": round(mu, 2), "sd": round(sd, 2),
-                          "puck_utc": str(row["start_time_utc"]) if row is not None else None,
-                          "p_plays": round(float(row["p_plays"] if row["kind"] == "skater" else row["p_start"]), 3) if row is not None else None,
-                          "flag": ("GTD" if p in gtd else state_status.get(p)) if (p in gtd or state_status.get(p) not in (None, "ACTIVE")) else None})
+        def slot_rows(lineup):
+            slots = []
+            for index, label in enumerate(self.slot_order):
+                p = lineup.assigned.get(index)
+                if p is None:
+                    slots.append({"slot": label, "player": None})
+                    continue
+                mu, sd = moments.get(p, (0.0, 0.0))
+                row = by_player.loc[p] if p in by_player.index else None
+                slots.append({"slot": label, "player": name(p), "player_id": int(p),
+                              "mean": round(mu, 2), "sd": round(sd, 2),
+                              "puck_utc": str(row["start_time_utc"]) if row is not None else None,
+                              "locked": bool(row is not None and pd.notna(row["start_time_utc"])
+                                             and pd.Timestamp(row["start_time_utc"]) <= pd.Timestamp(now)),
+                              "p_plays": round(float(row["p_plays"] if row["kind"] == "skater" else row["p_start"]), 3) if row is not None else None,
+                              "flag": ("GTD" if p in gtd else state_status.get(p)) if (p in gtd or state_status.get(p) not in (None, "ACTIVE")) else None})
+            return slots
+        slots = slot_rows(lineup)
         bench = [name(p) for p in me.roster if p not in lineup.assigned.values()]
+
+        # Before the moves (the window): the lineup over the roster as it stands, each slot with the
+        # player the plan would put there after its moves; every player's recommended action.
+        slots_now = slot_rows(lineup_now)
+        for index, slot in enumerate(slots_now):
+            after = lineup.assigned.get(index)
+            slot["after_moves"] = name(after) if after is not None and after != lineup_now.assigned.get(index) else None
+        action = {}
+        for t in state.transactions:
+            if t["team"] == snapshot.me:
+                action[t["player_id"]] = t["kind"]
+                if t["dropped"] is not None:
+                    action[t["dropped"]] = "drop"
+        action.update({p: "claim" for p, teams_ in state.pending_claims.items() if snapshot.me in teams_})
+        action.update({p: "move to IR" for p in me.ir if p not in before["ir"]})
+        action.update({p: "activate" for p in before["ir"] if p not in me.ir})
+        action.update({p: "drop" for p in before["roster"] + before["ir"] if p not in me.roster and p not in me.ir})
+        me_now = state_now.teams[snapshot.me]
         watch = [{"player": name(p), "status": ("GTD" if p in gtd else state_status.get(p)),
-                  "note": by_player.loc[p, "note"] if p in by_player.index and "note" in by_player.columns else None}
+                  "note": _note(by_player.loc[p, "note"]) if p in by_player.index and "note" in by_player.columns else None}
                  for p in me.roster + me.ir if p in gtd or state_status.get(p) not in (None, "ACTIVE")]
         goalie_notes = rows[(rows["kind"] == "goalie") & rows["player_id"].isin(me.roster)]
         return {
@@ -434,10 +471,41 @@ class LiveRunner:
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "lineup": slots, "bench": bench, "watch": watch,
             "goalies": [{"player": name(int(r.player_id)), "p_start": round(float(r.p_start), 3),
-                         "note": r.note} for r in goalie_notes.itertuples()],
+                         "note": _note(r.note)} for r in goalie_notes.itertuples()],
             "problems": problems, "sim_season": self.sim_season, "rate_source": source,
             "plan_log": manager.plan.log[-1] if manager.plan.log else {},
+            # For the plan window's tables (not in the Markdown): the whole roster, the best free
+            # agents, the opponent, the week's points so far.
+            "my_week_points": snapshot.my_week_points, "opponent_week_points": snapshot.opponent_week_points,
+            # Both as the league stands now; `plan` is the recommended action (add, drop, ...).
+            "lineup_now": slots_now,
+            "bench_now": [name(p) for p in me_now.roster if p not in lineup_now.assigned.values()],
+            "roster": [self._player_row(v, p, name, priced, state_status, gtd, by_player,
+                                        lineup_ids=set(lineup_now.assigned.values()), on_ir=p in me_now.ir,
+                                        plan=action.get(p))
+                       for p in me_now.roster + me_now.ir],
+            "free_agents": [self._player_row(v, p, name, priced, state_status, gtd, by_player,
+                                             waivers=state_now.on_waivers(p, v.day), plan=action.get(p))
+                            for p in sorted(state_now.free_agents(), key=priced, reverse=True)[:FREE_AGENTS_SHOWN]],
+            "opponent_roster": ([self._player_row(v, p, name, priced, state_status, gtd, by_player)
+                                 for p in state.teams[snapshot.opponent].roster]
+                                if snapshot.opponent is not None else []),
         }
+
+    def _player_row(self, v, p, name, priced, state_status, gtd, by_player, lineup_ids=None,
+                    on_ir=False, waivers=False, plan=None) -> dict:
+        """One player for the plan window's tables."""
+        row = by_player.loc[p] if p in by_player.index else None
+        tonight = None
+        if row is not None:
+            tonight = float(row["p_plays"] if row["kind"] == "skater" else row["p_start"])
+        return {"player_id": int(p), "player": name(p),
+                "positions": "/".join(sorted(self.eligibility.get(p, ()))),
+                "status": "GTD" if p in gtd else state_status.get(p) if state_status.get(p) != "ACTIVE" else None,
+                "rate": priced(p), "per_game": round(v.projected_rate(p), 2),
+                "games_left": v.games_remaining(p), "plays_tonight": tonight,
+                "in_lineup": lineup_ids is not None and p in lineup_ids, "on_ir": on_ir,
+                "on_waivers": bool(waivers), "plan": plan}
 
 
 def render(plan: dict) -> str:

@@ -13,7 +13,11 @@ pick or a move: every platform's API is read, never written.
 """
 
 from platforms import espn, fleaflicker, standalone
-from platforms.base import Matchup, PlayerIds, TeamRoster
+from platforms.base import Matchup, PlayerIds, Replay, TeamRoster
+from platforms.standalone import Standalone
+
+# Each platform's name in platform_ids.parquet (Fantasy.Platforms.PlatformName).
+PLATFORM_NAMES = {"fleaflicker": fleaflicker.Fleaflicker.platform_name, "espn": espn.Espn.platform_name}
 
 
 def for_league(league, season=None):
@@ -30,4 +34,5 @@ def for_league(league, season=None):
     return None
 
 
-__all__ = ["Matchup", "PlayerIds", "TeamRoster", "espn", "fleaflicker", "for_league", "standalone"]
+__all__ = ["Matchup", "PLATFORM_NAMES", "PlayerIds", "Replay", "Standalone", "TeamRoster", "espn",
+           "fleaflicker", "for_league", "standalone"]

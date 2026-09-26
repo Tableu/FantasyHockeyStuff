@@ -13,7 +13,7 @@ all, the pick order from --slot, --teams (default: the rules file), --rounds (de
 size) and --order (snake). The draft window's saved settings live in the league's own file, so one
 league's scoring never reaches another.
 
-**Read only.** It reads Fleaflicker's public draft board every `--poll` seconds and never submits a
+**Read only.** It reads the league platform's draft board every `--poll` seconds and never submits a
 pick. The board is `draft_board.py`'s: value over replacement on the external sources' consensus,
 on Fleaflicker's positions for this league (`import_fantasy_fleaflicker.py`), fixed before the
 draft. Each redraw shows who is on the clock and how many picks until yours, the best available by
@@ -22,10 +22,11 @@ VOR, whether each would fill one of your open starting slots, and ADP beside it 
 
 A pick is named by Fleaflicker's own player id (`Fantasy.PlatformPlayerIDs`, exported by
 `ModelFeatures/build_players.py`), with an exact-name fallback; anything still unmatched is listed,
-never dropped. Writes the latest redraw to reports/draft_assistant.md.
+never dropped. Writes the latest redraw to reports/<league>/draft_assistant.md.
 """
 
 import argparse
+import dataclasses
 import datetime as dt
 import json
 import logging
@@ -38,9 +39,8 @@ import pandas as pd
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import leagues
 import livepaths
-from platforms.fleaflicker import (configure_replay, fetch_board, picks_from, playoff_window,
-                                   team_id_for)
-from platforms.standalone import standalone_board
+import platforms
+from platforms.fleaflicker import picks_from, team_id_for
 import draft_board
 import league as league_module
 import paths
@@ -50,8 +50,6 @@ from decisionlayer import load_strategy
 from decisionlayer import slots as slots_module
 
 log = logging.getLogger("draft-assistant")
-# The platforms' names in platform_ids.parquet: picks arrive by the league platform's own ids.
-PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}
 # The aggregate workbook's roster slots, as this league's slot codes. W (a wing: LW or RW) is the
 # workbook's; the league file does not define it, so it is added here. F/D is its UTIL(F/D).
 ROSTER_SLOTS = ("C", "LW", "RW", "W", "F", "D", "F/D", "G")
@@ -65,7 +63,7 @@ class Assistant:
         season = args.season
         self.prior = args.prior_season or draft_board.previous(season)
         # Defaults: the registry league's rules, scoring and platforms (Settings/leagues/, filled
-        # into args by resolve_league), Fleaflicker's playoff weeks. The draft window's saved
+        # into args by resolve_league), the playoff weeks its platform reports. The draft window's saved
         # settings (the league file's draft_window) override them, and a command-line flag
         # overrides both.
         self.league = args.league_entry
@@ -74,10 +72,11 @@ class Assistant:
         self.overrides = dict(self.league.draft_window)
         self.default_playoffs = None
         if not getattr(args, "standalone", False):   # standalone: no platform to ask
+            source = platforms.for_league(self.league)    # this season's, even when replaying
             try:
-                self.default_playoffs = playoff_window(args.league_id, self.base_config.playoff_weeks)
+                self.default_playoffs = source.playoff_window(self.base_config.playoff_weeks) if source else None
             except Exception as error:                               # noqa: BLE001 - optional
-                log.warning("no playoff weeks from Fleaflicker (%s)", error)
+                log.warning("no playoff weeks from %s (%s)", self.league.platform, error)
         saved = self.overrides.get("playoffs")
         self.playoffs = (tuple(pd.Timestamp(d) for d in saved) if saved
                          else self.default_playoffs)
@@ -92,7 +91,7 @@ class Assistant:
                          or self.overrides.get("eligibility_platform")
                          or self.league.eligibility_platform)
         ids = pd.read_parquet(livepaths.platform_ids())
-        self.platform_name = PLATFORM_NAMES.get(self.league.platform, self.league.platform)
+        self.platform_name = platforms.PLATFORM_NAMES.get(self.league.platform, self.league.platform)
         ids = ids[(ids["platform"] == self.platform_name) & (ids["season"] == season)]
         self.by_platform_id = dict(zip(ids["external_id"].astype(str), ids["player_id"].astype(int)))
         players = pd.read_parquet(paths.players())
@@ -250,8 +249,8 @@ class Assistant:
         if not self.args.once:
             os.system("cls" if os.name == "nt" else "clear")
         print(text)
-        livepaths.ensure(livepaths.REPORTS_DIR)
-        (livepaths.REPORTS_DIR / "draft_assistant.md").write_text(text, encoding="utf-8")
+        out = livepaths.ensure(livepaths.league_reports(self.league.name))
+        (out / "draft_assistant.md").write_text(text, encoding="utf-8")
 
 
 def add_standalone_arguments(p) -> None:
@@ -288,12 +287,16 @@ def resolve_league(args, parser) -> None:
     """Fill the flags left unset from the registry league. A league whose draft the tools cannot
     read (ESPN until its reader exists, or one not joined yet) runs --standalone."""
     league = args.league_entry = leagues.load(args.league)
+    if args.league_id is not None and args.league_id != league.league_id:
+        league = args.league_entry = dataclasses.replace(league, league_id=args.league_id)
     args.league_id = args.league_id or league.league_id
     args.team = args.team or (str(league.team_id) if league.team_id is not None else None)
     args.season = args.season or league.season
     args.rules = args.rules or league.rules
     args.weights = args.weights or league.scoring
     args.strategy = args.strategy or league.strategy
+    if getattr(args, "replay_season", None) and not league.readable:
+        parser.error(f"{league.name}: a replay needs a league whose draft can be read from its platform")
     if not league.readable and not args.standalone and not getattr(args, "replay_season", None):
         args.standalone = True
     if args.standalone and args.slot is None:
@@ -304,24 +307,30 @@ def resolve_league(args, parser) -> None:
 
 
 def read_board(args) -> dict:
-    """The live draft board from the league's platform (Fleaflicker live or replayed, or ESPN)."""
-    league = args.league_entry
-    if league.platform == "espn":
-        import platforms
-        return platforms.for_league(league).draft_board()
-    return fetch_board(args.league_id)
+    """The draft board, re-read from this run's draft source (open_board chose it)."""
+    return args.draft_source.draft_board()
 
 
 def open_board(args, assistant) -> dict:
-    """The draft board to follow: the platform's (read_board), or the standalone one."""
-    if not getattr(args, "standalone", False):
-        return read_board(args)
-    if args.slot is None:
-        raise SystemExit("--standalone needs --slot (your draft slot, 1-based)")
-    args.manual = True
-    config = assistant.config
-    return standalone_board(args.teams or config.teams, args.slot, args.rounds or config.roster_size,
-                            args.order, args.team or "My team")
+    """Choose this run's draft source and read the board once: the league's platform adapter
+    (platforms.for_league), a rehearsal of one of its past drafts (--replay-season, platforms.Replay),
+    or --standalone (the pick order alone; picks recorded by hand). The tools never branch on the
+    platform after this."""
+    league = args.league_entry
+    if getattr(args, "standalone", False):
+        if args.slot is None:
+            raise SystemExit("--standalone needs --slot (your draft slot, 1-based)")
+        args.manual = True
+        config = assistant.config
+        args.draft_source = platforms.Standalone(args.teams or config.teams, args.slot,
+                                                 args.rounds or config.roster_size, args.order,
+                                                 args.team or "My team")
+    elif getattr(args, "replay_season", None):
+        args.draft_source = platforms.Replay(platforms.for_league(league, season=int(args.replay_season)),
+                                             args.replay_seconds, args.replay_start)
+    else:
+        args.draft_source = platforms.for_league(league)
+    return read_board(args)
 
 
 def manual_cells(board_json, picks):
@@ -348,8 +357,6 @@ def main():
     resolve_league(args, p)
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
-    if args.replay_season:
-        configure_replay(args.replay_season, args.replay_seconds, args.replay_start)
     assistant = Assistant(args)
     board_json = open_board(args, assistant)
     my_team, my_name = team_id_for(board_json, args.team or "My team")

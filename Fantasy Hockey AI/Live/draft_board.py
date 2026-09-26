@@ -19,7 +19,7 @@ off-night games and playoff games, as the aggregate workbook's Schedule Info she
 (`schedule_counts`).
 
 Sources must be published before `--draft-date` (default today). Writes
-reports/draft_board_<season>_<league>_<scoring>.csv, and .md with the top of the board.
+reports/<league>/draft_board_<season>_<scoring>.csv, and .md with the top of the board.
 """
 
 import argparse
@@ -246,7 +246,7 @@ def main():
                                          pd.Timestamp(args.draft_date), strategy,
                                          args.eligibility or league.eligibility_platform,
                                          args.playoffs)
-        livepaths.ensure(livepaths.REPORTS_DIR)
+        livepaths.ensure(livepaths.league_reports(league.name))
         csv = livepaths.draft_board(season, league.name, scoring, "csv")
         board.to_csv(csv)
         md = livepaths.draft_board(season, league.name, scoring, "md")

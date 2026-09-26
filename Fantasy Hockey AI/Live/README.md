@@ -5,11 +5,14 @@ window, and the in-season runner that writes each day's plan. Recommend-only thr
 here submits a pick or a move to a platform.
 
 ```
-draft_board.py      the VOR board from the external sources' consensus (reports/draft_board_*.csv/.md)
+draft_board.py      the VOR board from the external sources' consensus (reports/<league>/draft_board_*)
 draft_assistant.py  draft night in the terminal: follows the live draft (Fleaflicker), or --standalone
 draft_gui.py        the same in a window
 live.py             the live runner: the shipped manager on the real league (see its docstring)
-run_live.py         writes the day's plan (reports/plans/<league>/plan_{date}_*.md); --window per game
+plan_gui.py         the day's plan in a window: runs a pass on opening, Full / Quick refresh buttons,
+                    and (while open) a quick re-plan ~30 min before each group of games
+run_live.py         the same pass in the terminal (reports/<league>/plans/plan_{date}_*.md)
+planpass.py         the pass's steps, shared by both: snapshots, tonight, read league, plan, save
 leagues.py          the league registry (Settings/leagues/<name>.json): --league on every tool
 platforms/          read-only platform adapters: fleaflicker.py (draft board, rosters + IR, lineup
                     slots, moves used this week, matchup, rules), espn.py (settings + scoring,
@@ -19,7 +22,7 @@ import_league_settings.py  writes a league's Settings/rosters + scoring files fr
 seasonlayer.py      the one bridge into Season/ (league, state, view, schedule, inputs, ...)
 livepaths.py        Live's own locations (never named paths.py -- see seasonlayer.py)
 fixtures/           made-up leagues for exercising the tools before a league has rosters
-reports/            generated boards and plans (gitignored)
+reports/<league>/   one folder per league: draft boards, the draft-assistant view, plans (gitignored)
 ```
 
 Moved out of `Season/` on 2026-09-25: `Season/` is the backtest simulator and never touches a
@@ -33,11 +36,17 @@ python draft_assistant.py --team 63341 --replay-season 2025 # rehearse on the 20
 python draft_assistant.py --league <an espn league>         # follow an ESPN draft (see leagues/)
 python draft_assistant.py --league espn --slot 10           # an unreadable draft: type picks
 python draft_gui.py                                         # the window
+python plan_gui.py                                          # today's plan (league beagles)
+python plan_gui.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --now "2026-09-29 23:30"
 python run_live.py --make-fake                              # fixtures/beagles/fake_league.json
 python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh
 python run_live.py --date 2026-09-29 --platform-season 2025          # rehearse on 12090's 2025 rosters
 python run_live.py --window --refresh                       # in season: reads the league from Fleaflicker
 ```
+
+Plans are never scheduled -- they run when you open plan_gui.py (or call run_live.py). Task
+Scheduler keeps only the injury / line / goalie snapshots and the nightly ingest running, so the
+window's data is fresh; `--skip-snapshots` uses those instead of taking new ones.
 
 The in-season inputs come from the other folders: tonight's projections from
 `ModelFeatures/build_tonight.py` + `Projections/project_tonight.py` (run by `--refresh`), the
@@ -46,7 +55,7 @@ live injury and lineup reports from `pipeline/snapshot_live.py`.
 ## The draft board
 
 **The live board**: `python draft_board.py --season 2026-27 --weights points-league` writes
-`reports/draft_board_2026-27_league_<scoring>.csv/.md` -- rank, player, team, positions, value, VOR,
+`reports/<league>/draft_board_2026-27_<scoring>.csv/.md` -- rank, player, team, positions, value, VOR,
 the position he is measured against, sources, what the value rests on, and Yahoo and ESPN ADP beside
 it for reading whether a target will last to the next pick. 2026-27 goalies have three sources
 (Dailyfaceoff, Dom, Lineup Experts), so a goalie needs two of them or falls back.
@@ -68,7 +77,7 @@ D, UTIL(F/D), G, BN) and the points per stat for the 14 stats the projections ca
 the board -- values, replacement levels and slot fits all follow -- and refuses what the league
 config refuses (an odd team count); Save as default writes the league's `Settings/leagues/` file, which the
 window and `draft_assistant.py` start from; League defaults puts back `rosters/league.json`,
-`scoring/points-league.json` and Fleaflicker's playoff weeks. The simulator never reads the file.
+`scoring/points-league.json` and the platform's playoff weeks. The simulator never reads the file.
 Setting the sheet's own values (12 teams, PIM off) reproduces its FanPts: MacKinnon 540.0.
 
 Players are valued on one platform's positions, `draft.eligibility_platform` in
@@ -92,7 +101,7 @@ It reads Fleaflicker's public draft board (read only; it never submits a pick) a
 Picks are matched by Fleaflicker's own player id (`Fantasy.PlatformPlayerIDs`, written by
 `pipeline/import_fantasy_fleaflicker.py`, exported by `ModelFeatures/build_players.py`); all 400
 of the board's top players have one. The latest view is also written to
-`reports/draft_assistant.md`.
+`reports/<league>/draft_assistant.md`.
 
 **The same thing in a window:** `draft_gui.py` (tkinter, same flags, `--manual` = double-click a
 player to record the pick on the clock). Two tabs: **Rankings**, a spreadsheet of the whole board

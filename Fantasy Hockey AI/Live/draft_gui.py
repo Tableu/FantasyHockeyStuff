@@ -90,7 +90,7 @@ class DraftWindow:
         self.cells = da.picks_from(board_json)
         self.updates = queue.Queue()
 
-        root.title(f"Draft -- {my_name}")
+        root.title(f"Draft -- {args.league}: {my_name}")
         root.geometry("1500x860")
         try:
             root.state("zoomed")                  # 14 teams across need the full width
@@ -157,7 +157,7 @@ class DraftWindow:
 
         Apply rebuilds the board for this session; Save as default also writes it into the
         league's Settings/leagues/ file, which the draft tools start from next time. League defaults
-        puts back the league and scoring files and Fleaflicker's playoff weeks. The simulator never
+        puts back the league and scoring files and the platform's playoff weeks. The simulator never
         reads any of it."""
         if self.settings_window is not None and self.settings_window.winfo_exists():
             self.settings_window.lift()
@@ -340,7 +340,7 @@ class DraftWindow:
         self.settings_status.set(self.settings_status.get() + f" Saved to {path.name}.")
 
     def settings_defaults(self):
-        """The league and scoring files and Fleaflicker's playoff weeks, back in the fields and
+        """The league and scoring files and the platform's playoff weeks, back in the fields and
         applied (not saved: Save as default does that)."""
         self._fill_settings(self.a.default_playoffs, self.a.base_config, self.a.base_scoreset)
         self.settings_apply()
@@ -681,7 +681,7 @@ def main():
     p.add_argument("--poll", type=int, default=10, help="Seconds between reads of the live board")
     p.add_argument("--manual", action="store_true", help="Double-click players instead of the API")
     p.add_argument("--replay-season", default=None,
-                   help="Rehearse on a finished draft of this league, e.g. 2025 (use --team 63341)")
+                   help="Rehearse on a finished draft of this league, e.g. 2025")
     p.add_argument("--replay-seconds", type=float, default=5.0, help="Seconds per replayed pick")
     p.add_argument("--replay-start", type=int, default=0, help="Picks already made when it starts")
     da.add_standalone_arguments(p)
@@ -690,8 +690,6 @@ def main():
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     print("Building the board...")
-    if args.replay_season:
-        da.configure_replay(args.replay_season, args.replay_seconds, args.replay_start)
     assistant = da.Assistant(args)
     board_json = da.open_board(args, assistant)
     my_team, my_name = da.team_id_for(board_json, args.team or "My team")

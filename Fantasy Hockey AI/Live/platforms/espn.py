@@ -59,6 +59,7 @@ def espn_year(season: str) -> int:
 
 class Espn:
     platform = "espn"
+    platform_name = "ESPN"              # its name in platform_ids.parquet
 
     def __init__(self, league_id: int, year: int, cookies: dict | None = None):
         self.league_id = int(league_id)
@@ -165,6 +166,11 @@ class Espn:
                                   "a league with an acquisition limit needs them")
 
     # ---------- the draft ----------
+
+    def playoff_window(self, weeks: int):
+        """Not yet: ESPN's playoff weeks come from its matchup periods, which need a real league to
+        check the dates against. None = the draft board has no OFF/POG columns for this league."""
+        return None
 
     def draft_board(self) -> dict:
         """The draft in the shape Fleaflicker's FetchLeagueDraftBoard returns (what the draft tools

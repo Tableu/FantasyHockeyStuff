@@ -1,6 +1,8 @@
-"""What every adapter returns, in platform ids, and the one map from those to our PlayerIDs."""
+"""What every adapter returns, in platform ids, the one map from those to our PlayerIDs, and the
+draft rehearsal that works on any of them."""
 
 import dataclasses
+import time
 
 import pandas as pd
 
@@ -26,6 +28,30 @@ class Matchup:
     opponent_id: int | None
     points: float
     opponent_points: float
+
+
+class Replay:
+    """A rehearsal of draft night on a finished draft (--replay-season): every poll really reads the
+    platform -- the adapter built for that past season -- but the picks not yet "made" are hidden,
+    one revealed every `seconds` from `start` on, so polling, parsing, matching and redraws all run
+    as they will on draft night. Any adapter with a past-season draft_board() works."""
+
+    def __init__(self, adapter, seconds: float = 5.0, start: int = 0):
+        self.adapter, self.seconds, self.start, self.t0 = adapter, float(seconds), int(start), None
+
+    def draft_board(self) -> dict:
+        board = self.adapter.draft_board()
+        if self.t0 is None:
+            self.t0 = time.time()
+        made = self.start + int((time.time() - self.t0) / self.seconds)
+        for row in board.get("rows", []):
+            for cell in row.get("cells", []):
+                if cell["slot"]["overall"] > made:
+                    cell.pop("player", None)
+        return board
+
+    def __getattr__(self, name):
+        return getattr(self.adapter, name)
 
 
 class PlayerIds:
