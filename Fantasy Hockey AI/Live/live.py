@@ -36,6 +36,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import livepaths
 import draft_board
 import engine as engine_module
 import inputs
@@ -54,7 +56,7 @@ from decisionlayer import valuation as valuation_module
 
 log = logging.getLogger("live")
 
-LIVE_DIR = paths.REPORTS_DIR / "live"
+PLANS_DIR = livepaths.REPORTS_DIR / "plans"
 TONIGHT_DIR = paths.PROJECTIONS_REPORTS / "live"
 STATUS_DIR = paths.FEATURES_DIR.parent / "live"
 INJURED = ("OUT", "SUSP")
@@ -96,7 +98,8 @@ class LeagueSnapshot:
                    source=raw.get("source", f"file {Path(path).name}"))
 
 
-def make_fake_league(board: pd.DataFrame, config, eligibility, me: int, opponent: int, seed: int = 0) -> dict:
+def make_fake_league(board: pd.DataFrame, config, eligibility, me: int, opponent: int, seed: int = 0,
+                     my_name: str = "My team") -> dict:
     """A made-up league for exercising the runner before the draft: every seat drafts the
     consensus VOR board with the real pick rule (`draft.simulate_draft`), lightly shuffled so the
     rosters are not a perfect snake of the board."""
@@ -108,7 +111,7 @@ def make_fake_league(board: pd.DataFrame, config, eligibility, me: int, opponent
     teams = []
     for seat in range(config.teams):
         roster = picks[seat * per_team:(seat + 1) * per_team]
-        teams.append({"name": "Burnaby Beagles" if seat == me else f"Team {seat + 1}",
+        teams.append({"name": my_name if seat == me else f"Team {seat + 1}",
                       "roster": [int(p) for p in roster], "ir": [], "moves_used": 0})
     return {"source": f"fake league (seed {seed}): simulated draft on the 2026-27 consensus board",
             "me": me, "opponent": opponent, "my_week_points": 0.0, "opponent_week_points": 0.0,
@@ -156,15 +159,17 @@ class LiveRunner:
     """Everything that does not change between the passes of one day: league rules, strategy,
     the preseason board, the calendar, the simulator."""
 
-    def __init__(self, day: dt.date, league="league", scoring="points-league", strategy=None,
-                 sim_season=None):
+    def __init__(self, day: dt.date, league, sim_season=None):
+        """`league` is a registry league (leagues.load): its rules, scoring, strategy and positions."""
         self.day = day
+        self.league = league
+        self.plans_dir = PLANS_DIR / league.name
         self.season = season_of(day)
-        self.strategy = load_strategy(strategy)
-        self.scoreset = simlayer.load_scoreset(scoring)
+        self.strategy = load_strategy(league.strategy)
+        self.scoreset = simlayer.load_scoreset(league.scoring)
         self.board, _, self.config, self.eligibility = draft_board.build(
-            self.season, draft_board.previous(self.season), league, scoring, pd.Timestamp(day),
-            self.strategy, eligibility_platform=self.strategy.eligibility_platform)
+            self.season, draft_board.previous(self.season), league.rules, league.scoring,
+            pd.Timestamp(day), self.strategy, eligibility_platform=league.eligibility_platform)
         self.slot_order = self.config.slot_order()
 
         games = pd.read_parquet(paths.schedule(self.season)).reset_index(drop=True)

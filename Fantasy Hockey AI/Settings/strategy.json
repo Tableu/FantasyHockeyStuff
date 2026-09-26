@@ -41,8 +41,6 @@
   "draft": {
     "vor_values": "consensus",
     "min_sources": 2,
-    "undated_sources": "include",
-    "adp_platform": "espn",
-    "eligibility_platform": "fleaflicker"
+    "undated_sources": "include"
   }
 }

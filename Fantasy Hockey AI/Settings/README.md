@@ -10,6 +10,7 @@ rosters/        slots, rules, schedule, draft, playoffs read by Season          
 strategy.json   how the managers decide                 read by Season, handed to Decisions      (--strategy)
 field.json      how the simulated opponents draft       read by Season                           (--field)
 live.json       how tonight's reports become odds       read by Projections/project_tonight.py
+leagues/        the leagues we play: platform, id, team  read by Live (--league), pipeline importers
 ```
 
 The first two are what the league imposes; `strategy.json` is what a manager chooses; `field.json`
@@ -155,9 +156,6 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `opening_days` | 7 | days of rest-of-season rows the VOR draft board treats as draft day |
 | `draft` | `vor_values` | `consensus` | what the VOR draft board values players on: `consensus`, the external sources' preseason projections alone (the only values a real draft has), or `own_model`, our opening-week rest-of-season rows (a backtest reference; they need the season's own games) |
 | | `min_sources` | 2 | sources a player needs for the consensus; below it he keeps last season's total, or his thin consensus if he has none |
-| | `adp_platform` | `espn` | whose ADP the draft board, assistant and window show (one column) and use for "likely gone by your next pick" -- any platform with a `fantasy_adp_<platform>_<season>.parquet` (ModelFeatures `build_fantasy_positions.py`; today yahoo and espn). Display only: no pick rule reads ADP. ESPN's covers every player in the 2026-27 top 300, Yahoo's 230 |
-| | *(draft window)* | | `draft_window.json`, written by the draft window's ⚙ Save as default, overrides these two platforms and the league/scoring files **for the draft tools only** (playoff dates, teams, slots, bench, points per stat). Absent until saved; delete it to go back to the files |
-| | `eligibility_platform` | `fleaflicker` | whose positions the draft board, assistant and window value players on -- the aggregate workbook's "Site Used (POS)". Any platform with a `fantasy_positions_<platform>_<season>.parquet` (ModelFeatures `build_fantasy_positions.py`; today fleaflicker, yahoo, espn); fleaflicker is league 12090's own. The draft tools only: the simulator keeps `rosters/league.json`'s `eligibility_platform` (Yahoo 2026-27), so no ladder number moves |
 | | `undated_sources` | `include` | a source with no publish date (Dom's 2025-26 sheet; every 2026-27 file today) is used, or dropped with `exclude`; logged either way |
 
 ### Where the values come from
@@ -236,3 +234,35 @@ What the live runner does with tonight's reports that the models never saw
   partners share the rest in proportion to the model. `Confirmed` is measured (99.7%, 2025-26).
 
 Keys starting with `_` are notes (sources, dates), not settings.
+
+## leagues/
+
+One file per league we play (`Live/leagues.py` loads and validates them; unknown or missing keys
+fail). Every Live tool takes `--league <name>` (default `beagles`), and the pipeline's Fleaflicker
+importer and snapshot job read the active Fleaflicker league's id from here.
+
+```json
+{
+  "name": "beagles",                      "description": "...",
+  "platform": "fleaflicker",              "league_id": 12090,
+  "season": "2026-27",                    "team": {"id": 63341, "name": "Burnaby Beagles"},
+  "rules": "league",                      "scoring": "points-league",
+  "strategy": null,                       "eligibility_platform": "fleaflicker",
+  "adp_platform": "espn",                 "active": true,
+  "draft_window": { ... }
+}
+```
+
+- `platform`: `fleaflicker`, `espn` or `standalone`. A league whose draft the tools cannot read
+  (ESPN until its reader exists, or one without an id) runs the draft tools `--standalone`
+  (`--slot` required).
+- `rules` / `scoring` / `strategy`: names in `rosters/`, `scoring/` and here (`null` = strategy.json).
+- `eligibility_platform` / `adp_platform`: whose positions the draft tools value players on (the
+  aggregate workbook's "Site Used (POS)"; any platform with a
+  `fantasy_positions_<platform>_<season>.parquet`), and whose ADP they show beside the board
+  (display only). These used to be `strategy.json`'s `draft` block; they are per league now. The
+  simulator keeps `rosters/*.json`'s own `eligibility_platform`, so no ladder number moves.
+- `active`: whether scheduled jobs run the league.
+- `draft_window`: the draft window's saved settings (⚙ Save as default writes them here): playoff
+  dates, teams, slots, bench, points per stat and the two platforms, overriding the fields above
+  **for the draft tools only**. `{}` = use the files.

@@ -21,10 +21,9 @@ import argparse
 import datetime as dt
 import logging
 
-from nhl_pipeline import db, name_resolver
+from nhl_pipeline import db, fantasy_leagues, name_resolver
 from nhl_pipeline.api import dailyfaceoff, espn_injuries, fleaflicker
 from nhl_pipeline.ingest import live_snapshots as live
-from nhl_pipeline.ingest.fantasy_fleaflicker import FLEAFLICKER_LEAGUE_ID
 from nhl_pipeline.ingest.season import ensure_season
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -60,7 +59,9 @@ def run_source(conn, kind: str, source_key: str, work, dry_run: bool) -> None:
 
 def snapshot_injuries(conn, season_id, teams, player_index, dry_run):
     def fleaflicker_work(cursor, run_id, source):
-        rows = fleaflicker.injuries(fleaflicker.get_players(FLEAFLICKER_LEAGUE_ID))
+        # Designations are the platform's, not the league's: read through the registry's active
+        # Fleaflicker league (today 12090).
+        rows = fleaflicker.injuries(fleaflicker.get_players(fantasy_leagues.fleaflicker_league_id()))
         resolver = live.fleaflicker_resolver(cursor, season_id, player_index)
         status = live.fleaflicker_status_rows(rows, teams, resolver)
         _warn_unresolved("Fleaflicker", status)

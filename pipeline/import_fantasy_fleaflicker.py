@@ -14,15 +14,16 @@ It also records each resolved player's Fleaflicker id in Fantasy.PlatformPlayerI
 draft assistant uses to name a pick exactly.
 
 Usage:
-    python import_fantasy_fleaflicker.py                    # league 12090, the user's league
-    python import_fantasy_fleaflicker.py --league-id 100    # the old proxy league
+    python import_fantasy_fleaflicker.py                    # the registry's active Fleaflicker league (12090)
+    python import_fantasy_fleaflicker.py --league beagles   # a registry league by name
+    python import_fantasy_fleaflicker.py --league-id 100    # any league id, e.g. the old proxy
     python import_fantasy_fleaflicker.py --dry-run          # the same run, rolled back
 """
 
 import argparse
 import logging
 
-from nhl_pipeline import db
+from nhl_pipeline import db, fantasy_leagues
 from nhl_pipeline.ingest import fantasy_fleaflicker
 from nhl_pipeline.ingest.season import ensure_season
 
@@ -35,9 +36,13 @@ SEASON_CFG = {"SeasonID_NHL": 20262027, "DisplayName": "2026-27"}
 
 def main():
     parser = argparse.ArgumentParser(description="Import Fleaflicker positions and player ids")
-    parser.add_argument("--league-id", type=int, default=fantasy_fleaflicker.FLEAFLICKER_LEAGUE_ID)
+    parser.add_argument("--league", default=None,
+                        help="A league in Fantasy Hockey AI/Settings/leagues/ (default: the active "
+                             "Fleaflicker one)")
+    parser.add_argument("--league-id", type=int, default=None, help="Any Fleaflicker league id instead")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    args.league_id = args.league_id or fantasy_leagues.fleaflicker_league_id(args.league)
 
     conn = db.connect()
     cursor = conn.cursor()

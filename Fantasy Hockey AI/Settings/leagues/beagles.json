@@ -1,0 +1,59 @@
+{
+  "name": "beagles",
+  "description": "Fleaflicker league 12090 (https://www.fleaflicker.com/nhl/leagues/12090), team Burnaby Beagles (id 63341; 'One if by Landeskog' in 2025). 14-team H2H points, 18-round snake.",
+  "platform": "fleaflicker",
+  "league_id": 12090,
+  "season": "2026-27",
+  "team": {
+    "id": 63341,
+    "name": "Burnaby Beagles"
+  },
+  "rules": "league",
+  "scoring": "points-league",
+  "strategy": null,
+  "eligibility_platform": "fleaflicker",
+  "adp_platform": "espn",
+  "active": true,
+  "draft_window": {
+    "playoffs": [
+      "2027-03-15",
+      "2027-04-04"
+    ],
+    "roster": {
+      "teams": 14,
+      "bench": 4,
+      "slots": {
+        "C": 2,
+        "LW": 2,
+        "RW": 2,
+        "W": 0,
+        "F": 1,
+        "D": 4,
+        "F/D": 1,
+        "G": 2
+      }
+    },
+    "scoring": {
+      "skaters": {
+        "goals": 4.0,
+        "assists": 2.5,
+        "ppp": 1.0,
+        "shp": 1.25,
+        "shots": 0.25,
+        "hits": 0.4,
+        "blocks": 0.4,
+        "pim": 0.2
+      },
+      "goalies": {
+        "wins": 3.0,
+        "losses": -1.5,
+        "goals_against": -1.0,
+        "saves": 0.25,
+        "shutouts": 2.5,
+        "ot_losses": 1.0
+      }
+    },
+    "eligibility_platform": "fleaflicker",
+    "adp_platform": "espn"
+  }
+}

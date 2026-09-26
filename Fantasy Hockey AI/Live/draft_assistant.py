@@ -1,14 +1,17 @@
 #!/usr/bin/env python
 """Draft-night assistant: follows the league's live draft and shows the best available players.
 
-    python draft_assistant.py --team "Burnaby Beagles"            # follow the live draft
-    python draft_assistant.py --team "Burnaby Beagles" --once     # one snapshot, then exit
-    python draft_assistant.py --team "Burnaby Beagles" --manual   # the API is down: type picks
-    python draft_assistant.py --standalone --slot 10 --league espn-default --weights espn-default         --eligibility espn --adp espn                              # any platform (ESPN): type picks
+    python draft_assistant.py                          # follow the live draft (league beagles)
+    python draft_assistant.py --once                   # one snapshot, then exit
+    python draft_assistant.py --manual                 # the API is down: type picks
+    python draft_assistant.py --league espn --slot 10  # a league it cannot read (ESPN): type picks
 
-`--standalone` needs no draft API at all: the pick order comes from --teams (default: the league
-file), --slot, --rounds (default: the roster size) and --order (snake). Saved draft-window settings
-are per league (Settings/draft_window-<league>.json), so one league's scoring never reaches another.
+`--league` names a league in Settings/leagues/ (leagues.py): its platform and id, your team, its
+rules and scoring files, whose positions and ADP -- every other flag overrides one of those for the
+run. A league whose draft cannot be read from its platform runs `--standalone`: no draft API at
+all, the pick order from --slot, --teams (default: the rules file), --rounds (default: the roster
+size) and --order (snake). The draft window's saved settings live in the league's own file, so one
+league's scoring never reaches another.
 
 **Read only.** It reads Fleaflicker's public draft board every `--poll` seconds and never submits a
 pick. The board is `draft_board.py`'s: value over replacement on the external sources' consensus,
@@ -33,6 +36,9 @@ import urllib.request
 
 import pandas as pd
 
+import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import leagues
+import livepaths
 import draft_board
 import league as league_module
 import paths
@@ -48,14 +54,6 @@ PLATFORM = "Fleaflicker"     # the league's platform: picks arrive by its player
 # workbook's; the league file does not define it, so it is added here. F/D is its UTIL(F/D).
 ROSTER_SLOTS = ("C", "LW", "RW", "W", "F", "D", "F/D", "G")
 EXTRA_SLOT_POSITIONS = {"W": ["LW", "RW"]}
-
-
-def load_overrides(league: str = "league") -> dict:
-    """The draft window's saved settings for `league` (paths.draft_window_settings), or {}."""
-    path = paths.draft_window_settings(league)
-    if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 # A rehearsal of the live path (--replay-season): every poll really reads Fleaflicker, but reads a
@@ -119,17 +117,18 @@ class Assistant:
         strategy = self.strategy = load_strategy(args.strategy)
         season = args.season
         self.prior = args.prior_season or draft_board.previous(season)
-        # Defaults: the league and scoring files, Fleaflicker's playoff weeks, the strategy's
-        # platforms. The draft window's saved settings (Settings/draft_window.json) override them,
-        # and a command-line flag overrides both.
-        self.base_config = league_module.load(args.league)
+        # Defaults: the registry league's rules, scoring and platforms (Settings/leagues/, filled
+        # into args by resolve_league), Fleaflicker's playoff weeks. The draft window's saved
+        # settings (the league file's draft_window) override them, and a command-line flag
+        # overrides both.
+        self.league = args.league_entry
+        self.base_config = league_module.load(args.rules)
         self.base_scoreset = simlayer.load_scoreset(args.weights)
-        self.overrides = load_overrides(args.league)
+        self.overrides = dict(self.league.draft_window)
         self.default_playoffs = None
         if not getattr(args, "standalone", False):   # standalone: no platform to ask
             try:
-                self.default_playoffs = playoff_window(getattr(args, "league_id", 12090),
-                                                       self.base_config.playoff_weeks)
+                self.default_playoffs = playoff_window(args.league_id, self.base_config.playoff_weeks)
             except Exception as error:                               # noqa: BLE001 - optional
                 log.warning("no playoff weeks from Fleaflicker (%s)", error)
         saved = self.overrides.get("playoffs")
@@ -144,8 +143,8 @@ class Assistant:
             for p in paths.FEATURES_DIR.glob(f"fantasy_positions_*_{season}.parquet"))
         self.build_board(getattr(args, "eligibility", None)
                          or self.overrides.get("eligibility_platform")
-                         or strategy.eligibility_platform)
-        ids = pd.read_parquet(paths.platform_ids())
+                         or self.league.eligibility_platform)
+        ids = pd.read_parquet(livepaths.platform_ids())
         ids = ids[(ids["platform"] == PLATFORM) & (ids["season"] == season)]
         self.by_fleaflicker_id = dict(zip(ids["external_id"].astype(str), ids["player_id"].astype(int)))
         players = pd.read_parquet(paths.players())
@@ -155,25 +154,25 @@ class Assistant:
         self.names = dict(zip(players["player_id"].astype(int), players["name"]))
         self.adp_platforms = [c[len("adp_"):] for c in self.board.columns if c.startswith("adp_")]
         self.adp_platform = (getattr(args, "adp", None) or self.overrides.get("adp_platform")
-                             or strategy.adp_platform).lower()
+                             or self.league.adp_platform).lower()
         if self.adp_platform not in self.adp_platforms:
             raise SystemExit(f"no {self.adp_platform} ADP for {season} (have: "
                              f"{', '.join(self.adp_platforms) or 'none'}); run ModelFeatures "
                              f"build_fantasy_positions.py --platform {self.adp_platform} "
-                             f"--season {season}, or set draft.adp_platform")
+                             f"--season {season}, or set the league's adp_platform")
         self.manual_picks = []
 
     def build_board(self, platform):
-        """(Re)build the board on `platform`'s positions (draft.eligibility_platform) -- values,
+        """(Re)build the board on `platform`'s positions (the league's eligibility_platform) -- values,
         replacement levels, and which slots each player fills all follow the positions."""
         platform = platform.lower()
         if platform not in self.eligibility_platforms:
             raise SystemExit(f"no {platform} positions for {self.args.season} (have: "
                              f"{', '.join(self.eligibility_platforms) or 'none'}); run ModelFeatures "
                              f"build_fantasy_positions.py --platform {platform} --season "
-                             f"{self.args.season}, or set draft.eligibility_platform")
+                             f"{self.args.season}, or set the league's eligibility_platform")
         self.board, self.levels, self.config, self.eligibility = draft_board.build(
-            self.args.season, self.prior, self.args.league, self.args.weights,
+            self.args.season, self.prior, self.args.rules, self.args.weights,
             pd.Timestamp(self.args.draft_date), self.strategy, eligibility_platform=platform,
             playoffs=self.playoffs, config=self.league_config(), scoreset=self.scoreset())
         self.eligibility_platform = platform
@@ -201,9 +200,8 @@ class Assistant:
             "goalies": {k: float(v) for k, v in scoring["goalies"].items() if float(v)}})
 
     def save_overrides(self):
-        path = paths.draft_window_settings(self.args.league)
-        path.write_text(json.dumps(self.overrides, indent=2) + "\n", encoding="utf-8")
-        return path
+        """The draft window's Save as default: into the league's registry file."""
+        return leagues.save_draft_window(self.league, dict(self.overrides))
 
     # -- matching -----------------------------------------------------------------------------
     def player_id(self, pick):
@@ -304,8 +302,8 @@ class Assistant:
         if not self.args.once:
             os.system("cls" if os.name == "nt" else "clear")
         print(text)
-        paths.ensure(paths.REPORTS_DIR)
-        (paths.REPORTS_DIR / "draft_assistant.md").write_text(text, encoding="utf-8")
+        livepaths.ensure(livepaths.REPORTS_DIR)
+        (livepaths.REPORTS_DIR / "draft_assistant.md").write_text(text, encoding="utf-8")
 
 
 def team_id_for(board_json, name):
@@ -351,6 +349,44 @@ def add_standalone_arguments(p) -> None:
     p.add_argument("--order", default="snake", choices=("snake", "linear"), help="--standalone: pick order")
 
 
+def add_league_arguments(p) -> None:
+    """The league to draft for, shared by draft_assistant.py and draft_gui.py. `--league` names a
+    registry league (Settings/leagues/, see leagues.py); every other flag here overrides one of its
+    fields for this run."""
+    p.add_argument("--league", default=leagues.DEFAULT_LEAGUE,
+                   help="A league in Settings/leagues/ (default %(default)s)")
+    p.add_argument("--league-id", type=int, default=None, help="Override the league's platform id")
+    p.add_argument("--team", default=None,
+                   help="Your team's name or id as the platform shows it (default: the league's)")
+    p.add_argument("--season", default=None, help="Default: the league's")
+    p.add_argument("--prior-season", default=None)
+    p.add_argument("--rules", default=None, help="A Settings/rosters/ name (default: the league's)")
+    p.add_argument("--weights", default=None, help="A Settings/scoring/ name (default: the league's)")
+    p.add_argument("--strategy", default=None)
+    p.add_argument("--draft-date", default=dt.date.today().isoformat())
+    p.add_argument("--adp", default=None, help="Whose ADP to show (default: the league's)")
+    p.add_argument("--eligibility", default=None, help="Whose positions to use (default: the league's)")
+
+
+def resolve_league(args, parser) -> None:
+    """Fill the flags left unset from the registry league. A league whose draft the tools cannot
+    read (ESPN until its reader exists, or one not joined yet) runs --standalone."""
+    league = args.league_entry = leagues.load(args.league)
+    args.league_id = args.league_id or league.league_id
+    args.team = args.team or (str(league.team_id) if league.team_id is not None else None)
+    args.season = args.season or league.season
+    args.rules = args.rules or league.rules
+    args.weights = args.weights or league.scoring
+    args.strategy = args.strategy or league.strategy
+    if not league.readable and not args.standalone and not getattr(args, "replay_season", None):
+        args.standalone = True
+    if args.standalone and args.slot is None:
+        parser.error(f"{league.name} runs --standalone (its draft cannot be read from "
+                     f"{league.platform}): pass --slot, your draft slot")
+    if not args.standalone and not args.team:
+        parser.error("--team is required (the league has none on file)")
+
+
 def open_board(args, assistant) -> dict:
     """The draft board to follow: Fleaflicker's (live or replayed), or the standalone one."""
     if not getattr(args, "standalone", False):
@@ -373,18 +409,7 @@ def manual_cells(board_json, picks):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--league-id", type=int, default=12090)
-    p.add_argument("--team", default=None,
-                   help="Your team's name as Fleaflicker shows it (required unless --standalone)")
-    p.add_argument("--season", default="2026-27")
-    p.add_argument("--prior-season", default=None)
-    p.add_argument("--league", default="league")
-    p.add_argument("--weights", default="points-league")
-    p.add_argument("--strategy", default=None)
-    p.add_argument("--draft-date", default=dt.date.today().isoformat())
-    p.add_argument("--adp", default=None, help="Whose ADP to show (default: draft.adp_platform)")
-    p.add_argument("--eligibility", default=None,
-                   help="Whose positions to use (default: draft.eligibility_platform)")
+    add_league_arguments(p)
     p.add_argument("--top", type=int, default=15)
     p.add_argument("--poll", type=int, default=10, help="Seconds between reads of the live board")
     p.add_argument("--once", action="store_true", help="Show one snapshot and exit")
@@ -395,8 +420,7 @@ def main():
     p.add_argument("--replay-start", type=int, default=0, help="Picks already made when it starts")
     add_standalone_arguments(p)
     args = p.parse_args()
-    if not args.standalone and not args.team:
-        p.error("--team is required (or use --standalone)")
+    resolve_league(args, p)
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     if args.replay_season:

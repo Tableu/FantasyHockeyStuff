@@ -121,18 +121,7 @@ def schedule(season: str) -> Path:
     return FEATURES_DIR / f"schedule_{season}.parquet"
 
 
-def injury_risk() -> Path:
-    """Published injury-risk lists per season, e.g. Dobber's Band-Aid Boys (build_players.py)."""
-    return FEATURES_DIR / "injury_risk.parquet"
 
-
-def platform_ids() -> Path:
-    """A fantasy platform's own player id -> player_id, per season (ModelFeatures/build_players.py)."""
-    return FEATURES_DIR / "platform_ids.parquet"
-
-
-def draft_board(season: str, league: str, scoring: str, suffix: str) -> Path:
-    return REPORTS_DIR / f"draft_board_{season}_{league}_{scoring}.{suffix}"
 
 
 def holdout_predictions(season: str, variant: str = "A") -> Path:
@@ -161,15 +150,6 @@ def scoreset(name: str) -> Path:
     path = Path(name)
     return path if path.exists() else SCORESETS_DIR / f"{path.stem}.json"
 
-
-def draft_window_settings(league: str = "league") -> Path:
-    """The draft tools' own saved settings (the draft window's settings popup): positions, ADP,
-    playoff dates, roster and scoring for the live draft. Never read by the simulator. One file per
-    league (`--league`): they override the league and scoring files, so one league's saved scoring
-    must never reach another league's draft. The default league keeps its original file name."""
-    if league in (None, "league"):
-        return SETTINGS_DIR / "draft_window.json"
-    return SETTINGS_DIR / f"draft_window-{Path(str(league)).stem}.json"
 
 
 def strategy_config(name: str) -> Path:

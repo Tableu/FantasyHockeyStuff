@@ -1,0 +1,38 @@
+"""Where the live tools read and write -- the locations only Live/ uses.
+
+Shared data locations (ModelFeatures' features, Projections' reports, Settings/) stay in
+Season/'s `paths`, which Live/ imports through `seasonlayer`. This module is named `livepaths`,
+not `paths`, so it can never shadow that one (see seasonlayer.py).
+
+    reports/    draft boards and daily plans (gitignored)
+    fixtures/   made-up leagues for exercising the tools before a league has rosters
+"""
+
+from pathlib import Path
+
+import seasonlayer  # noqa: F401 -- Season/ on sys.path
+import paths as season_paths
+
+LIVE_DIR = Path(__file__).resolve().parent
+REPORTS_DIR = LIVE_DIR / "reports"
+FIXTURES_DIR = LIVE_DIR / "fixtures"
+
+
+def ensure(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def injury_risk() -> Path:
+    """Published injury-risk lists per season, e.g. Dobber's Band-Aid Boys (build_players.py)."""
+    return season_paths.FEATURES_DIR / "injury_risk.parquet"
+
+
+def platform_ids() -> Path:
+    """A fantasy platform's own player id -> player_id, per season (ModelFeatures/build_players.py)."""
+    return season_paths.FEATURES_DIR / "platform_ids.parquet"
+
+
+def draft_board(season: str, league: str, scoring: str, suffix: str) -> Path:
+    return REPORTS_DIR / f"draft_board_{season}_{league}_{scoring}.{suffix}"
+

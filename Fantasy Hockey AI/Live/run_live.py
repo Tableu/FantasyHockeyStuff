@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 """Writes today's plan for my team: IR moves, adds and drops, claims, and tonight's lineup
-(live.py). Recommend-only -- the plan is a file; make the moves on Fleaflicker.
+(live.py) for a registry league (`--league`, Settings/leagues/). Recommend-only -- the plan is a file; make the moves on Fleaflicker.
 
-    reports/live/plan_{date}_{HHMM}.md    the plan (and .json beside it)
-    reports/live/plan_latest.md            a copy of the newest one
+    reports/plans/<league>/plan_{date}_{HHMM}.md    the plan (and .json beside it)
+    reports/plans/<league>/plan_latest.md            a copy of the newest one
 
 Before the draft there are no rosters, so `--make-fake` writes a made-up league (every seat
 drafting the consensus board) to exercise the runner against:
 
-    python run_live.py --make-fake                       # -> live/fake_league.json
-    python run_live.py --date 2026-09-29 --league-file live/fake_league.json --refresh
-    python run_live.py --date 2026-09-29 --league-file live/fake_league.json --now "2026-09-29 23:30"
+    python run_live.py --make-fake                       # -> fixtures/beagles/fake_league.json
+    python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh
+    python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --now "2026-09-29 23:30"
 
 `--refresh` rebuilds tonight's rows and projections first (ModelFeatures/build_tonight.py, then
 Projections/project_tonight.py). `--now` (UTC) sets the moment the per-game lock is judged at.
@@ -19,7 +19,7 @@ Projections/project_tonight.py). `--now` (UTC) sets the moment the per-game lock
 within WINDOW_LEAD of now and that group has no plan yet (plan_{date}_w{HHMM}.md, the puck time),
 so Task Scheduler can call it every 15 minutes and each window is planned once, fresh:
 
-    python run_live.py --window --refresh --league-file live/league.json
+    python run_live.py --league beagles --window --refresh --league-file <snapshot>.json
 """
 
 import argparse
@@ -30,13 +30,15 @@ import shutil
 import subprocess
 import sys
 
+import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import leagues
+import livepaths
 import paths
 import live
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("run_live")
 
-FAKE_LEAGUE = paths.PROJECT_ROOT / "live" / "fake_league.json"
 WINDOW_LEAD = dt.timedelta(minutes=30)
 MODEL_FEATURES = paths.SIBLINGS / "ModelFeatures"
 
@@ -64,9 +66,11 @@ def next_window(day: dt.date, now: dt.datetime):
 
 def main():
     parser = argparse.ArgumentParser(description="Write today's plan for my team")
+    parser.add_argument("--league", default=leagues.DEFAULT_LEAGUE,
+                        help="A league in Settings/leagues/ (default %(default)s)")
     parser.add_argument("--date", default=None, help="game date (default: today on this PC)")
     parser.add_argument("--league-file", default=None, help="a league snapshot JSON (before the draft: the fake one)")
-    parser.add_argument("--make-fake", action="store_true", help="write a made-up league to live/fake_league.json")
+    parser.add_argument("--make-fake", action="store_true", help="write a made-up league to fixtures/<league>/fake_league.json")
     parser.add_argument("--me", type=int, default=9, help="--make-fake: my seat (0-based; draft slot 10 = 9)")
     parser.add_argument("--opponent", type=int, default=0, help="--make-fake: this week's opponent seat")
     parser.add_argument("--seed", type=int, default=0)
@@ -78,6 +82,9 @@ def main():
     now = (dt.datetime.fromisoformat(args.now) if args.now
            else dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0))
 
+    league = leagues.load(args.league)
+    plans_dir = live.PLANS_DIR / league.name
+    fake_league = livepaths.FIXTURES_DIR / league.name / "fake_league.json"
     stem = f"plan_{day.isoformat()}_{now:%H%M}"
     if args.window:
         window = next_window(day, now)
@@ -85,18 +92,19 @@ def main():
             log.info("no game starts within %s of %s UTC -- nothing to plan", WINDOW_LEAD, f"{now:%H:%M}")
             return
         stem = f"plan_{day.isoformat()}_w{window:%H%M}"
-        if (live.LIVE_DIR / f"{stem}.md").exists():
+        if (plans_dir / f"{stem}.md").exists():
             log.info("the %s UTC window is already planned (%s.md)", f"{window:%H:%M}", stem)
             return
     if args.refresh:
         refresh(day)
-    runner = live.LiveRunner(day)
+    runner = live.LiveRunner(day, league)
 
     if args.make_fake:
-        fake = live.make_fake_league(runner.board, runner.config, runner.eligibility, args.me, args.opponent, args.seed)
-        paths.ensure(FAKE_LEAGUE.parent)
-        FAKE_LEAGUE.write_text(json.dumps(fake, indent=1), encoding="utf-8")
-        log.info("wrote %s (%d teams x %d players)", FAKE_LEAGUE, len(fake["teams"]), len(fake["teams"][0]["roster"]))
+        fake = live.make_fake_league(runner.board, runner.config, runner.eligibility, args.me, args.opponent,
+                                     args.seed, my_name=league.team_name or "My team")
+        paths.ensure(fake_league.parent)
+        fake_league.write_text(json.dumps(fake, indent=1), encoding="utf-8")
+        log.info("wrote %s (%d teams x %d players)", fake_league, len(fake["teams"]), len(fake["teams"][0]["roster"]))
         if not args.league_file:
             return
 
@@ -105,12 +113,12 @@ def main():
     snapshot = live.LeagueSnapshot.load(args.league_file)
     plan = live.LiveRunner.plan(runner, snapshot, now)
 
-    paths.ensure(live.LIVE_DIR)
+    paths.ensure(plans_dir)
     markdown = live.render(plan)
-    (live.LIVE_DIR / f"{stem}.md").write_text(markdown, encoding="utf-8")
-    (live.LIVE_DIR / f"{stem}.json").write_text(json.dumps(plan, indent=1, default=str), encoding="utf-8")
-    shutil.copyfile(live.LIVE_DIR / f"{stem}.md", live.LIVE_DIR / "plan_latest.md")
-    log.info("plan -> %s", live.LIVE_DIR / f"{stem}.md")
+    (plans_dir / f"{stem}.md").write_text(markdown, encoding="utf-8")
+    (plans_dir / f"{stem}.json").write_text(json.dumps(plan, indent=1, default=str), encoding="utf-8")
+    shutil.copyfile(plans_dir / f"{stem}.md", plans_dir / "plan_latest.md")
+    log.info("plan -> %s", plans_dir / f"{stem}.md")
 
 
 if __name__ == "__main__":

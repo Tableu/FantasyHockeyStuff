@@ -3,7 +3,7 @@
 
 `Reference.Schedule` has every game, played or not, as soon as the NHL publishes the season, so
 this works before opening night. The draft board counts each team's off-night and fantasy-playoff
-games from it (`Season/draft_board.schedule_counts`), the way the aggregate workbook's Schedule
+games from it (`Live/draft_board.schedule_counts`), the way the aggregate workbook's Schedule
 Info sheet does.
 
     python build_schedule.py --season 2026-27

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Draft-night window: the live draft board and the rankings, in a spreadsheet-like view.
 
-    python draft_gui.py --team "Burnaby Beagles"            # follow the live draft
-    python draft_gui.py --team "Burnaby Beagles" --manual   # the API is down: double-click to pick
-    python draft_gui.py --standalone --slot 10 --league espn-default --weights espn-default         --eligibility espn --adp espn                        # any platform (ESPN): double-click picks
+    python draft_gui.py                          # follow the live draft (league beagles)
+    python draft_gui.py --manual                 # the API is down: double-click to pick
+    python draft_gui.py --league espn --slot 10  # a league it cannot read (ESPN): double-click picks
 
 The same board and matching as `draft_assistant.py` (read only; it never submits a pick), in a
 tkinter window instead of the terminal:
@@ -16,7 +16,7 @@ tkinter window instead of the terminal:
   pick on the clock highlighted and your column marked.
 - **⚙ Settings**: a popup laid out like the aggregate workbook's Settings sheet -- whose positions
   and ADP, the playoff dates, the roster (teams, slots, bench) and the scoring. Apply rebuilds the
-  board; Save as default writes Settings/draft_window.json (see `open_settings`).
+  board; Save as default writes the league's Settings/leagues/ file (see `open_settings`).
 - **Sidebar**: the clock, your next picks, open starting slots, the positional-need warning, your
   roster, the last picks and any pick it could not match.
 
@@ -34,6 +34,7 @@ from tkinter import ttk
 
 import pandas as pd
 
+import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import draft_assistant as da
 from decisionlayer import draft as draft_module
 
@@ -154,8 +155,8 @@ class DraftWindow:
         - Roster Settings: teams and the slots per team (UTIL(F/D) is this league's F/D);
         - Scoring: the points per stat, skaters and goalies (0 = not scored).
 
-        Apply rebuilds the board for this session; Save as default also writes
-        Settings/draft_window.json, which the draft tools start from next time. League defaults
+        Apply rebuilds the board for this session; Save as default also writes it into the
+        league's Settings/leagues/ file, which the draft tools start from next time. League defaults
         puts back the league and scoring files and Fleaflicker's playoff weeks. The simulator never
         reads any of it."""
         if self.settings_window is not None and self.settings_window.winfo_exists():
@@ -271,7 +272,7 @@ class DraftWindow:
             self.roster_total.set("?")
 
     def _read_settings(self) -> dict:
-        """The popup's fields as draft_window.json's overrides; ValueError names a bad field."""
+        """The popup's fields as the league's draft_window overrides; ValueError names a bad field."""
         days = [v.get().strip() for v in self.playoff_vars]
         if any(days) and not all(days):
             raise ValueError("give both playoff dates, or neither")
@@ -676,18 +677,7 @@ class DraftWindow:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--league-id", type=int, default=12090)
-    p.add_argument("--team", default=None,
-                   help="Your team's name as Fleaflicker shows it (required unless --standalone)")
-    p.add_argument("--season", default="2026-27")
-    p.add_argument("--prior-season", default=None)
-    p.add_argument("--league", default="league")
-    p.add_argument("--weights", default="points-league")
-    p.add_argument("--strategy", default=None)
-    p.add_argument("--draft-date", default=dt.date.today().isoformat())
-    p.add_argument("--adp", default=None, help="Whose ADP to show first (default: draft.adp_platform)")
-    p.add_argument("--eligibility", default=None,
-                   help="Whose positions to use first (default: draft.eligibility_platform)")
+    da.add_league_arguments(p)
     p.add_argument("--poll", type=int, default=10, help="Seconds between reads of the live board")
     p.add_argument("--manual", action="store_true", help="Double-click players instead of the API")
     p.add_argument("--replay-season", default=None,
@@ -696,8 +686,7 @@ def main():
     p.add_argument("--replay-start", type=int, default=0, help="Picks already made when it starts")
     da.add_standalone_arguments(p)
     args = p.parse_args()
-    if not args.standalone and not args.team:
-        p.error("--team is required (or use --standalone)")
+    da.resolve_league(args, p)
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     print("Building the board...")

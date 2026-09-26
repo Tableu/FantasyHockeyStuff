@@ -27,9 +27,8 @@ ALIAS_TABLE = "Fantasy.PlayerNameAliases"
 UNRESOLVED_TABLE = "Fantasy.UnresolvedPlayerNames"
 
 FLEAFLICKER_PROXY_LEAGUE_ID = 100
-# The user's own league (https://www.fleaflicker.com/nhl/leagues/12090): its positions are the ones
-# this league's draft and lineups are played under, so it is the default source now.
-FLEAFLICKER_LEAGUE_ID = 12090
+# The league whose positions the draft and lineups are played under is the registry's active
+# Fleaflicker league (nhl_pipeline.fantasy_leagues; today 12090, the user's), passed in by the caller.
 IDS_TABLE = "Fantasy.PlatformPlayerIDs"
 
 # Spellings with no exact Reference.Players name, each checked by hand (2026-09-24).
@@ -69,7 +68,7 @@ def ensure_ids_table(cursor) -> None:
                    "')")
 
 
-def sync_fleaflicker(cursor, season_id: int, league_id: int = FLEAFLICKER_LEAGUE_ID) -> dict:
+def sync_fleaflicker(cursor, season_id: int, league_id: int) -> dict:
     platform_id = get_or_create_platform(cursor, "Fleaflicker")
 
     for raw, player_id in CONFIRMED_ALIASES.items():

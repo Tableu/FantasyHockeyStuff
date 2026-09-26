@@ -1,0 +1,15 @@
+{
+  "name": "espn",
+  "description": "ESPN public league on ESPN's default settings. Not joined yet: no league id, so the draft tools run it --standalone (--slot). Scoring from espn.com story 34491407; rules provisional (Settings/rosters/espn-default.json) until the joined league's mSettings replace them.",
+  "platform": "espn",
+  "league_id": null,
+  "season": "2026-27",
+  "team": null,
+  "rules": "espn-default",
+  "scoring": "espn-default",
+  "strategy": null,
+  "eligibility_platform": "espn",
+  "adp_platform": "espn",
+  "active": false,
+  "draft_window": {}
+}

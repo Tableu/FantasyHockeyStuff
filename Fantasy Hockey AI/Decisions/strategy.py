@@ -39,8 +39,6 @@ class Strategy:
     vor_values: str                           # VOR board: "consensus" or "own_model" (reference)
     vor_min_sources: int                      # ...sources a player needs, else last season
     undated_sources: str                      # "include" or "exclude" a source with no publish date
-    adp_platform: str                         # whose ADP the draft tools show (display only)
-    eligibility_platform: str                 # whose positions the draft tools value players on
     description: str = ""
 
 
@@ -102,8 +100,9 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         raise ValueError(f"strategy {name}: playoffs.future_week_weight "
                          f"{playoffs['future_week_weight']!r}")
     draft = payload["draft"]
-    draft_keys = {"vor_values", "min_sources", "undated_sources", "adp_platform",
-                  "eligibility_platform"}
+    # adp_platform / eligibility_platform used to live here; they are per league now
+    # (Settings/leagues/, read by Live/leagues.py), so a strategy file still carrying them fails.
+    draft_keys = {"vor_values", "min_sources", "undated_sources"}
     if set(draft) != draft_keys:
         raise ValueError(f"strategy {name} draft: needs exactly {sorted(draft_keys)}; "
                          f"got {sorted(draft)}")
@@ -111,9 +110,6 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         raise ValueError(f"strategy {name}: draft.vor_values {draft['vor_values']!r}")
     if draft["undated_sources"] not in ("include", "exclude"):
         raise ValueError(f"strategy {name}: draft.undated_sources {draft['undated_sources']!r}")
-    for key in ("adp_platform", "eligibility_platform"):
-        if not isinstance(draft[key], str) or not draft[key].strip():
-            raise ValueError(f"strategy {name}: draft.{key} {draft[key]!r}")
     min_sources = draft["min_sources"]
     if isinstance(min_sources, bool) or not isinstance(min_sources, int) or min_sources < 1:
         raise ValueError(f"strategy {name}: draft.min_sources {draft['min_sources']!r}")
@@ -141,7 +137,5 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         vor_values=draft["vor_values"],
         vor_min_sources=draft["min_sources"],
         undated_sources=draft["undated_sources"],
-        adp_platform=draft["adp_platform"].strip().lower(),
-        eligibility_platform=draft["eligibility_platform"].strip().lower(),
         description=payload.get("description", ""),
     )
