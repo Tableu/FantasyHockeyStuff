@@ -2,15 +2,17 @@
 # user. Times are this PC's local time (Pacific). The PC has to be on and awake at those times;
 # a missed run starts as soon as possible afterwards.
 #
+#   FantasyHockey-LiveInjuries  10:00 and 15:00 daily   Fleaflicker + ESPN injury reports, then the
+#                               draft window's Status export (run_live_snapshot.cmd injuries)
 #   FantasyHockey-NightlyIngest 04:00 daily               run_daily.py: last night's games, lineups,
 #                               season totals, then the live injury spells
 #   FantasyHockey-PlayerTeams   05:00 daily               import_player_teams.py: new signings, then
 #                               each projected / league-pool player's NHL team (~12 min)
 #
-# The live snapshots (injuries, line charts, starting goalies; snapshot_live.py) are not scheduled:
-# they run only while the plan window is open (Fantasy Hockey AI/Live/plan_gui.py, via planpass.py).
-# Their old tasks -- FantasyHockey-LiveInjuries, -LiveLines, -LiveGoalies -- are still removed here
-# if present.
+# The line-chart and starting-goalie snapshots are not scheduled: they run only while the plan
+# window is open (Fantasy Hockey AI/Live/plan_gui.py, via planpass.py), which also takes an injury
+# snapshot. Their old tasks -- FantasyHockey-LiveLines, -LiveGoalies -- are still removed here if
+# present.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File schedule_live_tasks.ps1
 #         powershell -ExecutionPolicy Bypass -File schedule_live_tasks.ps1 -Remove
@@ -27,7 +29,17 @@ foreach ($name in $names) {
     }
 }
 if ($Remove) { Write-Output "Removed: $($names -join ', ')"; return }
-Write-Output "Removed if present: FantasyHockey-LiveInjuries, FantasyHockey-LiveLines, FantasyHockey-LiveGoalies"
+Write-Output "Removed if present: FantasyHockey-LiveLines, FantasyHockey-LiveGoalies"
+
+# Injury reports twice a day, each followed by the draft window's Status export.
+$injuries = New-ScheduledTaskAction -Execute (Join-Path $here "run_live_snapshot.cmd") -Argument "injuries" `
+    -WorkingDirectory $here
+$injurySettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) `
+    -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName "FantasyHockey-LiveInjuries" -Action $injuries `
+    -Trigger @((New-ScheduledTaskTrigger -Daily -At 10:00), (New-ScheduledTaskTrigger -Daily -At 15:00)) `
+    -Settings $injurySettings -Description "Fantasy Hockey AI live snapshot (injuries): pipeline\snapshot_live.py" | Out-Null
+Write-Output "Registered FantasyHockey-LiveInjuries"
 
 # Nightly ingest: a whole slate can take a while, so it gets two hours.
 $nightly = New-ScheduledTaskAction -Execute (Join-Path $here "run_nightly_ingest.cmd") -WorkingDirectory $here

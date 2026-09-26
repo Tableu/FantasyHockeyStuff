@@ -2,9 +2,10 @@
 window). Nothing here is scheduled -- a pass runs when one of them asks.
 
     snapshots(kinds)   fresh injury / line-chart / starting-goalie reports into the Live schema
-                       (pipeline/snapshot_live.py -- not scheduled: this is the only thing that
-                       runs it), then, after injuries or lines, the merged status re-exported for
-                       the draft window's Status column (ModelFeatures/build_players.py)
+                       (pipeline/snapshot_live.py -- lines and goalies run only from here; injuries
+                       are also scheduled, 10:00 and 15:00), then, after injuries or lines, the
+                       merged status re-exported for the draft window's Status column
+                       (ModelFeatures/build_players.py)
     tonight(day)       tonight's rows and projections (ModelFeatures/build_tonight.py, then
                        Projections/project_tonight.py)
     read_league(...)   the league as its platform shows it now (or a snapshot file)

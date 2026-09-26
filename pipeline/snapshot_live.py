@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Takes one live snapshot into the Live schema -- injury reports, line charts or starting
 goalies -- for the lineup-lock decisions (see nhl_pipeline/ingest/live_snapshots.py for the
-tables and why they are change logs). Not scheduled: run by the plan window while it is open
-(Fantasy Hockey AI/Live/plan_gui.py, via planpass.py), or by hand.
+tables and why they are change logs). Run by the plan window while it is open (Fantasy Hockey
+AI/Live/plan_gui.py, via planpass.py), or by hand; injuries are also scheduled at 10:00 and 15:00
+(FantasyHockey-LiveInjuries, run_live_snapshot.cmd).
 
 Each source is its own transaction: a failing source is recorded in Live.SnapshotRuns with its
 error and does not stop the others.
