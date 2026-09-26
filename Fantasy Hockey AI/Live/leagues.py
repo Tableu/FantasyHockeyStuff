@@ -12,6 +12,8 @@ Every Live tool takes `--league <name>` and gets from here what used to be separ
     eligibility_platform  whose positions players are valued on
     adp_platform          whose ADP the draft tools show beside the board
     active                whether scheduled jobs run this league
+    auth                  a key into Settings/secrets.json (gitignored) for a private league's login,
+                          e.g. ESPN's espn_s2 + SWID cookies; None for a public league
     draft_window          the draft window's saved settings (its settings popup's Save as default)
 
 Command-line flags still override a field for one run. Unknown or missing keys fail at load, as
@@ -29,7 +31,7 @@ LEAGUES_DIR = season_paths.SETTINGS_DIR / "leagues"
 DEFAULT_LEAGUE = "beagles"
 PLATFORMS = ("fleaflicker", "espn", "standalone")
 KEYS = ("name", "description", "platform", "league_id", "season", "team", "rules", "scoring",
-        "strategy", "eligibility_platform", "adp_platform", "active", "draft_window")
+        "strategy", "eligibility_platform", "adp_platform", "active", "auth", "draft_window")
 
 
 @dataclasses.dataclass
@@ -46,6 +48,7 @@ class League:
     eligibility_platform: str
     adp_platform: str
     active: bool
+    auth: str | None
     draft_window: dict
     path: Path
 
@@ -59,9 +62,8 @@ class League:
 
     @property
     def readable(self) -> bool:
-        """Whether the draft tools can follow this league's draft from its platform (today:
-        Fleaflicker only; ESPN's reader is the plan's Step 2)."""
-        return self.platform == "fleaflicker" and self.league_id is not None
+        """Whether the tools can read this league from its platform (Live/platforms/)."""
+        return self.platform in ("fleaflicker", "espn") and self.league_id is not None
 
 
 def path_for(name: str) -> Path:
@@ -83,6 +85,25 @@ def load(name: str = DEFAULT_LEAGUE) -> League:
     if raw["name"] != path.stem:
         raise ValueError(f"{path.name}: name {raw['name']!r} must match the file name")
     return League(**raw, path=path)
+
+
+SECRETS = season_paths.SETTINGS_DIR / "secrets.json"
+
+
+def credentials(league: League) -> dict:
+    """The league's login from Settings/secrets.json (never committed), or {} for a public league.
+    Fails with what to do when the file or the entry is missing, or still holds the placeholders."""
+    if league.auth is None:
+        return {}
+    if not SECRETS.exists():
+        raise SystemExit(f"{league.name} needs a login ({league.auth!r}) but {SECRETS} does not exist")
+    entry = json.loads(SECRETS.read_text(encoding="utf-8")).get(league.auth)
+    if not entry:
+        raise SystemExit(f"no {league.auth!r} entry in {SECRETS}")
+    unfilled = [k for k, v in entry.items() if not v or str(v).startswith("PASTE_")]
+    if unfilled:
+        raise SystemExit(f"{SECRETS} {league.auth!r}: fill in {unfilled} (see the file's _note)")
+    return entry
 
 
 def all_leagues() -> list:

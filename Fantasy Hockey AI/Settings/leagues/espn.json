@@ -11,5 +11,6 @@
   "eligibility_platform": "espn",
   "adp_platform": "espn",
   "active": false,
+  "auth": null,
   "draft_window": {}
 }

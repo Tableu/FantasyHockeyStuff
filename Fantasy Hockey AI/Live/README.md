@@ -12,8 +12,10 @@ live.py             the live runner: the shipped manager on the real league (see
 run_live.py         writes the day's plan (reports/plans/<league>/plan_{date}_*.md); --window per game
 leagues.py          the league registry (Settings/leagues/<name>.json): --league on every tool
 platforms/          read-only platform adapters: fleaflicker.py (draft board, rosters + IR, lineup
-                    slots, moves used this week, matchup, rules), standalone.py; espn.py once a
-                    league is joined. Platform ids -> PlayerIDs via platforms.PlayerIds
+                    slots, moves used this week, matchup, rules), espn.py (settings + scoring,
+                    rosters + IR, lineup slots, matchup, draft; private leagues via cookies),
+                    standalone.py. Platform ids -> PlayerIDs via platforms.PlayerIds
+import_league_settings.py  writes a league's Settings/rosters + scoring files from its platform
 seasonlayer.py      the one bridge into Season/ (league, state, view, schedule, inputs, ...)
 livepaths.py        Live's own locations (never named paths.py -- see seasonlayer.py)
 fixtures/           made-up leagues for exercising the tools before a league has rosters
@@ -28,7 +30,8 @@ share a name with one in Season/, Decisions/ or Simulation/ -- checked at import
 ```
 python draft_assistant.py                                   # follow the draft (league beagles)
 python draft_assistant.py --team 63341 --replay-season 2025 # rehearse on the 2025 draft
-python draft_assistant.py --league espn --slot 10           # unreadable draft (ESPN): type picks
+python draft_assistant.py --league <an espn league>         # follow an ESPN draft (see leagues/)
+python draft_assistant.py --league espn --slot 10           # an unreadable draft: type picks
 python draft_gui.py                                         # the window
 python run_live.py --make-fake                              # fixtures/beagles/fake_league.json
 python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh

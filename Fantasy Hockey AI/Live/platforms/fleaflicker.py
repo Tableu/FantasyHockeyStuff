@@ -73,14 +73,14 @@ def playoff_window(league_id: int, weeks: int):
 
 def picks_from(board_json: dict) -> list:
     """Every pick cell in draft order: overall, round, team id, team name, and the picked player's
-    Fleaflicker id and name (None until he is picked)."""
+    platform id and name (None until he is picked)."""
     cells = []
     for row in board_json.get("rows", []):
         for cell in row.get("cells", []):
             player = (cell.get("player") or {}).get("proPlayer") or {}
             cells.append({"overall": cell["slot"]["overall"], "round": cell["slot"]["round"],
                           "team_id": cell["team"]["id"], "team": cell["team"]["name"],
-                          "fleaflicker_id": player.get("id"), "name": player.get("nameFull")})
+                          "platform_id": player.get("id"), "name": player.get("nameFull")})
     return sorted(cells, key=lambda c: c["overall"])
 
 

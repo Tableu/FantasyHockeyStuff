@@ -4,14 +4,15 @@
                      team's current lineup slots, transactions (moves used this week), the
                      matchup, the league's roster rules
     standalone.py    no platform: a draft board built from the pick order alone (--standalone)
-    espn.py          not yet -- ESPN's public league API, once a league is joined (plan Step 2)
+    espn.py          ESPN's league API (a private league with the owner's cookies): settings and
+                     scoring, rosters and IR, lineup slots, the matchup, the draft
 
 An adapter returns platform ids and names; mapping them to our PlayerIDs is `base.PlayerIds`
 (ModelFeatures' platform_ids.parquet). Nothing here writes anywhere, and nothing here submits a
 pick or a move: every platform's API is read, never written.
 """
 
-from platforms import fleaflicker, standalone
+from platforms import espn, fleaflicker, standalone
 from platforms.base import Matchup, PlayerIds, TeamRoster
 
 
@@ -22,9 +23,11 @@ def for_league(league, season=None):
     if league.platform == "fleaflicker" and league.league_id is not None:
         return fleaflicker.Fleaflicker(league.league_id, season=season)
     if league.platform == "espn" and league.league_id is not None:
-        raise NotImplementedError("the ESPN adapter is not built yet (plan Step 2: once a league "
-                                  "is joined, so its responses can be checked)")
+        import leagues
+        # `season` is the season's START year everywhere (2025 = 2025-26); ESPN numbers the end year.
+        return espn.Espn(league.league_id, season + 1 if season else espn.espn_year(league.season),
+                         cookies=leagues.credentials(league))
     return None
 
 
-__all__ = ["Matchup", "PlayerIds", "TeamRoster", "fleaflicker", "for_league", "standalone"]
+__all__ = ["Matchup", "PlayerIds", "TeamRoster", "espn", "fleaflicker", "for_league", "standalone"]

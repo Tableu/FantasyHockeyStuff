@@ -263,6 +263,12 @@ importer and snapshot job read the active Fleaflicker league's id from here.
   (display only). These used to be `strategy.json`'s `draft` block; they are per league now. The
   simulator keeps `rosters/*.json`'s own `eligibility_platform`, so no ladder number moves.
 - `active`: whether scheduled jobs run the league.
+- `auth`: for a private league, a key into `secrets.json` (gitignored, never committed) holding its
+  login -- for ESPN the `espn_s2` and `SWID` cookies from a logged-in browser (F12 -> Application ->
+  Cookies -> espn.com). They expire when you log out of ESPN; a 401 means copy fresh ones. `null`
+  for a public league.
+- `rules` / `scoring` for a readable league can be generated from the platform:
+  `Live/import_league_settings.py --league <name> --write` (ESPN today).
 - `draft_window`: the draft window's saved settings (⚙ Save as default writes them here): playoff
   dates, teams, slots, bench, points per stat and the two platforms, overriding the fields above
   **for the draft tools only**. `{}` = use the files.

@@ -50,7 +50,8 @@ from decisionlayer import load_strategy
 from decisionlayer import slots as slots_module
 
 log = logging.getLogger("draft-assistant")
-PLATFORM = "Fleaflicker"     # the league's platform: picks arrive by its player ids
+# The platforms' names in platform_ids.parquet: picks arrive by the league platform's own ids.
+PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}
 # The aggregate workbook's roster slots, as this league's slot codes. W (a wing: LW or RW) is the
 # workbook's; the league file does not define it, so it is added here. F/D is its UTIL(F/D).
 ROSTER_SLOTS = ("C", "LW", "RW", "W", "F", "D", "F/D", "G")
@@ -91,8 +92,9 @@ class Assistant:
                          or self.overrides.get("eligibility_platform")
                          or self.league.eligibility_platform)
         ids = pd.read_parquet(livepaths.platform_ids())
-        ids = ids[(ids["platform"] == PLATFORM) & (ids["season"] == season)]
-        self.by_fleaflicker_id = dict(zip(ids["external_id"].astype(str), ids["player_id"].astype(int)))
+        self.platform_name = PLATFORM_NAMES.get(self.league.platform, self.league.platform)
+        ids = ids[(ids["platform"] == self.platform_name) & (ids["season"] == season)]
+        self.by_platform_id = dict(zip(ids["external_id"].astype(str), ids["player_id"].astype(int)))
         players = pd.read_parquet(paths.players())
         counts = players["name"].value_counts()
         unique = players[players["name"].map(counts) == 1]
@@ -153,8 +155,8 @@ class Assistant:
     def player_id(self, pick):
         if pick.get("player_id") is not None:       # a typed pick (--manual) already knows who
             return pick["player_id"]
-        if pick["fleaflicker_id"] is not None:
-            found = self.by_fleaflicker_id.get(str(pick["fleaflicker_id"]))
+        if pick["platform_id"] is not None:
+            found = self.by_platform_id.get(str(pick["platform_id"]))
             if found is not None:
                 return found
         return self.by_name.get(pick["name"]) if pick["name"] else None
@@ -163,7 +165,7 @@ class Assistant:
     def state(self, cells, my_team):
         taken, unmatched, rosters = set(), [], {}
         for c in cells:
-            if c["name"] is None and c["fleaflicker_id"] is None:
+            if c["name"] is None and c["platform_id"] is None:
                 continue
             pid = self.player_id(c)
             if pid is None:
@@ -171,7 +173,7 @@ class Assistant:
             else:
                 taken.add(pid)
                 rosters.setdefault(c["team_id"], []).append(pid)
-        upcoming = [c for c in cells if c["name"] is None and c["fleaflicker_id"] is None]
+        upcoming = [c for c in cells if c["name"] is None and c["platform_id"] is None]
         mine = [c for c in upcoming if c["team_id"] == my_team]
         return {"taken": taken, "unmatched": unmatched, "roster": rosters.get(my_team, []),
                 "clock": upcoming[0] if upcoming else None, "mine": mine,
@@ -240,7 +242,7 @@ class Assistant:
             lines.append(f"\nLast two rounds: {runs['G']} goalies, {runs['D']} defencemen taken.")
         if s["unmatched"]:
             lines += ["", "## Unmatched picks (not removed from the board -- check by hand)", ""]
-            lines += [f"- #{c['overall']} {c['team']}: {c['name']} (Fleaflicker id {c['fleaflicker_id']})"
+            lines += [f"- #{c['overall']} {c['team']}: {c['name']} ({self.platform_name} id {c['platform_id']})"
                       for c in s["unmatched"]]
         return "\n".join(lines) + "\n"
 
@@ -301,10 +303,19 @@ def resolve_league(args, parser) -> None:
         parser.error("--team is required (the league has none on file)")
 
 
+def read_board(args) -> dict:
+    """The live draft board from the league's platform (Fleaflicker live or replayed, or ESPN)."""
+    league = args.league_entry
+    if league.platform == "espn":
+        import platforms
+        return platforms.for_league(league).draft_board()
+    return fetch_board(args.league_id)
+
+
 def open_board(args, assistant) -> dict:
-    """The draft board to follow: Fleaflicker's (live or replayed), or the standalone one."""
+    """The draft board to follow: the platform's (read_board), or the standalone one."""
     if not getattr(args, "standalone", False):
-        return fetch_board(args.league_id)
+        return read_board(args)
     if args.slot is None:
         raise SystemExit("--standalone needs --slot (your draft slot, 1-based)")
     args.manual = True
@@ -317,7 +328,7 @@ def manual_cells(board_json, picks):
     """The board's cells with the typed picks filled in, in order, as the API would show them."""
     cells = picks_from(board_json)
     for cell, (pid, name) in zip([c for c in cells if c["name"] is None], picks):
-        cell["name"], cell["fleaflicker_id"], cell["player_id"] = name, None, pid
+        cell["name"], cell["platform_id"], cell["player_id"] = name, None, pid
     return cells
 
 
@@ -363,13 +374,13 @@ def main():
     last = None
     while True:
         try:
-            board_json = fetch_board(args.league_id)
+            board_json = read_board(args)
         except Exception as error:                                   # noqa: BLE001 - keep going
             print(f"could not read the draft board ({error}); retrying in {args.poll}s")
             time.sleep(args.poll)
             continue
         cells = picks_from(board_json)
-        made = sum(1 for c in cells if c["name"] is not None or c["fleaflicker_id"] is not None)
+        made = sum(1 for c in cells if c["name"] is not None or c["platform_id"] is not None)
         if made != last:
             assistant.show(assistant.render(cells, my_team, my_name))
             last = made

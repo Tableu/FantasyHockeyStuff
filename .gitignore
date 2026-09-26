@@ -7,3 +7,4 @@ Fantasy Hockey AI/ModelFeatures/databaseCredentials.txt
 ai_assistant/clips/
 __pycache__/
 *.pyc
+Fantasy Hockey AI/Settings/secrets.json

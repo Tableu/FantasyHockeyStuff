@@ -444,7 +444,7 @@ class DraftWindow:
     def _poll(self):
         while True:
             try:
-                self.updates.put(da.fetch_board(self.args.league_id))
+                self.updates.put(da.read_board(self.args))
             except Exception as error:                               # noqa: BLE001 - keep going
                 self.updates.put(error)
             threading.Event().wait(self.args.poll)
@@ -467,7 +467,7 @@ class DraftWindow:
             self.refresh()
             return
         try:
-            self.cells = da.picks_from(da.fetch_board(self.args.league_id))
+            self.cells = da.picks_from(da.read_board(self.args))
         except Exception as error:                                   # noqa: BLE001
             self.clock_var.set(f"Could not read the draft board ({error})")
             return
@@ -475,7 +475,7 @@ class DraftWindow:
 
     @staticmethod
     def _made(cells):
-        return [(c["overall"], c["fleaflicker_id"], c["name"]) for c in cells if c["name"] is not None]
+        return [(c["overall"], c["platform_id"], c["name"]) for c in cells if c["name"] is not None]
 
     def current_cells(self):
         if self.args.manual:
@@ -662,7 +662,7 @@ class DraftWindow:
             label = self.board_labels.get(c["overall"])
             if label is None:
                 continue
-            if c["name"] is None and c["fleaflicker_id"] is None:
+            if c["name"] is None and c["platform_id"] is None:
                 on_clock = clock is not None and c["overall"] == clock["overall"]
                 label.configure(text=f"#{c['overall']}" + ("\nON THE CLOCK" if on_clock else ""),
                                 background=CLOCK_COLOUR if on_clock else "white",
