@@ -18,6 +18,10 @@ forward spots. That is a modest but real widening of the legal-lineup space.
 
     python build_fantasy_positions.py --platform Yahoo --season 2026-27
     python build_fantasy_positions.py --platform ESPN --season 2026-27 --adp
+    python build_fantasy_positions.py --platform OldTimeHockey --season 2026-27 --adp-only
+
+`--adp-only` is for a platform that publishes ADP but no positions of its own (Old Time Hockey,
+whose leagues play on Fleaflicker).
 """
 
 import argparse
@@ -43,7 +47,11 @@ def parse_args():
     parser.add_argument("--season", required=True, help="Season display name, e.g. 2026-27")
     parser.add_argument("--adp", action="store_true",
                         help="Also export Fantasy.PlayerADP for the same platform-season")
-    return parser.parse_args()
+    parser.add_argument("--adp-only", action="store_true",
+                        help="Export only Fantasy.PlayerADP (a platform with no positions)")
+    args = parser.parse_args()
+    args.adp = args.adp or args.adp_only
+    return args
 
 
 def fetch_positions(cursor, platform: str, season: str) -> pd.DataFrame:
@@ -93,14 +101,17 @@ def main():
     cursor = conn.cursor()
     paths.ensure(paths.FEATURES_DIR)
 
-    positions = fetch_positions(cursor, args.platform, args.season)
-    report(positions, args.platform, args.season)
-    out = paths.FEATURES_DIR / f"fantasy_positions_{args.platform.lower()}_{args.season}.parquet"
-    positions.to_parquet(out, index=False)
-    log.info("-> %s", out)
+    if not args.adp_only:
+        positions = fetch_positions(cursor, args.platform, args.season)
+        report(positions, args.platform, args.season)
+        out = paths.FEATURES_DIR / f"fantasy_positions_{args.platform.lower()}_{args.season}.parquet"
+        positions.to_parquet(out, index=False)
+        log.info("-> %s", out)
 
     if args.adp:
         adp = fetch_adp(cursor, args.platform, args.season)
+        if adp.empty:
+            raise SystemExit(f"no ADP rows for {args.platform} {args.season}")
         out = paths.FEATURES_DIR / f"fantasy_adp_{args.platform.lower()}_{args.season}.parquet"
         adp.to_parquet(out, index=False)
         log.info("%s %s: %d ADP rows, %.2f..%.2f -> %s", args.platform, args.season,

@@ -55,6 +55,7 @@
       }
     },
     "eligibility_platform": "fleaflicker",
-    "adp_platform": "espn"
+    "adp_platform": "oldtimehockey",
+    "tier_gap_z": 1.0
   }
 }
