@@ -91,7 +91,4 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except planpass.NoGames as error:
-        log.info("%s", error)
+    main()

@@ -168,6 +168,23 @@ def make_fake_league(board: pd.DataFrame, config, eligibility, me: int, opponent
 
 # ---------- tonight's inputs ----------
 
+# Tonight's rows as project_tonight.py writes them; a day with no games has none.
+TONIGHT_COLUMNS = {
+    "season_id": "int64", "game_id": "int64", "game_date": "datetime64[ns]", "team_id": "int64",
+    "player_id": "int64", "position": "object", "variant": "object", "copy_index": "int64",
+    "p_plays": "float64", "toi": "float64", "ev_toi": "float64", "pp_toi": "float64",
+    "lambda_shots": "float64", "lambda_hits": "float64", "lambda_blocks": "float64",
+    "lambda_assists": "float64", "lambda_goals": "float64", "lambda_pim": "float64",
+    "pp_point_share": "float64", "sh_point_share": "float64", "p_plays_model": "float64",
+    "questionable": "object", "note": "object", "injured_at_lockout": "bool", "kind": "object",
+    "p_start": "float64", "p_start_model": "float64", "nhl_game_id": "int64",
+    "start_time_utc": "datetime64[ns]", "lineup_source": "object"}
+
+
+def no_games_rows() -> pd.DataFrame:
+    return pd.DataFrame({c: pd.Series(dtype=t) for c, t in TONIGHT_COLUMNS.items()})
+
+
 def tonight_rows(day: dt.date) -> pd.DataFrame:
     path = TONIGHT_DIR / f"tonight_{day.isoformat()}.parquet"
     if not path.exists():
@@ -229,6 +246,7 @@ class LiveRunner:
         self.regular_weeks = self.config.regular_season_weeks_in(self.calendar)
         self.calendar.last_week = self.regular_weeks + self.config.playoff_weeks
         team_games = schedule.groupby("team_id")["game_id"].nunique()
+        self.game_days = set(pd.to_datetime(games["game_date"]).dt.date)
 
         history = inputs.load_goalie_history(self.season)
         self.goalie_line_mean, self.goalie_line_sd = engine_module.goalie_line(history, self.scoreset)
@@ -274,7 +292,8 @@ class LiveRunner:
     def plan(self, snapshot: LeagueSnapshot, now: dt.datetime) -> dict:
         """Run the shipped manager for my team on a copy of the league and return the plan."""
         day = pd.Timestamp(self.day)
-        rows = tonight_rows(self.day)
+        # No games today: no lineup to set, but the roster, IR moves and pickups still stand.
+        rows = tonight_rows(self.day) if self.day in self.game_days else no_games_rows()
         skaters = rows[rows["kind"] == "skater"].copy()
         goalies = rows[rows["kind"] == "goalie"].copy()
         status = reported_status(self.day)
@@ -296,7 +315,7 @@ class LiveRunner:
         decision_points = self._draws(skaters, goalies)
 
         state = self._state(snapshot, day)
-        week = self.calendar.week_of(day)
+        week = self.calendar.week_from(day)
         phase = "playoffs" if week and week > self.regular_weeks else "regular"
 
         def view(state=state):
@@ -337,7 +356,7 @@ class LiveRunner:
             raise ValueError(f"the snapshot has {len(snapshot.teams)} teams; the league has {self.config.teams}")
         universe = set(self.eligibility)
         state = state_module.LeagueState(self.config, universe, self.eligibility)
-        state.week = self.calendar.week_of(day)
+        state.week = self.calendar.week_from(day)
         for index, team in enumerate(snapshot.teams):
             unknown = [p for p in team["roster"] + team["ir"] if p not in self.eligibility]
             if unknown:
@@ -475,6 +494,7 @@ class LiveRunner:
         goalie_notes = rows[(rows["kind"] == "goalie") & rows["player_id"].isin(me.roster)]
         return {
             "generated_at": now.isoformat(timespec="minutes") + "Z", "game_date": self.day.isoformat(),
+            "games_today": bool(len(rows)),
             "league_source": snapshot.source, "platform": PLATFORM_NAMES.get(self.league.platform, "the platform"),
             "team": snapshot.teams[snapshot.me]["name"],
             "week": v.week, "moves_left": v.moves_left,
@@ -537,15 +557,19 @@ def render(plan: dict) -> str:
     actions += [f"- **Waiver claim:** {c['claim']}" + (f", dropping {c['drop']}" if c["drop"] else "") for c in plan["claims"]]
     actions += [f"- **Drop:** {p}" for p in plan["other_drops"]]
     lines += ["## Moves", *(actions or ["- None today."]), ""]
-    lines += ["## Tonight's lineup", "", "| Slot | Player | Exp. pts | P(plays/starts) | Puck (UTC) | Flag |",
-              "|---|---|---|---|---|---|"]
-    for s in plan["lineup"]:
-        if s["player"] is None:
-            lines.append(f"| {s['slot']} | *(empty)* | | | | |")
-        else:
-            puck = (s["puck_utc"] or "")[11:16]
-            lines.append(f"| {s['slot']} | {s['player']} | {s['mean']:.2f} | {s['p_plays'] if s['p_plays'] is not None else ''} | {puck} | {s['flag'] or ''} |")
-    lines += ["", f"**Bench / not playing:** {', '.join(plan['bench']) or 'none'}", ""]
+    if plan.get("games_today", True):
+        lines += ["## Tonight's lineup", "", "| Slot | Player | Exp. pts | P(plays/starts) | Puck (UTC) | Flag |",
+                  "|---|---|---|---|---|---|"]
+        for s in plan["lineup"]:
+            if s["player"] is None:
+                lines.append(f"| {s['slot']} | *(empty)* | | | | |")
+            else:
+                puck = (s["puck_utc"] or "")[11:16]
+                lines.append(f"| {s['slot']} | {s['player']} | {s['mean']:.2f} | {s['p_plays'] if s['p_plays'] is not None else ''} | {puck} | {s['flag'] or ''} |")
+        lines += ["", f"**Bench / not playing:** {', '.join(plan['bench']) or 'none'}", ""]
+    else:
+        lines += ["## Tonight's lineup", "", "No NHL games today: no lineup to set.", "",
+                  f"**Roster:** {', '.join(plan['bench']) or 'none'}", ""]
     if plan["goalies"]:
         lines += ["## My goalies tonight", *[f"- {g['player']}: P(start) {g['p_start']:.0%}" + (f" ({g['note']})" if g["note"] else "")
                                            for g in plan["goalies"]], ""]

@@ -105,6 +105,15 @@ class Calendar:
         week = self._week_memo[day] = self._week_of_period.get(period)
         return week
 
+    def week_from(self, day) -> int | None:
+        """The matchup week `day` falls in, or -- a day in no week: before opening week, or in a
+        break -- the next week to start after it; None once the weeks are over. What a move made
+        on that day plays for (the live planner runs on days a backtest never visits)."""
+        week = self.week_of(day)
+        if week is not None:
+            return week
+        return next((w.number for w in self.weeks if w.start > pd.Timestamp(day)), None)
+
     def _window(self, team_id, start, end) -> list:
         """The team's game dates from `start` through `end`, inclusive, in order."""
         dates = self._team_dates.get(team_id, [])
@@ -134,7 +143,7 @@ class Calendar:
         cached = self._remaining.get(key)
         if cached is not None:
             return cached
-        week = week if week is not None else self.week_of(day)
+        week = week if week is not None else self.week_from(day)
         if week is None:
             self._remaining[key] = 0
             return 0
@@ -168,7 +177,7 @@ class Calendar:
         if cached is not None:
             return cached
         if key not in self._memo:
-            week = self.week_of(day)
+            week = self.week_from(day)
             cap = min(self.last_week, len(self.weeks))
             if week is None or week > cap:
                 self._memo[key] = []

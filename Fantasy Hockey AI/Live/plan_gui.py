@@ -223,8 +223,6 @@ class PlanWindow:
             plan = planpass.plan(self.runner, snapshot, now, self.echo)
             planpass.save(self.league, plan, self.day, f"{now:%H%M}", self.echo)
             self.messages.put(("plan", plan))
-        except planpass.NoGames as error:
-            self.messages.put(("nogames", str(error)))
         except BaseException as error:           # SystemExit from a step included: show it, keep the window
             self.messages.put(("error", f"{type(error).__name__}: {error}"))
 
@@ -240,10 +238,6 @@ class PlanWindow:
                 self.plan = payload
                 self._finished(f"Plan updated {dt.datetime.now():%I:%M %p}".replace(" 0", " "))
                 self.show()
-            elif kind == "nogames":
-                self.echo(payload)
-                self.headline.set(f"{self.league.team_name or self.league.name} -- {self.day}: no NHL games")
-                self._finished("No games today")
             elif kind == "error":
                 self.echo(payload)
                 self._finished("Last run failed -- see Progress")
@@ -274,12 +268,15 @@ class PlanWindow:
         p = self.plan
         opponent = p["opponent"] or "no opponent"
         self.headline.set(f"{p['team']} -- {p['game_date']} · week {p['week']} vs {opponent} · "
-                          f"P(win) {p['p_win']:.0%} · moves left after the plan {p['moves_left']}")
+                          f"P(win) {p['p_win']:.0%} · moves left after the plan {p['moves_left']}"
+                          + ("" if p.get("games_today", True) else " · no NHL games today"))
 
         self.tonight.delete(*self.tonight.get_children())
         for s in p["lineup_now"]:
             after = s.get("after_moves") or ""
             if s["player"] is None:
+                if not p.get("games_today", True):
+                    continue                      # no games: the roster, not 17 empty slots
                 self.tonight.insert("", "end", values=(s["slot"], "(empty)", "", "", "", "", "", "", after),
                                     tags=("plan",) if after else ("empty",))
                 continue

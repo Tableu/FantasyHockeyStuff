@@ -7,6 +7,7 @@ Projections/project_tonight.py:
     data/live/tonight_{date}_context.parquet   per team-game: lineup source, chart, goalie report
     data/live/tonight_{date}_questionable.json {PlayerID: "DTD" | "GTD"}
     data/live/tonight_{date}_status.parquet    every reported player's merged status at --at
+                                               (the only file on a day with no games)
 
 Rebuilt before each lineup window, so each run overwrites the date's files; the durable record
 is the Live schema itself. Read-only like the rest of ModelFeatures.
@@ -50,10 +51,13 @@ def main():
 
     cursor = nhlstats_db.connect().cursor()
     out = tonight.build(cursor, game_date, at)
-    if not out:
-        return
     paths.ensure(LIVE_DIR)
     files = output_paths(game_date)
+    if not out:
+        # No games: still today's injury report, which the day's IR moves and pickups read.
+        tonight.status_frame(tonight.player_status(cursor, at)).to_parquet(files["status"], index=False)
+        log.info("no games: wrote %s only", files["status"].name)
+        return
     out["skaters"].to_parquet(files["skaters"], index=False)
     out["goalies"].to_parquet(files["goalies"], index=False)
     out["context"].assign(built_at=at).to_parquet(files["context"], index=False)

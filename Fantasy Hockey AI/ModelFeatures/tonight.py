@@ -68,6 +68,12 @@ def player_status(cursor, at: dt.datetime) -> dict:
     return {r.PlayerID: (r.Status, r.TeamID, bool(r.GameTimeDecision)) for r in cursor.fetchall()}
 
 
+def status_frame(status: dict) -> pd.DataFrame:
+    """`player_status` as the table build_tonight.py writes (tonight_{date}_status.parquet)."""
+    return pd.DataFrame([(p, st, t, g) for p, (st, t, g) in status.items()],
+                        columns=["player_id", "status", "team_id", "game_time_decision"])
+
+
 def line_charts(cursor, at: dt.datetime) -> dict:
     """{TeamID: {"updated_at", "label", "rows": [(PlayerID, group, position)]}} -- each team's
     latest Daily Faceoff chart as of `at`."""
@@ -226,7 +232,5 @@ def build(cursor, game_date: dt.date, at: dt.datetime) -> dict:
     log.info("%s as of %s: %d games, %d skater rows, %d goalie rows, lineup source %s",
              game_date, at, len(games), len(table), len(goalie_rows),
              dict(pd.Series([c["lineup_source"] for c in context_rows]).value_counts()))
-    status_frame = pd.DataFrame([(p, st, t, g) for p, (st, t, g) in status.items()],
-                                columns=["player_id", "status", "team_id", "game_time_decision"])
     return {"skaters": table, "goalies": goalie_rows, "context": pd.DataFrame(context_rows),
-            "questionable": questionable, "status": status_frame}
+            "questionable": questionable, "status": status_frame(status)}
