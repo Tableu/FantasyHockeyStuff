@@ -55,11 +55,15 @@ import draft_board
 import leagues
 import live
 import planpass
+import sheets
 import simlayer
 
 AUTO_CHECK_MS = 60_000          # how often the auto window looks at the clock
 PLAN_COLOUR = "#e0ecff"         # a row the plan recommends acting on
 STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": "#fff4d6"}
+# A row's look by its tags: a recommended action, an injury status, greyed (locked, empty).
+ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "locked": {"fg": "#6b7280"}, "empty": {"fg": "#9ca3af"},
+              **{status: {"bg": colour} for status, colour in STATUS_COLOURS.items()}}
 
 
 def utc_now() -> dt.datetime:
@@ -108,7 +112,6 @@ class PlanWindow:
         style = ttk.Style(root)
         if "vista" in style.theme_names():
             style.theme_use("vista")
-        style.configure("Treeview", rowheight=22)
         style.configure("Big.TLabel", font=("Segoe UI", 12, "bold"))
         style.configure("Warn.TLabel", foreground="#b91c1c", font=("Segoe UI", 10, "bold"))
 
@@ -165,20 +168,7 @@ class PlanWindow:
     def _table(self, title, columns, sortable=False):
         frame = ttk.Frame(self.tabs)
         self.tabs.add(frame, text=title)
-        tree = ttk.Treeview(frame, columns=[c[0] for c in columns], show="headings", selectmode="browse")
-        for key, heading, width in columns:
-            tree.heading(key, text=heading, command=(lambda k=key: self._sort_fa(k)) if sortable else "")
-            tree.column(key, width=width, anchor="w" if key in ("player", "add", "drop", "note", "slot", "after") else "center")
-        for status, colour in STATUS_COLOURS.items():
-            tree.tag_configure(status, background=colour)
-        tree.tag_configure("plan", background=PLAN_COLOUR)
-        tree.tag_configure("locked", foreground="#6b7280")
-        tree.tag_configure("empty", foreground="#9ca3af")
-        scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scroll.set)
-        tree.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        return tree
+        return sheets.Table(frame, columns, ROW_STYLES, on_sort=self._sort_fa if sortable else None)
 
     def _build_matchup(self):
         frame = ttk.Frame(self.tabs, padding=8)
@@ -189,11 +179,9 @@ class PlanWindow:
         columns = [("player", "Player", 260), ("positions", "Pos", 80), ("rate", "Rate (pts/g)", 100),
                    ("games_left", "Games left", 90)] + [(k, draft_board.STAT_HEADINGS[k], 48)
                                                          for k in self.stat_keys]
-        self.opponent = ttk.Treeview(frame, columns=[c[0] for c in columns], show="headings", height=20)
-        for key, heading, width in columns:
-            self.opponent.heading(key, text=heading)
-            self.opponent.column(key, width=width, anchor="w" if key == "player" else "center")
-        self.opponent.pack(fill="both", expand=True)
+        table = ttk.Frame(frame)
+        table.pack(fill="both", expand=True)
+        self.opponent = sheets.Table(table, columns, ROW_STYLES)
 
     def _build_sidebar(self, parent):
         side = ttk.Frame(parent, padding=(8, 0, 0, 0))
@@ -297,57 +285,47 @@ class PlanWindow:
                           f"P(win) {p['p_win']:.0%} · moves left after the plan {p['moves_left']}"
                           + ("" if p.get("games_today", True) else " · no NHL games today"))
 
-        self.tonight.delete(*self.tonight.get_children())
+        rows = []
         for s in p["lineup_now"]:
             after = s.get("after_moves") or ""
             if s["player"] is None:
                 if not p.get("games_today", True):
                     continue                      # no games: the roster, not 17 empty slots
-                self.tonight.insert("", "end", values=(s["slot"], "(empty)", "", "", "", "", "", "", after,
-                                                       *self._stats(None)),
-                                    tags=("plan",) if after else ("empty",))
+                rows.append(((s["slot"], "(empty)", "", "", "", "", "", "", after, *self._stats(None)),
+                             ("plan",) if after else ("empty",)))
                 continue
             tags = tuple(t for t in (s.get("flag"),) if t in STATUS_COLOURS) + (("locked",) if s.get("locked") else ())
-            self.tonight.insert("", "end", tags=tags + (("plan",) if after else ()), values=(
-                s["slot"], s["player"], _num(s["mean"]), _num(s["sd"]),
-                "" if s["p_plays"] is None else f"{s['p_plays']:.0%}", local_time(s["puck_utc"]),
-                s["flag"] or "", "\U0001f512" if s.get("locked") else "", after, *self._stats(s.get("stats"))))
+            rows.append(((s["slot"], s["player"], _num(s["mean"]), _num(s["sd"]),
+                          "" if s["p_plays"] is None else f"{s['p_plays']:.0%}", local_time(s["puck_utc"]),
+                          s["flag"] or "", "\U0001f512" if s.get("locked") else "", after,
+                          *self._stats(s.get("stats"))), tags + (("plan",) if after else ())))
         for name, stats in zip(p["bench_now"], p.get("bench_now_stats") or [None] * len(p["bench_now"])):
-            self.tonight.insert("", "end", values=("BN", name, "", "", "", "", "", "", "", *self._stats(stats)),
-                                tags=("empty",))
+            rows.append((("BN", name, "", "", "", "", "", "", "", *self._stats(stats)), ("empty",)))
+        self.tonight.set_rows(rows)
         # Tonight is always the per-game projection; the other tables say what their stats are.
         basis = p.get("stats_basis", "")
-        for tree, title in ((self.roster, "Roster"), (self.free_agents, "Free agents"),
-                            (self.opponent, "Matchup")):
-            self.tabs.tab(tree.master, text=f"{title} ({basis})" if basis else title)
+        for table, title in ((self.roster, "Roster"), (self.free_agents, "Free agents"),
+                             (self.opponent, "Matchup")):
+            self.tabs.tab(self._tab_of(table), text=f"{title} ({basis})" if basis else title)
 
-        self.moves.delete(*self.moves.get_children())
-        for name in p["ir_to"]:
-            self.moves.insert("", "end", values=("IR: move to", name, "", "", "", ""))
-        for name in p["ir_off"]:
-            self.moves.insert("", "end", values=("IR: activate", name, "", "", "", ""))
+        rows = [(("IR: move to", name, "", "", "", ""), ()) for name in p["ir_to"]]
+        rows += [(("IR: activate", name, "", "", "", ""), ()) for name in p["ir_off"]]
         for m in p["moves"]:
             note = f"reported {m['add_status']}" if m.get("add_status") not in (None, "ACTIVE") else ""
-            self.moves.insert("", "end", values=(m["kind"].capitalize(), m["add"], _num(m["add_rate"]),
-                                                 m["drop"] or "", _num(m["drop_rate"]), note))
-        for c in p["claims"]:
-            self.moves.insert("", "end", values=("Waiver claim", c["claim"], "", c["drop"] or "", "", ""))
-        for name in p["other_drops"]:
-            self.moves.insert("", "end", values=("Drop", "", "", name, "", ""))
-        if not self.moves.get_children():
-            self.moves.insert("", "end", values=("", "No moves today.", "", "", "", ""), tags=("empty",))
+            rows.append(((m["kind"].capitalize(), m["add"], _num(m["add_rate"]), m["drop"] or "",
+                          _num(m["drop_rate"]), note), ()))
+        rows += [(("Waiver claim", c["claim"], "", c["drop"] or "", "", ""), ()) for c in p["claims"]]
+        rows += [(("Drop", "", "", name, "", ""), ()) for name in p["other_drops"]]
+        self.moves.set_rows(rows or [(("", "No moves today.", "", "", "", ""), ("empty",))])
 
-        self.options.delete(*self.options.get_children())
+        rows = []
         for i, o in enumerate(p.get("options", []), 1):
             note = "in plan" if o["in_plan"] else "clears bar" if o["clears"] else "below bar"
             tags = ("plan",) if o["in_plan"] else () if o["clears"] else ("empty",)
-            self.options.insert("", "end", tags=tags, values=(
-                i, o["kind"], o["add"], _num(o["add_rate"]), o["add_games"], o["drop"] or "(open spot)",
-                _num(o["drop_rate"]), "" if o["drop_games"] is None else o["drop_games"],
-                f"{o['gain']:+.1f}", f"{o['bar']:.1f}", f"{o['edge']:+.1f}", note))
-        if not self.options.get_children():
-            self.options.insert("", "end", values=("", "", "No pickups priced.", "", "", "", "", "", "", "", "", ""),
-                                tags=("empty",))
+            rows.append(((i, o["kind"], o["add"], _num(o["add_rate"]), o["add_games"], o["drop"] or "(open spot)",
+                          _num(o["drop_rate"]), "" if o["drop_games"] is None else o["drop_games"],
+                          f"{o['gain']:+.1f}", f"{o['bar']:.1f}", f"{o['edge']:+.1f}", note), tags))
+        self.options.set_rows(rows or [(("", "", "No pickups priced.") + ("",) * 9, ("empty",))])
 
         self._fill_players(self.roster, p["roster"], where=True)
         self._fill_free_agents()
@@ -355,10 +333,9 @@ class PlanWindow:
         self.matchup_var.set(f"Week {p['week']}: {p['team']} {p['my_week_points']:.1f}  vs  "
                              f"{opponent} {p['opponent_week_points']:.1f}\n"
                              f"P(win this week) {p['p_win']:.0%}  (z {p['matchup_z']:+.2f})")
-        self.opponent.delete(*self.opponent.get_children())
-        for r in sorted(p["opponent_roster"], key=lambda r: -r["rate"]):
-            self.opponent.insert("", "end", values=(r["player"], r["positions"], _num(r["rate"]), r["games_left"],
-                                                    *self._stats(r.get("stats"))))
+        self.opponent.set_rows([((r["player"], r["positions"], _num(r["rate"]), r["games_left"],
+                                  *self._stats(r.get("stats"))), ())
+                                for r in sorted(p["opponent_roster"], key=lambda r: -r["rate"])])
 
         self.goalie_box.delete(0, "end")
         for g in p["goalies"]:
@@ -368,16 +345,23 @@ class PlanWindow:
             self.watch_box.insert("end", f"{w['player']}: {w['status']}" + (f" -- {w['note']}" if w["note"] else ""))
         self.problem_var.set("\n".join(p["problems"]))
 
-    def _fill_players(self, tree, rows, where=False):
-        tree.delete(*tree.get_children())
-        for r in rows:
+    def _fill_players(self, table, players, where=False, **sort):
+        rows = []
+        for r in players:
             place = ("IR" if r["on_ir"] else "lineup" if r["in_lineup"] else "bench") if where else \
                     ("on waivers" if r["on_waivers"] else "")
             tags = ("plan",) if r.get("plan") else (r["status"],) if r["status"] in STATUS_COLOURS else ()
-            tree.insert("", "end", tags=tags, values=(
-                r["player"], r["positions"], r["status"] or "", _num(r["rate"]), _num(r["per_game"]),
-                "" if r["plays_tonight"] is None else f"{r['plays_tonight']:.0%}", r["games_left"], place,
-                _action(r.get("plan")), *self._stats(r.get("stats"))))
+            rows.append(((r["player"], r["positions"], r["status"] or "", _num(r["rate"]), _num(r["per_game"]),
+                          "" if r["plays_tonight"] is None else f"{r['plays_tonight']:.0%}", r["games_left"], place,
+                          _action(r.get("plan")), *self._stats(r.get("stats"))), tags))
+        table.set_rows(rows, **sort)
+
+    def _tab_of(self, table):
+        """The notebook tab a table sits in (the Matchup's sits in frames inside its tab)."""
+        widget = table.frame
+        while widget.master is not self.tabs:
+            widget = widget.master
+        return widget
 
     def _stats(self, stats):
         return [_stat((stats or {}).get(k)) for k in self.stat_keys]
@@ -398,7 +382,7 @@ class PlanWindow:
         present = [r for r in self.plan["free_agents"] if value(r) is not None]
         rows = sorted(present, key=(lambda r: value(r) or "") if text else value, reverse=self.fa_reverse)
         rows += [r for r in self.plan["free_agents"] if value(r) is None]
-        self._fill_players(self.free_agents, rows)
+        self._fill_players(self.free_agents, rows, sort_key=self.fa_sort, descending=self.fa_reverse)
 
     def _show_freshness(self):
         lines = [f"{step}: {when:%I:%M %p}".replace(" 0", " ") for step, when in self.last.items()]

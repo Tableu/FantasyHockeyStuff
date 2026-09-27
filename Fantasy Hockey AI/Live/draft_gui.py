@@ -43,6 +43,7 @@ from tksheet import Sheet
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import draft_assistant as da
 import draft_board
+import sheets
 from decisionlayer import draft as draft_module
 
 POSITION_COLOURS = {"C": "#cfe2ff", "LW": "#d1f0d8", "RW": "#fde2c4", "D": "#e6d8f5",
@@ -436,33 +437,19 @@ class DraftWindow:
         self.sheet.enable_bindings("single_select", "row_select", "column_width_resize",
                                    "arrowkeys", "copy")
         self.row_pids = []
-        self._header_press = None
-        self.sheet.bind("<ButtonPress-1>", self._header_down, add="+")
-        self.sheet.bind("<ButtonRelease-1>", self._header_up, add="+")
+        sheets.bind_header_clicks(self.sheet, self._header_clicked)
         self.sheet.bind("<Double-Button-1>", self._double_click, add="+")
         self.sheet.pack(fill="both", expand=True)
         self._set_columns()
 
     def _double_click(self, event):
-        """Tk sends a second quick click as a double-click, not a press: on a header it is still
-        a click (sorting the other way); on a row in --manual it picks the player."""
-        self._header_down(event)
+        """On a row in --manual, a double-click picks the player (on a header it is a click)."""
         if self.args.manual:
             self.pick_selected(event)
 
-    def _header_down(self, event):
-        self._header_press = ((event.x_root, self.sheet.identify_column(event))
-                              if self.sheet.identify_region(event) == "header" else None)
-
-    def _header_up(self, event):
-        """A click on a header sorts by its column; a drag (resizing a column) does not."""
-        press, self._header_press = self._header_press, None
-        if (press is None or press[1] is None or self.sheet.identify_region(event) != "header"
-                or abs(event.x_root - press[0]) > 3
-                or self.sheet.identify_column(event) != press[1]):
-            return
-        if press[1] < len(self.columns):
-            self.sort_by(self.columns[press[1]][0])
+    def _header_clicked(self, index):
+        if index < len(self.columns):
+            self.sort_by(self.columns[index][0])
 
     def _build_board(self):
         outer = ttk.Frame(self.tabs)

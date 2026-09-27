@@ -13,6 +13,7 @@ plan_gui.py         the day's plan in a window: runs a pass on opening, Full / Q
                     and (while open) a quick re-plan ~30 min before each group of games
 run_live.py         the same pass in the terminal (reports/<league>/plans/plan_{date}_*.md)
 planpass.py         the pass's steps, shared by both: snapshots, tonight, read league, plan, save
+sheets.py           the windows' read-only tksheet tables: row colours by tag, header-click sorting
 leagues.py          the league registry (Settings/leagues/<name>.json): --league on every tool
 platforms/          read-only platform adapters: fleaflicker.py (draft board, rosters + IR, lineup
                     slots, moves used this week, matchup, rules), espn.py (settings + scoring,
