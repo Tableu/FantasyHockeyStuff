@@ -21,6 +21,8 @@ The rule, in the order it is applied:
    claim clears the same margin as an add, and priority is treated as free. Provisional: the
    premium is unmeasured (a sweep over {0, 5} is planned). Before that, the default was infinite
    and no rung ever claimed; `claim_premium=inf` restores that.
+   A claim's gain counts only nights from the day the player clears waivers (as streaming's
+   rentals always have); until 2026-09-26 it was priced from today.
 
 Then repeat while moves remain. Nothing here reads a file or a table: it is handed a view, and
 it acts through the view's league state, whose methods raise on an illegal move.
@@ -99,9 +101,12 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
                                  roster):
                     continue
                 tried += 1
-                gain = nights.swap_gain(incoming, outgoing)
+                # A claim is awarded when the player clears waivers, so it pays only from then --
+                # the streaming rule's pricing. Before 2026-09-26 it was priced from today.
+                clears = view.waiver_clears(incoming) if view.on_waivers(incoming) else None
+                gain = nights.swap_gain(incoming, outgoing, from_day=clears)
                 bar = params.margin * nights.swap_sd(incoming, outgoing)
-                if view.on_waivers(incoming):
+                if clears is not None:
                     bar += params.claim_premium
                 if gain > bar and (best is None or gain - bar > best[0]):
                     best = (gain - bar, gain, incoming, outgoing)
