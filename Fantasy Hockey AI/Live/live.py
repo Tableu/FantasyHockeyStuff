@@ -64,10 +64,13 @@ DECISION_SIMS = 400
 FREE_AGENTS_SHOWN = 60
 OPTIONS_PRICED = 25        # free agents the options price on the roster (the rule itself prices 10)
 OPTIONS_SHOWN = 15         # pickups listed, each with its best drop
+# Week plans shown beside the one made, each adding a different player first (weekplan.run):
+# ten plans in all, where that many first pickups are worth a move.
+WEEK_ALTERNATIVES = 9
 # A logged move's kind as the plan names it (managers.repair_roster, adddrop, streaming).
 MOVE_KINDS = {"repair": "Repair", "add": "Upgrade", "claim": "Claim", "rental": "Rental",
               "rental claim": "Rental claim"}
-PLATFORM_NAMES ={"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
+PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
 
 
 def season_of(day: dt.date) -> str:
@@ -384,6 +387,7 @@ class LiveRunner:
         # before any move, and the moves as recommendations.
         state_now = copy.deepcopy(state)
         manager = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
+        manager.plan.week_alternatives = WEEK_ALTERNATIVES
         manager.transactions(view())
         problems = []
         try:
@@ -576,18 +580,26 @@ class LiveRunner:
                 break
         # The week mode's plan (weekplan.py): every move it would make this week, today's made above,
         # the later ones what it would do if nothing changes -- it plans again on every pass.
-        week_plan = []
-        for m in manager.plan.week_plan:
-            p, d = m["incoming"], m["outgoing"]
-            week_plan.append({"day": m["day"].date().isoformat(), "from": m["effective"].date().isoformat(),
-                              "today": m["today"], "for_next_week": m["for_next_week"],
-                              "kind": MOVE_KINDS[m["kind"]], "add": name(p),
-                              "drop": name(d) if d is not None else None,
-                              "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
-                              "add_games": m["incoming_games"],
-                              "drop_games": m["outgoing_games"] if d is not None else None,
-                              "gain": round(m["gain"], 1), "bar": round(m["bar"], 1),
-                              "edge": round(m["gain"] - m["bar"], 1)})
+        def week_rows(planned):
+            rows = []
+            for m in planned:
+                p, d = m["incoming"], m["outgoing"]
+                rows.append({"day": m["day"].date().isoformat(), "from": m["effective"].date().isoformat(),
+                             "today": m["today"], "for_next_week": m["for_next_week"],
+                             "kind": MOVE_KINDS[m["kind"]], "add": name(p),
+                             "drop": name(d) if d is not None else None,
+                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
+                             "add_games": m["incoming_games"],
+                             "drop_games": m["outgoing_games"] if d is not None else None,
+                             "gain": round(m["gain"], 1), "bar": round(m["bar"], 1),
+                             "edge": round(m["gain"] - m["bar"], 1)})
+            return rows
+        week_plan = week_rows(manager.plan.week_plan)
+        # The plan made (A) and the alternatives (B, C, ...), each adding a different player first.
+        week_plans = [{"label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
+                       "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
+                       "moves": week_rows(w["moves"])}
+                      for i, w in enumerate(manager.plan.week_plans)]
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]
@@ -645,7 +657,7 @@ class LiveRunner:
             "matchup_z": round(z, 2), "p_win": round(statistics.NormalDist().cdf(z), 3),
             "opponent": snapshot.teams[snapshot.opponent]["name"] if snapshot.opponent is not None else None,
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
-            "options": choices, "week_plan": week_plan,
+            "options": choices, "week_plan": week_plan, "week_plans": week_plans,
             "stream_mode": self.strategy.streaming.mode, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
             "lineup": slots, "bench": bench, "watch": watch,
             "goalies": [{"player": name(int(r.player_id)), "p_start": round(float(r.p_start), 3),
@@ -729,6 +741,18 @@ def render(plan: dict) -> str:
         else:
             lines.append("- No rentals worth a move this week.")
         lines.append("")
+        if len(plan.get("week_plans", [])) > 1:
+            a = plan["week_plans"][0]
+            lines += [f"Plan A, above, adds {a['first']} first: {a['week_gain']:+.1f} lineup points this week. "
+                      f"The other first pickups, each with the rest of the week planned around it (in the "
+                      f"plan window, click a plan for its moves):", "",
+                      "| Plan | Day | Add first | Drop | Week | vs A | Moves |", "|---|---|---|---|---|---|---|"]
+            for w in plan["week_plans"][1:]:
+                m = next(m for m in w["moves"] if m["add"] == w["first"])
+                lines.append(f"| {w['label']} | {pd.Timestamp(m['day']).strftime('%a %b %d')} | {m['add']} | "
+                             f"{m['drop'] or '(open spot)'} | {w['week_gain']:+.1f} | "
+                             f"{w['week_gain'] - a['week_gain']:+.1f} | {len(w['moves'])} |")
+            lines.append("")
     if plan.get("options"):
         weeks = plan.get("horizon_weeks")
         window = "the rest of the season" if weeks is None else f"this week and the next {weeks}"

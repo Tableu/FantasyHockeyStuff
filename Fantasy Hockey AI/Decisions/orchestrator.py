@@ -39,6 +39,10 @@ class DailyPlan:
         # The week mode's plan for the rest of the week, as of the last day planned (weekplan.py):
         # today's moves made, the later ones recommendations. Empty in the daily mode.
         self.week_plan = []
+        # Alternative plans to show beside it, each opened by a different first pickup: the plan
+        # window asks for some (`week_alternatives`); a backtest never does.
+        self.week_alternatives = 0
+        self.week_plans = []
 
     def before_lock(self, view) -> None:
         """Steps 1-4: everything that changes the roster."""
@@ -65,9 +69,10 @@ class DailyPlan:
         entry["upgrades"] = len(upgrades)
 
         if self.stream_params.mode == "week":
-            rentals, self.week_plan = weekplan.run(
+            rentals, self.week_plans = weekplan.run(
                 view, self.stream_params, m.params.horizon_weeks, m.params.rate_source,
-                m.slot_order, m.accepts, m._fieldable, z=z)
+                m.slot_order, m.accepts, m._fieldable, z=z, alternatives=self.week_alternatives)
+            self.week_plan = self.week_plans[0]["moves"] if self.week_plans else []
         else:
             rentals = streaming.run(view, self.stream_params, m.params.horizon_weeks,
                                     m.params.rate_source, m.slot_order, m.accepts, m._fieldable,

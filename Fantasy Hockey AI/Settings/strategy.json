@@ -20,7 +20,8 @@
     "shortlist": 12,
     "mode": "daily",
     "survival": 1.0,
-    "next_week": 0.0
+    "next_week": 0.0,
+    "goalies": false
   },
   "rung3_streamer": {
     "horizon_weeks": 1

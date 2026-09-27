@@ -58,13 +58,35 @@ CLEAR_WIN_Z = 1.2816
 
 
 def run(view, params: streaming.StreamParams, horizon, source, slot_order, accepts, fieldable,
-        z=0.0):
-    """Plan the week's streams and make today's. Returns (done today, the whole plan)."""
+        z=0.0, alternatives=0):
+    """Plan the week's streams and make today's. Returns (done today, plans): plans[0] is the plan
+    made, then up to `alternatives` others that each ADD A DIFFERENT PLAYER FIRST -- on the plan
+    made's first pickup day, the next best pickups in its place (and none of the other plans'
+    first pickups), the rest of the week planned around each. For the plan window only: a
+    backtest asks for none. Each plan is {"first", "moves", "week_gain", "week_edge"}."""
     if params.spots <= 0 or view.week is None:
         return [], []
     planner = WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, z)
-    plan = planner.plan()
-    return planner.execute(plan), [planner.describe(m) for m in plan]
+    plan = planner.plan(record=alternatives > 0)
+    plans = [(plan, planner.first_pickup(plan))]
+    if plan and alternatives > 0:
+        # Its first pickup day, and the best pickups that day by their value as an opening move.
+        day = plan[0]["day"]
+        firsts = {plans[0][1]}
+        for opening in planner.openings:
+            if len(plans) > alternatives:
+                break
+            incoming = opening[1][-1]["incoming"]
+            if opening[4] != day or incoming in firsts:
+                continue
+            alternative = planner.plan(first=opening, banned=firsts - {incoming})
+            plans.append((alternative, incoming))
+            firsts.add(incoming)
+    # Only the first plan is made. Making the best of 3 by week total instead measured nothing
+    # (2024-25, strategy-espn-la, 32 drafts: +0.33 +/- 0.45 pts/wk; best of 5, 16: +0.27 +/- 0.73):
+    # the plan is made again every day, so a better week on paper rarely survives to be played.
+    out = [planner.summary(p, first) for p, first in plans]   # before today's moves change state
+    return planner.execute(plan), out
 
 
 class WeekPlanner:
@@ -82,11 +104,17 @@ class WeekPlanner:
         self.roster = list(view.roster)
 
         eligibility = self.eligibility
-        free = [p for p in view.free_agents() if not streaming.is_goalie(eligibility, p)]
+        # Goalie rentals (`goalies`): 2024-25, strategy-espn-la, 32 drafts, +1.16 +/- 0.59 pts/wk
+        # (fresh half +1.50 +/- 0.79), win +0.010 +/- 0.009, ~10 more moves a season -- priced on
+        # tonight's simulated line below; on P(start) x the average line alone, +0.26 +/- 0.60.
+        self.goalies = params.goalies
+        free = [p for p in view.free_agents()
+                if self.goalies or not streaming.is_goalie(eligibility, p)]
         self.claimable = [p for p in free if view.on_waivers(p)] if params.claim else []
         self.addable = [p for p in free if not view.on_waivers(p)]
         pool = self.addable + self.claimable
-        self.spots = streaming.spots(view, params, horizon, source, pool, eligibility)
+        self.spots = streaming.spots(view, params, horizon, source, pool, eligibility,
+                                     goalies=self.goalies)
         self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True)
         self.horizon = horizon
 
@@ -95,10 +123,27 @@ class WeekPlanner:
         # Buying next week's roster: the week's last day, the matchup won (`gate` supplies z).
         self.late = ((self.week_end - self.today).days < LATE_DAYS and params.gate
                      and z >= CLEAR_WIN_Z)
+        # Tonight a goalie is worth tonight's P(start) x the expected line: whether he starts is
+        # often known by the lock, and that is what a goalie rental is for. (Other nights, his
+        # rate: his usual share of starts.)
+        self.tonight = {}
+        if self.goalies:
+            g = view.goalie_projections
+            column = getattr(view, "p_start_column", None) or "p_start"
+            column = column if column in g.columns else "p_start"
+            self.tonight = {int(p): float(s) * float(line) for p, s, line
+                            in zip(g["player_id"], g[column], g["expected_line"])}
+            # Better where tonight was simulated: the mean of his draws, which carries the
+            # matchup -- goals against are the opponent's sampled goals, the win his own team's.
+            for p in self.tonight:
+                draws = view.decision_points.get(p)
+                if draws is not None and len(draws):
+                    self.tonight[p] = float(sum(draws) / len(draws))
         self.candidates = self._shortlist()
         self.rates = {p: valuation.rate(view, p, source)
                       for p in set(self.roster) | {c[0] for c in self.candidates}}
         self.moves_left = view.moves_left
+        self.openings = []                 # best opening move per player (plan(record=True))
 
     # ---------- inputs ----------
 
@@ -138,6 +183,9 @@ class WeekPlanner:
             ahead = self.next_weight if day == self.today and self.late else 0.0
             worth = {p: rate[p] * (sum(1 for n in self.nights_of(p) if n >= day)
                                    + ahead * len(self.next_nights_of(p)))
+                        # a goalie tonight at tonight's P(start), not his usual share
+                        + (self.tonight[p] - rate[p] if day == self.today and p in self.tonight
+                           and self.today in self.nights_of(p) else 0.0)
                      for p in self.addable}
             best = sorted((p for p in worth if worth[p] > 0.0), key=lambda p: (-worth[p], p))[:k]
             out += [(p, day, day) for p in best if day == self.today or day in self.nights_of(p)]
@@ -176,7 +224,8 @@ class WeekPlanner:
                          and not (night == self.today and p in self.view.unavailable))
         key = (night, tuple(playing))
         if key not in self._memo:
-            values = {p: self.rates.get(p, 0.0) for p in playing}
+            values = {p: (self.tonight[p] if night == self.today and p in self.tonight
+                          else self.rates.get(p, 0.0)) for p in playing}
             self._memo[key] = (slots_module.assign_value(self.slot_order, values, self.eligibility,
                                                           self.accepts) if values else 0.0)
         return self._memo[key]
@@ -216,16 +265,24 @@ class WeekPlanner:
                    <= self.moves_left - self.reserve_on(later)
                    for later in self.move_days if later >= day)
 
-    def plan(self) -> list:
+    def plan(self, first=None, record=False, banned=()) -> list:
+        """Greedy insertion, from an empty plan -- or from `first`, an opening move chosen by the
+        caller (an alternative plan), never adding a `banned` player. With `record`, the first
+        pass keeps each player's best opening move per day in `self.openings`, best first."""
         moves, spent = [], {}
         open_spots = self.view.roster_room()
+        if first is not None:
+            _, moves, cost, into_open, day = first
+            spent[day] = cost
+            open_spots -= into_open
+        openings = {} if record and first is None else None
         while True:
             best = None
             added = {m["incoming"] for m in moves}
             dropped = {m["outgoing"]: m for m in moves if m["outgoing"] is not None}
             picked_up = {m["incoming"]: m["effective"] for m in moves}
             for incoming, day, effective in self.candidates:
-                if incoming in added or incoming in dropped:
+                if incoming in added or incoming in dropped or incoming in banned:
                     continue
                 kind = "claim" if incoming in self.claimable else "add"
                 before = self.roster_at(self.roster, moves, effective)
@@ -250,6 +307,12 @@ class WeekPlanner:
                     edge = self.params.survival ** (day - self.today).days * (gain - bar)
                     if gain > bar and (best is None or edge > best[0]):
                         best = (edge, trial, cost, outgoing is None, day)
+                    if openings is not None and gain > bar and (
+                            (incoming, day) not in openings or edge > openings[incoming, day][0]):
+                        openings[incoming, day] = (edge, trial, cost, outgoing is None, day)
+            if openings is not None:
+                self.openings = sorted(openings.values(), key=lambda o: -o[0])
+                openings = None
             if best is None:
                 return sorted(moves, key=lambda m: (m["day"], m["effective"]))
             _, moves, cost, into_open, day = best
@@ -318,6 +381,23 @@ class WeekPlanner:
                          "incoming_games": self._games(incoming, m["effective"]),
                          "outgoing_games": self._games(outgoing, m["effective"])})
         return done
+
+    @staticmethod
+    def first_pickup(moves):
+        """The player a plan adds first: its earliest move, the most valuable on that day."""
+        if not moves:
+            return None
+        day = moves[0]["day"]
+        return max((m for m in moves if m["day"] == day), key=lambda m: m["gain"] - m["bar"])["incoming"]
+
+    def summary(self, moves, first) -> dict:
+        """A plan for the window: its moves, and what the whole of it adds this week -- the
+        lineup points with every move in against none (moves interact, so this is not the sum of
+        their gains), and that less the drop costs."""
+        players = {p for m in moves for p in (m["incoming"], m["outgoing"]) if p is not None}
+        gain = self.delta([], moves, self.today, players) if moves else 0.0
+        return {"first": first, "moves": [self.describe(m) for m in moves],
+                "week_gain": gain, "week_edge": gain - sum(m["drop_cost"] for m in moves)}
 
     def _games(self, player_id, effective) -> int:
         return sum(1 for n in self.nights_of(player_id) if n >= effective)

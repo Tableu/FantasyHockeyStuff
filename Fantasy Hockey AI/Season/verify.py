@@ -429,7 +429,8 @@ def check_streaming() -> str:
     # The week mode (weekplan.py) is held to the same rules as the daily one, with the next-week
     # pickup (the Fleaflicker league's) on as well as off.
     arms = {"daily": {"mode": "daily"}, "week": {"mode": "week"},
-            "next-week": {"mode": "week", "gate": True, "next_week": 1.0}}
+            "next-week": {"mode": "week", "gate": True, "next_week": 1.0},
+            "goalie": {"mode": "week", "goalies": True}}
     for mode, stream in arms.items():
         season, _ = run((2, 7), 2, **stream)
         rentals = [r for m in season.field if m.rung == 7 for r in m.move_log if r["kind"] == "rental"]
@@ -442,8 +443,8 @@ def check_streaming() -> str:
         assert weekly.max() <= season.config.moves_per_week, f"a week went over budget ({mode})"
         counts[mode] = len(rentals)
     return (f"k=0 identical to rung 5; k=2: {counts['daily']} daily / {counts['week']} week-mode / "
-            f"{counts['next-week']} next-week-pickup rentals, reserve, floor, spot-only drops and the "
-            f"weekly budget all held")
+            f"{counts['next-week']} next-week-pickup / {counts['goalie']} goalie-rental rentals, reserve, "
+            f"floor, spot-only drops and the weekly budget all held")
 
 
 def check_frozen_rosters() -> str:
@@ -1262,7 +1263,7 @@ def check_boom_bust(drafts=3, draws=300) -> str:
 # What a live league's strategy may choose for itself; everything else is strategy.json's, the
 # values the backtests measured.
 LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"),
-                ("streaming", "next_week"))
+                ("streaming", "next_week"), ("streaming", "goalies"))
 
 
 def check_live_strategy() -> str:

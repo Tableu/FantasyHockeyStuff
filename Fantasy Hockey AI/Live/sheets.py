@@ -2,8 +2,9 @@
 
     bind_header_clicks(sheet, on_column)   a click on a header calls on_column(index); a drag
                                            across it (resizing a column) does not
+    bind_row_clicks(sheet, on_row)         a click on a row calls on_row(index)
     Table(parent, columns, ...)            a sheet of rows, each coloured by its tags, with an
-                                           optional sort on a header click
+                                           optional sort on a header click and action on a row click
 """
 
 from tksheet import Sheet
@@ -35,13 +36,31 @@ def bind_header_clicks(sheet, on_column) -> None:
     sheet.bind("<Double-Button-1>", down, add="+")
 
 
+def bind_row_clicks(sheet, on_row) -> None:
+    """Call on_row(row index) when a row of the table is clicked (pressed and released on it)."""
+    press = {}
+
+    def down(event):
+        press["at"] = (sheet.identify_row(event) if sheet.identify_region(event) == "table"
+                       else None)
+
+    def up(event):
+        start, press["at"] = press.get("at"), None
+        if start is None or sheet.identify_region(event) != "table" or sheet.identify_row(event) != start:
+            return
+        on_row(start)
+
+    sheet.bind("<ButtonPress-1>", down, add="+")
+    sheet.bind("<ButtonRelease-1>", up, add="+")
+
+
 class Table:
     """A read-only sheet: `columns` is [(key, heading, width)]; `styles` maps a row tag to its
     {"bg": ..., "fg": ...}. `set_rows([(values, tags)])` redraws it; a row takes the background
     of its first tag that has one and the foreground likewise. With `on_sort`, a header click
     calls on_sort(key), and `set_rows(..., sort_key=, descending=)` marks that header."""
 
-    def __init__(self, parent, columns, styles, on_sort=None):
+    def __init__(self, parent, columns, styles, on_sort=None, on_row_click=None):
         self.frame = parent
         self.keys = [c[0] for c in columns]
         self.headings = [c[1] for c in columns]
@@ -60,6 +79,8 @@ class Table:
         self.on_sort = on_sort
         if on_sort is not None:
             bind_header_clicks(self.sheet, self._header_clicked)
+        if on_row_click is not None:
+            bind_row_clicks(self.sheet, lambda i: on_row_click(i) if i < len(self.rows) else None)
         self.sheet.pack(fill="both", expand=True)
         self.rows = []
 

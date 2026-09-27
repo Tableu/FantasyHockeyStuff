@@ -61,6 +61,7 @@ class StreamParams:
     mode: str                   # "daily": this rule, a day at a time; "week": weekplan.py
     survival: float             # week mode: P(a free agent is still free a day later), per day
     next_week: float            # week mode: weight on next week's nights of a pickup (0 = off)
+    goalies: bool               # week mode: goalies may be rented (and dropped for a rental)
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -71,7 +72,8 @@ class StreamParams:
                 f"{' gate' if self.gate else ''}{' flat' if self.flat else ''}"
                 f"{' claim' if self.claim else ''}"
                 f"{f' week s={self.survival:g}' if self.mode == 'week' else ''}"
-                f"{f' nw={self.next_week:g}' if self.mode == 'week' and self.next_week else ''}")
+                f"{f' nw={self.next_week:g}' if self.mode == 'week' and self.next_week else ''}"
+                f"{' goalies' if self.mode == 'week' and self.goalies else ''}")
 
 
 # How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
@@ -122,7 +124,7 @@ def is_goalie(eligibility, player_id) -> bool:
     return "G" in eligibility.get(player_id, frozenset())
 
 
-def spots(view, params, horizon, source, pool, eligibility) -> list:
+def spots(view, params, horizon, source, pool, eligibility, goalies=False) -> list:
     """Rostered skaters whose forward value is BELOW replacement -- the best free agent eligible
     at their positions, over the rest of the season -- cheapest first, at most k of them.
 
@@ -142,7 +144,7 @@ def spots(view, params, horizon, source, pool, eligibility) -> list:
     replacement = Replacement(view, pool, horizon, source, eligibility, after_week=False)
     scored = []
     for p in view.roster:
-        if is_goalie(eligibility, p) or not valuation.known(view, p, source):
+        if (is_goalie(eligibility, p) and not goalies) or not valuation.known(view, p, source):
             continue
         over = (valuation.player_value(view, p, horizon, source)
                 - replacement.at(eligibility.get(p, frozenset())))
