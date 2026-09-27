@@ -20,10 +20,15 @@ moves are not transactions) -- the league's rule (Settings/rosters/league.json m
 import datetime as dt
 import json
 import urllib.request
+import zoneinfo
 
 import pandas as pd
 
 from platforms.base import Matchup, TeamRoster
+
+# Fleaflicker's scoring days roll over at 6:00 AM Eastern, daylight time included (period starts
+# are 10:00 UTC in October, 11:00 UTC after the clocks change).
+EASTERN = zoneinfo.ZoneInfo("America/New_York")
 
 API = "https://www.fleaflicker.com/api"
 
@@ -45,9 +50,8 @@ def playoff_window(league_id: int, weeks: int):
     with urllib.request.urlopen(url, timeout=20) as response:
         periods = json.load(response)["eligibleSchedulePeriods"]
 
-    def day(bound):     # the period boundaries are early-morning UTC instants on the NHL's day
-        return dt.datetime.fromtimestamp(int(bound["startEpochMilli"]) / 1000,
-                                         dt.timezone(dt.timedelta(hours=-5))).date()
+    def day(bound):     # the period boundaries are 6:00 AM Eastern on the NHL's day
+        return dt.datetime.fromtimestamp(int(bound["startEpochMilli"]) / 1000, EASTERN).date()
     last = sorted(periods, key=lambda p: p["ordinal"])[-weeks:]
     return pd.Timestamp(day(last[0]["low"])), pd.Timestamp(day(last[-1]["high"]))
 
@@ -85,10 +89,14 @@ def _get(endpoint: str, **params) -> dict:
         return json.load(response)
 
 
+def _instant(bound) -> dt.datetime:
+    """A period boundary as the instant it is (aware, UTC)."""
+    return dt.datetime.fromtimestamp(int(bound["startEpochMilli"]) / 1000, dt.timezone.utc)
+
+
 def _day(bound) -> dt.date:
-    """A period boundary (an early-morning UTC instant on the NHL's day) as that day."""
-    return dt.datetime.fromtimestamp(int(bound["startEpochMilli"]) / 1000,
-                                     dt.timezone(dt.timedelta(hours=-5))).date()
+    """A period boundary (6:00 AM Eastern on the NHL's day) as that day."""
+    return dt.datetime.fromtimestamp(int(bound["startEpochMilli"]) / 1000, EASTERN).date()
 
 
 class Fleaflicker:
@@ -149,9 +157,28 @@ class Fleaflicker:
 
     def periods(self) -> list:
         """[(period number, first day, last day)] -- the league's matchup weeks."""
+        return [(n, lo, hi) for n, lo, hi, _, _ in self._period_rows()]
+
+    def _period_rows(self) -> list:
+        """[(number, first day, last day, start, end)]: `start` the instant the period begins
+        (6:00 AM Eastern on its first day), `end` the instant after its last day (UTC)."""
         raw = self._get("FetchLeagueScoreboard", season=self.season)
-        return sorted((p["ordinal"], _day(p["low"]), _day(p["high"]))
+        return sorted((p["ordinal"], _day(p["low"]), _day(p["high"]), _instant(p["low"]),
+                       _instant(p["high"]) + dt.timedelta(days=1))
                       for p in raw.get("eligibleSchedulePeriods", []))
+
+    def period_at(self, when: dt.datetime):
+        """The period a move made at `when` (an aware datetime) counts toward: the one running then,
+        by Fleaflicker's instants -- before 6:00 AM on a week's first day that is still the week
+        before. None before the first period begins, after the last ends, or in a break."""
+        return next(((n, lo, hi) for n, lo, hi, start, end in self._period_rows()
+                     if start <= when < end), None)
+
+    def before_first_period(self, when: dt.datetime) -> bool:
+        """Whether `when` is before the season's first period: a move then counts toward no
+        week's limit (the user, 2026-09-27)."""
+        rows = self._period_rows()
+        return bool(rows) and when < rows[0][3]
 
     def period_of(self, day: dt.date):
         return next(((n, lo, hi) for n, lo, hi in self.periods() if lo <= day <= hi), None)
@@ -188,14 +215,17 @@ class Fleaflicker:
                 break
         return out
 
-    def moves_used(self, team_id: int, day: dt.date) -> int:
-        """Adds and claims by the team since the first day of `day`'s period."""
-        period = self.period_of(day)
+    def moves_used(self, team_id: int, day: dt.date, when: dt.datetime | None = None) -> int:
+        """Adds and claims by the team in the period a move made now counts toward: the one
+        running at `when` (an aware datetime), or `day`'s when no instant is given. Counted from
+        the instant Fleaflicker gives for its start (6:00 AM Eastern on its first day), not a
+        midnight rebuilt from the date: a fixed UTC-5 midnight opened the window five hours early
+        in daylight time, charging the new week for moves made in the old one's last hours."""
+        period = self.period_at(when) if when is not None else self.period_of(day)
         if period is None:
             return 0
-        start = dt.datetime.combine(period[1], dt.time(0), tzinfo=dt.timezone(dt.timedelta(hours=-5)))
-        since = int(start.timestamp() * 1000)
-        return sum(1 for t in self.transactions(since_ms=since)
+        start = next(s for n, _, _, s, _ in self._period_rows() if n == period[0])
+        return sum(1 for t in self.transactions(since_ms=int(start.timestamp() * 1000))
                    if t["team_id"] == team_id and t["type"] in MOVE_TYPES)
 
     # ---------- the league ----------

@@ -64,7 +64,7 @@ DECISION_SIMS = 400
 FREE_AGENTS_SHOWN = 60
 OPTIONS_PRICED = 25        # free agents the options price on the roster (the rule itself prices 10)
 OPTIONS_SHOWN = 15         # pickups listed, each with its best drop
-# A logged move's kind as the Options table names it (managers.repair_roster, adddrop, streaming).
+# A logged move's kind as the plan names it (managers.repair_roster, adddrop, streaming).
 MOVE_KINDS = {"repair": "Repair", "add": "Upgrade", "claim": "Claim", "rental": "Rental",
               "rental claim": "Rental claim"}
 PLATFORM_NAMES ={"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
@@ -95,6 +95,9 @@ class LeagueSnapshot:
     lineup: dict = dataclasses.field(default_factory=dict)
     waivers: dict = dataclasses.field(default_factory=dict)
     source: str = "file"
+    # Whether a move made now counts toward no week's limit, as the platform says (Fleaflicker:
+    # before its first period begins); None when it cannot say, and the calendar decides.
+    moves_free: bool | None = None
 
     @classmethod
     def load(cls, path: Path) -> "LeagueSnapshot":
@@ -111,11 +114,17 @@ class LeagueSnapshot:
 
 
     @classmethod
-    def from_platform(cls, adapter, my_team_id: int, day: dt.date) -> "LeagueSnapshot":
+    def from_platform(cls, adapter, my_team_id: int, day: dt.date,
+                      now: dt.datetime | None = None) -> "LeagueSnapshot":
         """The league as its platform shows it now (platforms/): every roster and IR, my current
         lineup slots, moves used this week, the matchup. Platform ids become our PlayerIDs through
-        `platforms.PlayerIds`; a player with none is logged and left out -- never guessed."""
+        `platforms.PlayerIds`; a player with none is logged and left out -- never guessed. `now`
+        (UTC) is when the moves would be made: the period they count toward is the platform's at
+        that instant, which can differ from `day`'s (before 6:00 AM on a Fleaflicker week's first
+        day, the week before)."""
         import platforms
+
+        when = None if now is None else now.replace(tzinfo=dt.timezone.utc)
 
         ids = platforms.PlayerIds(adapter.platform)
         teams, me, unmatched = [], None, []
@@ -128,7 +137,7 @@ class LeagueSnapshot:
                 lineup = {label: ids.resolve(players)[0] for label, players in team.lineup.items()
                           if label not in ("BN", "IR")}
             teams.append({"name": team.name, "team_id": team.team_id, "roster": roster, "ir": ir,
-                          "moves_used": adapter.moves_used(team.team_id, day)})
+                          "moves_used": adapter.moves_used(team.team_id, day, when=when)})
         if me is None:
             raise SystemExit(f"team {my_team_id} is not in this league's rosters")
         if unmatched:
@@ -144,7 +153,9 @@ class LeagueSnapshot:
                 player_id = ids.get(external_id)
                 if player_id is not None:
                     waivers[player_id] = clears
-        return cls(teams=teams, me=me, opponent=opponent,
+        moves_free = (adapter.before_first_period(when)
+                      if when is not None and hasattr(adapter, "before_first_period") else None)
+        return cls(teams=teams, me=me, opponent=opponent, moves_free=moves_free,
                    my_week_points=matchup.points if matchup else 0.0,
                    opponent_week_points=matchup.opponent_points if matchup else 0.0,
                    lineup=lineup, waivers=waivers,
@@ -408,8 +419,11 @@ class LiveRunner:
                 state.owner[p] = index
                 state.pool.discard(p)
         state.waived = {int(p): pd.Timestamp(d) for p, d in snapshot.waivers.items()}
-        # Before the first week, a move counts toward no week's limit (Fleaflicker, 2026-09-27).
-        state.free_moves = day < self.calendar.weeks[0].start
+        # Before the first week, a move counts toward no week's limit (Fleaflicker, 2026-09-27):
+        # the platform's own first period when it says (it can start a day after our calendar's
+        # week 1 -- Fleaflicker 2026-27: Tue Sep 29, 6:00 AM Eastern), else the calendar's.
+        state.free_moves = (snapshot.moves_free if snapshot.moves_free is not None
+                            else day < self.calendar.weeks[0].start)
         return state
 
     def _draws(self, skaters, goalies) -> dict:
@@ -518,29 +532,23 @@ class LiveRunner:
                           "add_status": state_status.get(t["player_id"])})
         claims = [{"claim": name(p), "drop": name(state.claim_drops.get((snapshot.me, p))) if state.claim_drops.get((snapshot.me, p)) else None}
                   for p, teams_ in state.pending_claims.items() if snapshot.me in teams_]
-        # The plan's own moves first, each as the rule that made it priced it -- an upgrade over the
-        # window, a rental on this week alone (so its gain is not the upgrades' gain), a repair not
-        # at all -- so they can be compared with the pickups the upgrade rule priced below them.
+        # The Upgrade tab: the add/drop rule's own moves first (upgrades and claims -- rentals are
+        # on the Week tab), then the pickups it priced on the roster as it stands, for comparison.
         choices = []
-        for q in manager.move_log:
+        upgrades = [q for q in manager.move_log if q["kind"] in ("add", "claim")]
+        for q in upgrades:
             p, d = q["incoming"], q["outgoing"]
-            gain, bar = q.get("predicted_gain"), q.get("bar")
-            rental = q["kind"] in ("rental", "rental claim")
+            gain, bar = q["predicted_gain"], q["bar"]
             choices.append({"rank": None, "kind": MOVE_KINDS[q["kind"]], "add": name(p),
                             "drop": name(d) if d is not None else None,
-                            "gain": None if gain is None else round(gain, 1),
-                            "bar": None if bar is None else round(bar, 1),
-                            "edge": None if gain is None or bar is None else round(gain - bar, 1),
-                            "clears": True, "in_plan": True,
-                            "note": ("in plan: for next week" if q.get("for_next_week")
-                                     else "in plan: this week only" if rental else "in plan"),
+                            "gain": round(gain, 1), "bar": round(bar, 1), "edge": round(gain - bar, 1),
+                            "clears": True, "in_plan": True, "note": "in plan",
                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
                             "add_games": q.get("incoming_games"),
                             "drop_games": q.get("outgoing_games") if d is not None else None})
         # An upgrade is the same pricing as its row below, so it takes that row's rank instead; a
-        # rental's pickup keeps his row, priced as an upgrade, for the comparison.
-        made = {(q["incoming"], q["outgoing"]): row for q, row in zip(manager.move_log, choices)
-                if q["kind"] in ("add", "claim")}
+        # rented player keeps his row, priced as an upgrade.
+        made = {(q["incoming"], q["outgoing"]): row for q, row in zip(upgrades, choices)}
         rented = {q["incoming"] for q in manager.move_log if q["kind"] in ("rental", "rental claim")}
         added = {q["incoming"] for q in manager.move_log}
         seen, ranked = set(), 0
@@ -721,10 +729,9 @@ def render(plan: dict) -> str:
     if plan.get("options"):
         weeks = plan.get("horizon_weeks")
         window = "the rest of the season" if weeks is None else f"this week and the next {weeks}"
-        lines += ["## Options", "",
-                  f"The plan's moves first, each as the rule that made it priced it (a rental on this "
-                  f"week alone), then the best pickups on your roster as it stands, each with its best "
-                  f"drop. Gain = lineup points over {window}; a move is made only when the gain clears "
+        lines += ["## Upgrade", "",
+                  f"The plan's upgrades and claims first, then the best pickups on your roster as it "
+                  f"stands, each with its best drop (rentals are in the week's streaming plan). Gain = lineup points over {window}; a move is made only when the gain clears "
                   f"the bar (its own sd x the margin, plus the claim premium for a claim). Ranked by "
                   f"edge = gain - bar, as the rule ranks them.", "",
                   "| # | Move | Add | pts/g | games | Drop | pts/g | games | Gain | Bar | Edge | |",

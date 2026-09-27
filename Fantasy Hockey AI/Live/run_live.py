@@ -85,7 +85,7 @@ def main():
         if not args.league_file:
             return
 
-    snapshot = planpass.read_league(league, day, args.league_file, args.platform_season, echo)
+    snapshot = planpass.read_league(league, day, args.league_file, args.platform_season, echo, now=now)
     result = planpass.plan(runner, snapshot, now, echo)
     planpass.save(league, result, day, stem, echo)
 

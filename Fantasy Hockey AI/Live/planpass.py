@@ -83,14 +83,15 @@ def next_window(day: dt.date, now: dt.datetime):
     return upcoming[0]
 
 
-def read_league(league, day: dt.date, league_file=None, platform_season=None, echo=print):
+def read_league(league, day: dt.date, league_file=None, platform_season=None, echo=print,
+                now: dt.datetime | None = None):
     if league_file:
         snapshot = live.LeagueSnapshot.load(league_file)
     else:
         adapter = platforms.for_league(league, season=platform_season)
         if adapter is None:
             raise SystemExit(f"{league.name} has no readable platform: pass --league-file")
-        snapshot = live.LeagueSnapshot.from_platform(adapter, league.team_id, day)
+        snapshot = live.LeagueSnapshot.from_platform(adapter, league.team_id, day, now=now)
     echo(f"league: {snapshot.source}, {len(snapshot.teams)} teams, "
          f"{len(snapshot.teams[snapshot.me]['roster'])} on my roster")
     return snapshot

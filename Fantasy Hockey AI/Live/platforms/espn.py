@@ -182,10 +182,10 @@ class Espn:
                                    opponent_points=float(other.get("totalPoints", 0.0)))
         return None
 
-    def moves_used(self, team_id: int, day=None) -> int:
+    def moves_used(self, team_id: int, day=None, when=None) -> int:
         """Acquisitions this matchup period: the team's transactionCounter.matchupAcquisitionTotals,
-        keyed by matchup period. `day` is accepted for the interface; the period is ESPN's current
-        one. (mSettings can report no limit on a league that has one -- espn-la reports
+        keyed by matchup period. `day` and `when` are accepted for the interface; the period is
+        ESPN's current one. (mSettings can report no limit on a league that has one -- espn-la reports
         acquisitionLimit -1 with a 6-a-week limit -- so the limit itself comes from the rules file.)"""
         period = str(self._get("mMatchupScore")["status"]["currentMatchupPeriod"])
         team = next(t for t in self._get("mTeam")["teams"] if t["id"] == team_id)

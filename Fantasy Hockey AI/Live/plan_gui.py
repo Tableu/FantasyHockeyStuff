@@ -23,16 +23,15 @@ make the moves on the platform yourself.
                  who the plan would put in that slot after its moves; then his projected stat line
                  for tonight (per game, in the league's scored stats)
     Moves        IR moves, adds and drops, claims -- with the rate each was priced on
-    Options      the plan's moves, highlighted, each as the rule that made it priced it (a rental
-                 on this week alone), to compare with the pickups below them: the add/drop rule's
-                 own pricing of the top free agents on the roster you hold now, each with his best
-                 drop, the lineup points he gains over the pricing window, the bar a move must
-                 clear and the edge (gain - bar) they are ranked by
+    Upgrade      permanent pickups: the plan's upgrades and claims, highlighted, above the add/drop
+                 rule's own pricing of the top free agents on the roster you hold now, each with his
+                 best drop, the lineup points he gains over the pricing window, the bar a move must
+                 clear and the edge (gain - bar) they are ranked by (rentals: the Week tab)
     Week         the week's streaming plan (strategy mode 'week', Decisions/weekplan.py): every rental
                  it would make this week, by day, with its gain, bar and edge -- today's are the
                  Moves; the later ones are planned again on every run
-    Roster       every player you hold now: status, rate, games left this week and his stats; a
-                 player the plan acts on is highlighted
+    Roster       every player you hold now: status, rate, games left this week and his stats
+                 (sortable); a player the plan acts on is highlighted
     Free agents  the best available now by rate (sortable), the recommended adds highlighted
 
 Roster, Free agents and the Matchup's opponent show each player's stats in the league's scored
@@ -65,8 +64,8 @@ import simlayer
 AUTO_CHECK_MS = 60_000          # how often the auto window looks at the clock
 PLAN_COLOUR = "#e0ecff"         # a row the plan recommends acting on
 STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": "#fff4d6"}
-# A row's look by its tags: a recommended action, an injury status, greyed (locked, empty).
-ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "locked": {"fg": "#6b7280"}, "empty": {"fg": "#9ca3af"},
+# A row's look by its tags: a recommended action, an injury status, greyed (a placeholder message).
+ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "empty": {"fg": "#9ca3af"},
               **{status: {"bg": colour} for status, colour in STATUS_COLOURS.items()}}
 
 
@@ -114,7 +113,9 @@ class PlanWindow:
         self.windows_done = set()          # puck times already re-planned by the auto window
         self.last = {}                     # step -> when this window last ran it
         self.messages = queue.Queue()
-        self.fa_sort, self.fa_reverse = "rate", True
+        # Sortable tables: name -> [column key, descending]. The roster keeps the plan's order until
+        # a header is clicked; the free agents start best rate first.
+        self.sorts = {"roster": [None, False], "free_agents": ["rate", True]}
 
         root.title(f"Plan -- {self.league.name}: {self.league.team_name or 'my team'}")
         root.geometry("1400x820")
@@ -140,7 +141,7 @@ class PlanWindow:
                                                ("after", "After moves", 240)] + stat_columns)
         self.moves = self._table("Moves", [("kind", "Move", 110), ("add", "Add", 260), ("add_rate", "pts/g", 70),
                                            ("drop", "Drop", 260), ("drop_rate", "pts/g", 70), ("note", "Note", 200)])
-        self.options = self._table("Options", [("rank", "#", 36), ("kind", "Move", 90), ("add", "Add", 230),
+        self.options = self._table("Upgrade", [("rank", "#", 36), ("kind", "Move", 90), ("add", "Add", 230),
                                                ("add_rate", "pts/g", 60), ("add_games", "Games", 60),
                                                ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
                                                ("drop_games", "Games", 60), ("gain", "Gain", 70),
@@ -156,10 +157,10 @@ class PlanWindow:
                           ("where", "", 90), ("plan", "Recommended", 110)]
         # The roster you hold: no tonight columns, no lineup/bench/IR column, no recommended action.
         self.roster = self._table("Roster", [c for c in player_columns + stat_columns
-                                             if c[0] not in ROSTER_HIDDEN])
+                                             if c[0] not in ROSTER_HIDDEN], sort_as="roster")
         self.free_agents = self._table("Free agents", [c for c in player_columns + stat_columns
                                                        if c[0] not in FREE_AGENTS_HIDDEN],
-                                       sortable=True)
+                                       sort_as="free_agents")
         self._build_matchup()
         body.add(self._build_sidebar(body), weight=1)
 
@@ -183,10 +184,11 @@ class PlanWindow:
         self.status_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.status_var).pack(side="right", padx=12)
 
-    def _table(self, title, columns, sortable=False):
+    def _table(self, title, columns, sort_as=None):
         frame = ttk.Frame(self.tabs)
         self.tabs.add(frame, text=title)
-        return sheets.Table(frame, columns, ROW_STYLES, on_sort=self._sort_fa if sortable else None)
+        on_sort = None if sort_as is None else (lambda key: self._sort(sort_as, key))
+        return sheets.Table(frame, columns, ROW_STYLES, on_sort=on_sort)
 
     def _build_matchup(self):
         frame = ttk.Frame(self.tabs, padding=8)
@@ -250,7 +252,8 @@ class PlanWindow:
             if self.runner is None:
                 self.echo("building the board and the sampler (once a day)...")
                 self.runner = live.LiveRunner(self.day, self.league)
-            snapshot = planpass.read_league(self.league, self.day, args.league_file, args.platform_season, self.echo)
+            snapshot = planpass.read_league(self.league, self.day, args.league_file, args.platform_season,
+                                            self.echo, now=now)
             self.last["league read"] = dt.datetime.now()
             plan = planpass.plan(self.runner, snapshot, now, self.echo)
             planpass.save(self.league, plan, self.day, f"{now:%H%M}", self.echo)
@@ -313,15 +316,15 @@ class PlanWindow:
                 if not p.get("games_today", True):
                     continue                      # no games: the roster, not 17 empty slots
                 rows.append(((s["slot"], "(empty)", "", "", "", "", "", "", after, *self._stats(None)),
-                             ("plan",) if after else ("empty",)))
+                             ("plan",) if after else ()))
                 continue
-            tags = tuple(t for t in (s.get("flag"),) if t in STATUS_COLOURS) + (("locked",) if s.get("locked") else ())
+            tags = tuple(t for t in (s.get("flag"),) if t in STATUS_COLOURS)
             rows.append(((s["slot"], s["player"], _num(s["mean"]), _num(s["sd"]),
                           "" if s["p_plays"] is None else f"{s['p_plays']:.0%}", local_time(s["puck_utc"]),
                           s["flag"] or "", "\U0001f512" if s.get("locked") else "", after,
                           *self._stats(s.get("stats"))), tags + (("plan",) if after else ())))
         for name, stats in zip(p["bench_now"], p.get("bench_now_stats") or [None] * len(p["bench_now"])):
-            rows.append((("BN", name, "", "", "", "", "", "", "", *self._stats(stats)), ("empty",)))
+            rows.append((("BN", name, "", "", "", "", "", "", "", *self._stats(stats)), ()))
         self.tonight.set_rows(rows)
         # Tonight is always the per-game projection; the other tables say what their stats are.
         basis = p.get("stats_basis", "")
@@ -342,12 +345,12 @@ class PlanWindow:
         rows = []
         blank = lambda x, f="": "" if x is None else format(x, f)
         for o in p.get("options", []):
-            tags = ("plan",) if o["in_plan"] else () if o["clears"] else ("empty",)
+            tags = ("plan",) if o["in_plan"] else ()
             rows.append(((blank(o["rank"]), o["kind"], o["add"], _num(o["add_rate"]), blank(o["add_games"]),
                           o["drop"] or "(open spot)", _num(o["drop_rate"]), blank(o["drop_games"]),
                           blank(o["gain"], "+.1f"), blank(o["bar"], ".1f"), blank(o["edge"], "+.1f"),
                           o["note"]), tags))
-        self.options.set_rows(rows or [(("", "", "No pickups priced.") + ("",) * 9, ("empty",))])
+        self.options.set_rows(rows or [(("", "", "No pickups priced.") + ("",) * 9, ())])
 
         rows = []
         for w in p.get("week_plan", []):
@@ -363,8 +366,8 @@ class PlanWindow:
                  else "Streaming decides a day at a time (strategy mode 'daily').")
         self.week.set_rows(rows or [(("", "", empty) + ("",) * 9, ("empty",))])
 
-        self._fill_players(self.roster, p["roster"], where=True)
-        self._fill_free_agents()
+        self._fill_sorted("roster")
+        self._fill_sorted("free_agents")
 
         self.matchup_var.set(f"Week {p['week']}: {p['team']} {p['my_week_points']:.1f}  vs  "
                              f"{opponent} {p['opponent_week_points']:.1f}\n"
@@ -405,23 +408,32 @@ class PlanWindow:
     def _stats(self, stats):
         return [_stat((stats or {}).get(k)) for k in self.stat_keys]
 
-    def _sort_fa(self, key):
-        self.fa_reverse = not self.fa_reverse if key == self.fa_sort else key in (
+    def _sort(self, name, key):
+        """A header click: the same column flips the order; a new one starts high-first for
+        numbers, A-Z for text."""
+        state = self.sorts[name]
+        state[1] = not state[1] if key == state[0] else key in (
             "rate", "per_game", "plays_tonight", "games_left", *self.stat_keys)
-        self.fa_sort = key
-        self._fill_free_agents()
+        state[0] = key
+        self._fill_sorted(name)
 
-    def _fill_free_agents(self):
+    def _fill_sorted(self, name):
+        """The Roster or Free agents table, in its current sort."""
         if not self.plan:
             return
-        key = "player" if self.fa_sort == "where" else self.fa_sort
-        text = key in ("player", "positions", "status", "plan")
-        value = (lambda r: (r.get("stats") or {}).get(key)) if key in self.stat_keys else (lambda r: r[key])
-        # Blanks last either way: a goalie has no hits, a player with no games no line.
-        present = [r for r in self.plan["free_agents"] if value(r) is not None]
-        rows = sorted(present, key=(lambda r: value(r) or "") if text else value, reverse=self.fa_reverse)
-        rows += [r for r in self.plan["free_agents"] if value(r) is None]
-        self._fill_players(self.free_agents, rows, sort_key=self.fa_sort, descending=self.fa_reverse)
+        table, players = getattr(self, name), self.plan[name]
+        key, descending = self.sorts[name]
+        if key is not None:
+            text = key in ("player", "positions", "status", "plan", "where")
+            value = ((lambda r: (r.get("stats") or {}).get(key)) if key in self.stat_keys
+                     else (lambda r: r[key]) if key != "where" else (lambda r: r["player"]))
+            # Blanks last either way: a goalie has no hits, a player with no games no line.
+            present = [r for r in players if value(r) is not None]
+            players = (sorted(present, key=(lambda r: value(r) or "") if text else value,
+                              reverse=descending)
+                       + [r for r in players if value(r) is None])
+        self._fill_players(table, players, where=name == "roster", sort_key=key,
+                           descending=descending)
 
     def _show_freshness(self):
         lines = [f"{step}: {when:%I:%M %p}".replace(" 0", " ") for step, when in self.last.items()]
