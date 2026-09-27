@@ -33,6 +33,7 @@ season-level result rather than as an error:
     tune guard      section 11 tuning on the final holdout
     opponents       a simulated leaguemate whose board is not his sources' consensus, whose draw
                     differs between paired runs, or who drafts past his goalie cap
+    live strategy   Settings/strategy-live.json differing from strategy.json anywhere but adddrop.tail
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
     boom bust       boom/bust odds outside [0, 1], a par curve that rises, season draws or room
                     drafts that differ between two runs with one seed, or the saved-run reader
@@ -1248,6 +1249,21 @@ def check_boom_bust(drafts=3, draws=300) -> str:
             f"({par[0]:.0f} -> {par[-1]:.0f}); odds in [0, 1]; reader matches {checked} saved rows")
 
 
+def check_live_strategy() -> str:
+    """strategy-live.json (the live leagues' strategy) is strategy.json but for adddrop.tail."""
+    import json
+    blocks = []
+    for name in ("strategy", "strategy-live"):
+        block = json.loads((paths.SETTINGS_DIR / f"{name}.json").read_text(encoding="utf-8"))
+        block.pop("description")
+        block["adddrop"].pop("tail")
+        blocks.append(block)
+    differ = sorted(k for k in set(blocks[0]) | set(blocks[1]) if blocks[0].get(k) != blocks[1].get(k))
+    assert not differ, f"strategy-live.json drifted from strategy.json in {differ}"
+    tail = decisionlayer.load_strategy("strategy-live").adddrop.tail
+    return f"strategy-live.json equals strategy.json apart from adddrop.tail ({tail}), and loads"
+
+
 def check_modules() -> str:
     import decisionlayer
 
@@ -1271,7 +1287,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("no clobber", check_no_clobber),
           ("first week", check_first_week), ("candidate", check_candidate),
           ("tune guard", check_tune_guard), ("opponents", check_opponents),
-          ("boom bust", check_boom_bust), ("modules", check_modules)]
+          ("boom bust", check_boom_bust), ("live strategy", check_live_strategy),
+          ("modules", check_modules)]
 
 
 def main():

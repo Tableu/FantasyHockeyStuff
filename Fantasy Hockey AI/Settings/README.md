@@ -134,6 +134,7 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `claim_premium` | 0.0 | extra points a waiver claim must clear; `"inf"` never claims |
 | | `shortlist` | 10 | free agents priced on the roster per pass |
 | | `drop_shortlist` | 4 | cheapest fieldable drops tried against each |
+| | `tail` | `none` | value after the pricing window: `none` ignores it; `cost` makes a swap also cover the rest-of-season value it loses (outgoing's after the window minus incoming's, added to the bar); `net` counts it both ways |
 | `streaming` (rung 7) | `spots` | 2 | streaming spots; 0 makes rung 7 identical to rung 5 |
 | | `reserve` | 2 | moves held for upgrades on a week's first day, falling to 0 |
 | | `lam` | 2.0 | points a rental must clear early in the week, falling to 0 |
@@ -170,6 +171,10 @@ was not touched.
 - **`adddrop.horizon_weeks = 3`** is section 9's plan. On the 2025-26 sensitivity check
   (`Season/docs/ladder-league_sens-*.md`) H = 1, 3 and the rest of the season all cleared hold,
   with 3 and season within noise of each other and ahead of 1.
+- **`tail = none`** in strategy.json; **`strategy-live.json`** (what `beagles` and `espn-la` use, via
+  their league file's `strategy`) is strategy.json with `tail = cost`. Seat-paired on 2024-25, `cost`
+  was neutral (+0.21 +/- 0.40 pts/wk pooled; +0.69 +/- 0.25 14-team points, -0.87 +/- 0.43 12-team
+  points) and `net` lost (-3.37 +/- 1.04). Keep strategy-live.json's other values equal to strategy.json.
 - **`claim_premium = 0`** since 2026-09-23, when claims were made to resolve: a claim clears the
   same bar as an add and priority is treated as free. Unmeasured; a sweep over {0, 5} is planned.
 - **The streaming values** are the section 10 v1 settings; the ablations are in `Season/README.md`.

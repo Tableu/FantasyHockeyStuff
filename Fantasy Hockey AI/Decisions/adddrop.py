@@ -47,10 +47,34 @@ class AddDropParams:
     claim_premium: float              # extra points a waiver claim must clear; inf never claims
     shortlist: int                    # free agents priced on the roster per pass
     drop_shortlist: int               # cheapest fieldable drops tried against each
+    tail: str                         # value after the window: "none", "cost" or "net" (below)
+
+    def __post_init__(self):
+        if self.tail not in TAILS:
+            raise ValueError(f"adddrop tail {self.tail!r}; use one of {TAILS}")
 
     def describe(self) -> str:
         return (f"H={self.horizon_weeks} m={self.margin:g} rate={self.rate_source} "
-                f"claim={self.claim_premium:g}")
+                f"claim={self.claim_premium:g}" + ("" if self.tail == "none" else f" tail={self.tail}"))
+
+
+# What the rest of the season after the H-week window counts for. A swap is permanent, but the
+# window prices it as if the season ended with the window: Byfield (3.73 pts/g, 9 games in the
+# window) lost to Lundell (3.15, 12 games) on opening night 2026-27, and ~35 points of Byfield
+# after the window never entered the sum.
+#   none   ignored -- section 9's rule as shipped
+#   cost   a drop must also cover what it loses after the window, tail(out) - tail(in) when
+#          positive, added to the bar -- streaming's drop cost, for a permanent swap
+#   net    both ways: gain += tail(in) - tail(out)
+TAILS = ("none", "cost", "net")
+
+
+def tail_value(view, player_id, params) -> float:
+    """His value from the end of the window to the end of the season, at the rule's rate."""
+    if player_id is None or params.horizon_weeks is None:
+        return 0.0
+    return (valuation.player_value(view, player_id, None, params.rate_source)
+            - valuation.player_value(view, player_id, params.horizon_weeks, params.rate_source))
 
 
 def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=(),
@@ -84,6 +108,13 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
         # forced drop when the injured player returns is priced then, by manage_ir.
         drops = [None] + drops
 
+    tails = {}
+
+    def tail(p):
+        if p not in tails:
+            tails[p] = tail_value(view, p, params)
+        return tails[p]
+
     pairs = []
     for incoming in candidates:
         tried = 0
@@ -101,8 +132,16 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
             bar = params.margin * nights.swap_sd(incoming, outgoing)
             if clears is not None:
                 bar += params.claim_premium
+            lost = 0.0
+            if params.tail != "none":
+                lost = tail(outgoing) - tail(incoming)
+                if params.tail == "cost":
+                    bar += max(0.0, lost)
+                else:
+                    gain -= lost
             pairs.append({"incoming": incoming, "outgoing": outgoing, "gain": gain, "bar": bar,
-                          "claim": clears is not None, "rates": rates, "nights": nights})
+                          "claim": clears is not None, "rates": rates, "nights": nights,
+                          "tail_lost": lost})
     # Stable, so equal margins keep the pricing order: the first priced wins, as it always has.
     pairs.sort(key=lambda q: q["gain"] - q["bar"], reverse=True)
     return pairs

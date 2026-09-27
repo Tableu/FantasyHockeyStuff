@@ -1,5 +1,5 @@
 {
-  "description": "How the managers decide: every tunable choice a manager makes, separate from the league's rules (scoring/, rosters/). Read by Season (decisionlayer.load_strategy) and handed to Decisions/, which never reads a file itself. Values are the shipped defaults; section 11 tunes them. 'inf' is accepted wherever a number is.",
+  "description": "The live plans' strategy (Settings/leagues/*.json 'strategy'): strategy.json with one change, adddrop.tail = 'cost' -- a swap must also cover the rest-of-season value it loses, so a better player is not dropped for a short schedule edge. Seat-paired on 2024-25 it was neutral (+0.21 +/- 0.40 pts/wk pooled over four formats), so the backtest default stays 'none'. Keep every other value equal to strategy.json.",
   "adddrop": {
     "horizon_weeks": 3,
     "margin": 1.0,
@@ -7,7 +7,7 @@
     "claim_premium": 0.0,
     "shortlist": 10,
     "drop_shortlist": 4,
-    "tail": "none"
+    "tail": "cost"
   },
   "streaming": {
     "spots": 2,
