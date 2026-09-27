@@ -98,7 +98,7 @@ class WeekPlanner:
         self.candidates = self._shortlist()
         self.rates = {p: valuation.rate(view, p, source)
                       for p in set(self.roster) | {c[0] for c in self.candidates}}
-        self.budget = view.moves_left - streaming.reserve_today(view, params)
+        self.moves_left = view.moves_left
 
     # ---------- inputs ----------
 
@@ -195,8 +195,29 @@ class WeekPlanner:
 
     # ---------- the plan ----------
 
+    def reserve_on(self, day) -> int:
+        """streaming.py's reserve on `day`: `reserve` moves held for upgrades at the week's start,
+        falling to 0 on its last day."""
+        week = self.view.calendar.weeks[self.view.week - 1]
+        span = (week.end - week.start).days
+        share = min(1.0, max(0.0, (week.end - day).days / span)) if span > 0 else 0.0
+        return int(round(self.params.reserve * share))
+
+    def fits(self, spent, day, cost) -> bool:
+        """Whether a move costing `cost` on `day` keeps the plan inside each day's budget: by any
+        day D, the moves spent through D leave that day's reserve. The reserve falls through the
+        week, so the week's last nights can spend what its first held back -- the whole budget
+        by its last day. (Holding today's reserve all week planned two moves short; against it,
+        2024-25, 16 drafts: -0.17 +/- 0.58 pts/wk, 147 moves a season against 143 -- neutral, kept
+        so the plan shows the whole week.)"""
+        if cost <= 0:
+            return True
+        return all(sum(c for d, c in spent.items() if d <= later) + cost
+                   <= self.moves_left - self.reserve_on(later)
+                   for later in self.move_days if later >= day)
+
     def plan(self) -> list:
-        moves, spent = [], 0
+        moves, spent = [], {}
         open_spots = self.view.roster_room()
         while True:
             best = None
@@ -217,7 +238,7 @@ class WeekPlanner:
                                               or later["day"] == self.today):
                         continue
                     cost = self.move_cost(day, kind, outgoing)
-                    if spent + cost > self.budget and cost > 0:
+                    if not self.fits(spent, day, cost):
                         continue
                     after = (before - {outgoing}) | {incoming}
                     if outgoing is not None and not self.fieldable(sorted(after), self.eligibility,
@@ -228,11 +249,11 @@ class WeekPlanner:
                     # A later night's pickup happens only if nobody takes him first.
                     edge = self.params.survival ** (day - self.today).days * (gain - bar)
                     if gain > bar and (best is None or edge > best[0]):
-                        best = (edge, trial, cost, outgoing is None)
+                        best = (edge, trial, cost, outgoing is None, day)
             if best is None:
                 return sorted(moves, key=lambda m: (m["day"], m["effective"]))
-            _, moves, cost, into_open = best
-            spent += cost
+            _, moves, cost, into_open, day = best
+            spent[day] = spent.get(day, 0) + cost
             open_spots -= into_open
 
     def _with(self, moves, incoming, outgoing, day, effective, kind, later) -> list:
