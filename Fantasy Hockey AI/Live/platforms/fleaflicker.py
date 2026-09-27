@@ -19,8 +19,10 @@ moves are not transactions) -- the league's rule (Settings/rosters/league.json m
 
 import datetime as dt
 import json
+import time
 import urllib.request
 import zoneinfo
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
@@ -29,6 +31,13 @@ from platforms.base import Matchup, TeamRoster
 # Fleaflicker's scoring days roll over at 6:00 AM Eastern, daylight time included (period starts
 # are 10:00 UTC in October, 11:00 UTC after the clocks change).
 EASTERN = zoneinfo.ZoneInfo("America/New_York")
+
+# One league read asks for the schedule and the transaction list once per team; they are fetched
+# once and reused for this long (an adapter lives for one read in the plan window, but the draft
+# tools keep theirs). Team rosters are fetched this many at a time: Fleaflicker answers a burst
+# with 403 Forbidden for a while (2026-09-27: ~280 transaction pages in a row did it).
+REUSE_SECONDS = 60
+ROSTER_WORKERS = 3
 
 API = "https://www.fleaflicker.com/api"
 
@@ -109,6 +118,16 @@ class Fleaflicker:
     def __init__(self, league_id: int, season=None):
         self.league_id = int(league_id)
         self.season = season
+        self._reused = {}                  # key -> (fetched at, value): see REUSE_SECONDS
+
+    def _reuse(self, key, fetch):
+        """`fetch()`, or its value from under REUSE_SECONDS ago."""
+        hit = self._reused.get(key)
+        if hit is not None and time.monotonic() - hit[0] < REUSE_SECONDS:
+            return hit[1]
+        value = fetch()
+        self._reused[key] = (time.monotonic(), value)
+        return value
 
     def _get(self, endpoint, **params):
         return _get(endpoint, league_id=self.league_id, **params)
@@ -144,14 +163,14 @@ class Fleaflicker:
         return TeamRoster(team_id=team_id, name=name, roster=roster, ir=ir, lineup=lineup)
 
     def rosters(self) -> list:
-        """Every team, in the league's roster order, with IR and lineup slots (one call a team)."""
+        """Every team, in the league's roster order, with IR and lineup slots (one call a team,
+        ROSTER_WORKERS at a time -- one after another took 9 s of a 15 s read)."""
         names = self.teams()
-        out = []
-        for team_id, name in names.items():
-            team = self.roster(team_id)
+        with ThreadPoolExecutor(max_workers=ROSTER_WORKERS) as pool:
+            teams = list(pool.map(self.roster, names))
+        for team, name in zip(teams, names.values()):
             team.name = name
-            out.append(team)
-        return out
+        return teams
 
     # ---------- the week ----------
 
@@ -162,10 +181,13 @@ class Fleaflicker:
     def _period_rows(self) -> list:
         """[(number, first day, last day, start, end)]: `start` the instant the period begins
         (6:00 AM Eastern on its first day), `end` the instant after its last day (UTC)."""
-        raw = self._get("FetchLeagueScoreboard", season=self.season)
-        return sorted((p["ordinal"], _day(p["low"]), _day(p["high"]), _instant(p["low"]),
-                       _instant(p["high"]) + dt.timedelta(days=1))
-                      for p in raw.get("eligibleSchedulePeriods", []))
+        def fetch():
+            raw = self._get("FetchLeagueScoreboard", season=self.season)
+            return sorted((p["ordinal"], _day(p["low"]), _day(p["high"]), _instant(p["low"]),
+                           _instant(p["high"]) + dt.timedelta(days=1))
+                          for p in raw.get("eligibleSchedulePeriods", []))
+        # Asked once per team's move count and per period lookup: 17-45 fetches a read, now one.
+        return self._reuse(("periods", self.season), fetch)
 
     def period_at(self, when: dt.datetime):
         """The period a move made at `when` (an aware datetime) counts toward: the one running then,
@@ -225,8 +247,10 @@ class Fleaflicker:
         if period is None:
             return 0
         start = next(s for n, _, _, s, _ in self._period_rows() if n == period[0])
-        return sum(1 for t in self.transactions(since_ms=int(start.timestamp() * 1000))
-                   if t["team_id"] == team_id and t["type"] in MOVE_TYPES)
+        since = int(start.timestamp() * 1000)
+        # The whole league's list, fetched once for every team's count (it was once per team).
+        moves = self._reuse(("transactions", since), lambda: self.transactions(since_ms=since))
+        return sum(1 for t in moves if t["team_id"] == team_id and t["type"] in MOVE_TYPES)
 
     # ---------- the league ----------
 
