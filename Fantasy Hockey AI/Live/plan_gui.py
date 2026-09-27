@@ -33,9 +33,9 @@ make the moves on the platform yourself.
                  it would make this week, by day, with its gain, bar and edge -- today's are the
                  Moves; the later ones are planned again on every run
     Roster       every player you hold now: status, rate, games left this week and his stats
-                 (sortable); a player the plan acts on is highlighted
+                 (sortable); injured players coloured by status
     Free agents  the best available now by rate, with rest-of-season points (rate x his team's games
-                 left in the fantasy season; sortable), the recommended adds highlighted
+                 left in the fantasy season; sortable); injured players coloured by status
 
 Roster, Free agents and the Matchup's opponent show each player's stats in the league's scored
 categories: the season so far once it has started (ModelFeatures/build_season_stats.py and the goalie
@@ -420,7 +420,8 @@ class PlanWindow:
         for r in players:
             place = ("IR" if r["on_ir"] else "lineup" if r["in_lineup"] else "bench") if where else \
                     ("on waivers" if r["on_waivers"] else "")
-            tags = ("plan",) if r.get("plan") else (r["status"],) if r["status"] in STATUS_COLOURS else ()
+            # Only injury colours: what the plan does with a player is on the Moves tab.
+            tags = (r["status"],) if r["status"] in STATUS_COLOURS else ()
             cells = {"player": r["player"], "positions": r["positions"], "status": r["status"] or "",
                      "rate": _num(r["rate"]), "ros_points": _num(r.get("ros_points"), 1),
                      "per_game": _num(r["per_game"]),
