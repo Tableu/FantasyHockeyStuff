@@ -22,6 +22,10 @@ make the moves on the platform yourself.
                  starts, puck time (local), injury / GTD flag, a lock once his game has started, and
                  who the plan would put in that slot after its moves
     Moves        IR moves, adds and drops, claims -- with the rate each was priced on
+    Options      the best pickups to choose from: the add/drop rule's own pricing of the top free
+                 agents on the roster you hold now, each with his best drop, the lineup points he
+                 gains over the pricing window, the bar a move must clear and the edge (gain -
+                 bar) they are ranked by; the plan's own picks highlighted
     Roster       every player you hold now: status, rate, points tonight, games left this week, and
                  the recommended action (drop, move to IR, ...)
     Free agents  the best available now by rate (sortable), the recommended adds marked
@@ -108,6 +112,11 @@ class PlanWindow:
                                                ("after", "After moves", 240)])
         self.moves = self._table("Moves", [("kind", "Move", 110), ("add", "Add", 260), ("add_rate", "pts/g", 70),
                                            ("drop", "Drop", 260), ("drop_rate", "pts/g", 70), ("note", "Note", 200)])
+        self.options = self._table("Options", [("rank", "#", 36), ("kind", "Move", 60), ("add", "Add", 230),
+                                               ("add_rate", "pts/g", 60), ("add_games", "Games", 60),
+                                               ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
+                                               ("drop_games", "Games", 60), ("gain", "Gain", 70),
+                                               ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 90)])
         player_columns = [("player", "Player", 240), ("positions", "Pos", 80), ("status", "Status", 70),
                           ("rate", "Rate (pts/g)", 90), ("per_game", "Tonight's proj.", 100),
                           ("plays_tonight", "Plays tonight", 95), ("games_left", "Games left", 80),
@@ -303,6 +312,18 @@ class PlanWindow:
             self.moves.insert("", "end", values=("Drop", "", "", name, "", ""))
         if not self.moves.get_children():
             self.moves.insert("", "end", values=("", "No moves today.", "", "", "", ""), tags=("empty",))
+
+        self.options.delete(*self.options.get_children())
+        for i, o in enumerate(p.get("options", []), 1):
+            note = "in plan" if o["in_plan"] else "clears bar" if o["clears"] else "below bar"
+            tags = ("plan",) if o["in_plan"] else () if o["clears"] else ("empty",)
+            self.options.insert("", "end", tags=tags, values=(
+                i, o["kind"], o["add"], _num(o["add_rate"]), o["add_games"], o["drop"] or "(open spot)",
+                _num(o["drop_rate"]), "" if o["drop_games"] is None else o["drop_games"],
+                f"{o['gain']:+.1f}", f"{o['bar']:.1f}", f"{o['edge']:+.1f}", note))
+        if not self.options.get_children():
+            self.options.insert("", "end", values=("", "", "No pickups priced.", "", "", "", "", "", "", "", "", ""),
+                                tags=("empty",))
 
         self._fill_players(self.roster, p["roster"], where=True)
         self._fill_free_agents()

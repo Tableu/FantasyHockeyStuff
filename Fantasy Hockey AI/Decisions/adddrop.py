@@ -53,6 +53,61 @@ class AddDropParams:
                 f"claim={self.claim_premium:g}")
 
 
+def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=(),
+          shortlist=None) -> list:
+    """Every (incoming, outgoing) pair the rule prices today, best first by gain over its bar:
+    [{"incoming", "outgoing", "gain", "bar", "claim", "rates", "nights"}]. `shortlist` widens the
+    free agents priced past params.shortlist (the plan window's options); the drops tried per
+    incoming stay params.drop_shortlist. A pair clears when gain > bar."""
+    eligibility = view._state.eligibility
+    roster = [p for p in view.roster if p not in view.ir]
+    if not roster:
+        return []
+    pool = [p for p in view.free_agents()
+            if not view.on_waivers(p) or not math.isinf(params.claim_premium)]
+    pool = [p for p in pool if p not in reserved]
+    forward = {p: valuation.player_value(view, p, params.horizon_weeks, params.rate_source)
+               for p in pool + roster}
+    candidates = sorted((p for p in pool if forward[p] > 0.0),
+                        key=lambda p: forward[p], reverse=True)[:shortlist or params.shortlist]
+    if not candidates:
+        return []
+
+    rates = {p: valuation.rate(view, p, params.rate_source) for p in roster + candidates}
+    nights = valuation.RosterNights(view, roster, rates, params.horizon_weeks, slot_order,
+                                    eligibility, accepts)
+    # A rostered player with no rate yet is unknown, not worthless: never a drop candidate.
+    drops = [d for d in sorted(roster, key=lambda p: forward[p])
+             if d not in reserved and valuation.known(view, d, params.rate_source)]
+    if view.roster_room() > 0:
+        # An open spot (a stash made it) is the cheapest "drop" there is: nobody leaves. The
+        # forced drop when the injured player returns is priced then, by manage_ir.
+        drops = [None] + drops
+
+    pairs = []
+    for incoming in candidates:
+        tried = 0
+        for outgoing in drops:
+            if tried >= params.drop_shortlist:
+                break
+            if not fieldable([p for p in roster if p != outgoing] + [incoming], eligibility,
+                             roster):
+                continue
+            tried += 1
+            # A claim is awarded when the player clears waivers, so it pays only from then --
+            # the streaming rule's pricing. Before 2026-09-26 it was priced from today.
+            clears = view.waiver_clears(incoming) if view.on_waivers(incoming) else None
+            gain = nights.swap_gain(incoming, outgoing, from_day=clears)
+            bar = params.margin * nights.swap_sd(incoming, outgoing)
+            if clears is not None:
+                bar += params.claim_premium
+            pairs.append({"incoming": incoming, "outgoing": outgoing, "gain": gain, "bar": bar,
+                          "claim": clears is not None, "rates": rates, "nights": nights})
+    # Stable, so equal margins keep the pricing order: the first priced wins, as it always has.
+    pairs.sort(key=lambda q: q["gain"] - q["bar"], reverse=True)
+    return pairs
+
+
 def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
     """Make this team's moves for today. Returns what was done, for the manager's log.
 
@@ -63,60 +118,19 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
     if math.isinf(params.margin) or view.moves_left <= 0:
         return []
     state = view._state
-    eligibility = state.eligibility
     done, reserved = [], set()
 
     while view.moves_left > 0:
-        roster = [p for p in view.roster if p not in view.ir]
-        if not roster:
-            break
-        pool = [p for p in view.free_agents()
-                if not view.on_waivers(p) or not math.isinf(params.claim_premium)]
-        pool = [p for p in pool if p not in reserved]
-        forward = {p: valuation.player_value(view, p, params.horizon_weeks, params.rate_source)
-                   for p in pool + roster}
-        candidates = sorted((p for p in pool if forward[p] > 0.0),
-                            key=lambda p: forward[p], reverse=True)[:params.shortlist]
-        if not candidates:
-            break
-
-        rates = {p: valuation.rate(view, p, params.rate_source) for p in roster + candidates}
-        nights = valuation.RosterNights(view, roster, rates, params.horizon_weeks, slot_order,
-                                        eligibility, accepts)
-        # A rostered player with no rate yet is unknown, not worthless: never a drop candidate.
-        drops = [d for d in sorted(roster, key=lambda p: forward[p])
-                 if d not in reserved and valuation.known(view, d, params.rate_source)]
-        if view.roster_room() > 0:
-            # An open spot (a stash made it) is the cheapest "drop" there is: nobody leaves. The
-            # forced drop when the injured player returns is priced then, by manage_ir.
-            drops = [None] + drops
-
-        best = None
-        for incoming in candidates:
-            tried = 0
-            for outgoing in drops:
-                if tried >= params.drop_shortlist:
-                    break
-                if not fieldable([p for p in roster if p != outgoing] + [incoming], eligibility,
-                                 roster):
-                    continue
-                tried += 1
-                # A claim is awarded when the player clears waivers, so it pays only from then --
-                # the streaming rule's pricing. Before 2026-09-26 it was priced from today.
-                clears = view.waiver_clears(incoming) if view.on_waivers(incoming) else None
-                gain = nights.swap_gain(incoming, outgoing, from_day=clears)
-                bar = params.margin * nights.swap_sd(incoming, outgoing)
-                if clears is not None:
-                    bar += params.claim_premium
-                if gain > bar and (best is None or gain - bar > best[0]):
-                    best = (gain - bar, gain, incoming, outgoing)
+        pairs = price(view, params, slot_order, accepts, fieldable, reserved)
+        best = next((q for q in pairs if q["gain"] > q["bar"]), None)
         if best is None:
             break
 
-        _, gain, incoming, outgoing = best
+        incoming, outgoing, gain = best["incoming"], best["outgoing"], best["gain"]
+        rates, nights = best["rates"], best["nights"]
         reserved.update({incoming, outgoing} - {None})
         try:
-            if view.on_waivers(incoming):
+            if best["claim"]:
                 state.submit_claim(view.team_index, incoming, drop=outgoing, today=view.day)
                 kind = "claim"
             else:

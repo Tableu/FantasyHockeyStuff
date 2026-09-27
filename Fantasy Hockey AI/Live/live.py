@@ -47,6 +47,7 @@ import schedule as schedule_module
 import simlayer
 import state as state_module
 import view as view_module
+from decisionlayer import adddrop as adddrop_module
 from decisionlayer import draft as draft_module
 from decisionlayer import estimators as estimators_module
 from decisionlayer import load_strategy
@@ -61,6 +62,8 @@ STATUS_DIR = paths.FEATURES_DIR.parent / "live"
 INJURED = ("OUT", "SUSP")
 DECISION_SIMS = 400
 FREE_AGENTS_SHOWN = 60
+OPTIONS_PRICED = 25        # free agents the options price on the roster (the rule itself prices 10)
+OPTIONS_SHOWN = 15         # pickups listed, each with its best drop
 PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
 
 
@@ -346,10 +349,13 @@ class LiveRunner:
         v = view()
         lineup, z = self._lineup(manager, v, snapshot, rows, now)
         # After the plan's own lineup, so the plan is what it would be without this extra solve.
-        lineup_now, _ = self._lineup(managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy),
-                                     view(state_now), snapshot, rows, now)
+        manager_now = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
+        lineup_now, _ = self._lineup(manager_now, view(state_now), snapshot, rows, now)
+        # The pickups to choose from: the add/drop rule's own pricing, on the roster as it stands.
+        options = adddrop_module.price(view(state_now), manager_now.params, manager_now.slot_order,
+                                       manager_now.accepts, manager_now._fieldable, shortlist=OPTIONS_PRICED)
         return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
-                              state_now, lineup_now)
+                              state_now, lineup_now, options)
 
     def _state(self, snapshot, day) -> state_module.LeagueState:
         if len(snapshot.teams) != self.config.teams:
@@ -422,7 +428,7 @@ class LiveRunner:
     # ---------- the plan ----------
 
     def _describe(self, snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
-                  state_now, lineup_now) -> dict:
+                  state_now, lineup_now, options) -> dict:
         me = state.teams[snapshot.me]
         names = pd.read_parquet(paths.players()).set_index("player_id")["name"]
         teams = pd.read_parquet(paths.teams()).set_index("team_id")["team"]
@@ -446,6 +452,24 @@ class LiveRunner:
                           "add_status": state_status.get(t["player_id"])})
         claims = [{"claim": name(p), "drop": name(state.claim_drops.get((snapshot.me, p))) if state.claim_drops.get((snapshot.me, p)) else None}
                   for p, teams_ in state.pending_claims.items() if snapshot.me in teams_]
+        planned = ({t["player_id"] for t in state.transactions if t["team"] == snapshot.me}
+                   | {p for p, teams_ in state.pending_claims.items() if snapshot.me in teams_})
+        choices, seen = [], set()
+        for q in options:                                # best first; each pickup with its best drop
+            p, d = q["incoming"], q["outgoing"]
+            if p in seen:
+                continue
+            seen.add(p)
+            choices.append({"kind": "Claim" if q["claim"] else "Add", "add": name(p),
+                            "drop": name(d) if d is not None else None,
+                            "gain": round(q["gain"], 1), "bar": round(q["bar"], 1),
+                            "edge": round(q["gain"] - q["bar"], 1),
+                            "clears": q["gain"] > q["bar"], "in_plan": p in planned,
+                            "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
+                            "add_games": len(q["nights"].nights(p)),
+                            "drop_games": len(q["nights"].nights(d)) if d is not None else None})
+            if len(choices) == OPTIONS_SHOWN:
+                break
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]
@@ -502,6 +526,7 @@ class LiveRunner:
             "matchup_z": round(z, 2), "p_win": round(statistics.NormalDist().cdf(z), 3),
             "opponent": snapshot.teams[snapshot.opponent]["name"] if snapshot.opponent is not None else None,
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
+            "options": choices, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
             "lineup": slots, "bench": bench, "watch": watch,
             "goalies": [{"player": name(int(r.player_id)), "p_start": round(float(r.p_start), 3),
                          "note": _note(r.note)} for r in goalie_notes.itertuples()],
@@ -557,6 +582,22 @@ def render(plan: dict) -> str:
     actions += [f"- **Waiver claim:** {c['claim']}" + (f", dropping {c['drop']}" if c["drop"] else "") for c in plan["claims"]]
     actions += [f"- **Drop:** {p}" for p in plan["other_drops"]]
     lines += ["## Moves", *(actions or ["- None today."]), ""]
+    if plan.get("options"):
+        weeks = plan.get("horizon_weeks")
+        window = "the rest of the season" if weeks is None else f"this week and the next {weeks}"
+        lines += ["## Options", "",
+                  f"The best pickups on your roster as it stands, each with its best drop. Gain = lineup "
+                  f"points over {window}; a move is made only when the gain clears the bar (its own sd x "
+                  f"the margin, plus the claim premium for a claim). Ranked by edge = gain - bar, "
+                  f"as the rule ranks them.", "",
+                  "| # | Move | Add | pts/g | games | Drop | pts/g | games | Gain | Bar | Edge | |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for i, o in enumerate(plan["options"], 1):
+            mark = "**in plan**" if o["in_plan"] else ("clears" if o["clears"] else "")
+            lines.append(f"| {i} | {o['kind']} | {o['add']} | {o['add_rate']} | {o['add_games']} | "
+                         f"{o['drop'] or '(open spot)'} | {'' if o['drop_rate'] is None else o['drop_rate']} | "
+                         f"{'' if o['drop_games'] is None else o['drop_games']} | {o['gain']:+.1f} | {o['bar']:.1f} | {o['edge']:+.1f} | {mark} |")
+        lines.append("")
     if plan.get("games_today", True):
         lines += ["## Tonight's lineup", "", "| Slot | Player | Exp. pts | P(plays/starts) | Puck (UTC) | Flag |",
                   "|---|---|---|---|---|---|"]
