@@ -1,5 +1,5 @@
 {
-  "description": "How the managers decide: every tunable choice a manager makes, separate from the league's rules (scoring/, rosters/). Read by Season (decisionlayer.load_strategy) and handed to Decisions/, which never reads a file itself. Values are the shipped defaults; section 11 tunes them. 'inf' is accepted wherever a number is.",
+  "description": "The Fleaflicker league's strategy (Settings/leagues/beagles.json): strategy.json with the live choices: adddrop.tail = 'cost' (a swap must also cover the rest-of-season value it loses; seat-paired on 2024-25 neutral, +0.21 +/- 0.40 pts/wk pooled) and streaming.mode = 'week' (Decisions/weekplan.py; +2.01 +/- 0.62 pts/wk, 2024-25, 16 drafts); and streaming.gate = true with streaming.next_week = 1.0 -- on the week's last day with the week won (P(win) >= 0.9), a pickup is priced on next week alone. The user's call for a league that streams heavily (2026-09-27): in the 2024-25 backtest it cost -1.45 +/- 0.62 pts/wk (win rate +0.007 +/- 0.013, 8 drafts); the backtest's leaguemates may not stream like this league's. Every other value equals strategy.json (verify.py 'live strategy').",
   "adddrop": {
     "horizon_weeks": 3,
     "margin": 1.0,
@@ -7,20 +7,20 @@
     "claim_premium": 0.0,
     "shortlist": 10,
     "drop_shortlist": 4,
-    "tail": "none"
+    "tail": "cost"
   },
   "streaming": {
     "spots": 2,
     "reserve": 2,
     "lam": 2.0,
     "margin": 0.0,
-    "gate": false,
+    "gate": true,
     "flat": false,
     "claim": true,
     "shortlist": 12,
-    "mode": "daily",
+    "mode": "week",
     "survival": 1.0,
-    "next_week": 0.0
+    "next_week": 1.0
   },
   "rung3_streamer": {
     "horizon_weeks": 1

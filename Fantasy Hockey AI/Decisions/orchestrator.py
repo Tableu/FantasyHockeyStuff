@@ -11,7 +11,8 @@ order, hands each step what the step before it left, and writes down what it saw
                    full roster), stash the injured
        repair      restore a roster that cannot fill every slot    Manager.repair_roster
     3. upgrade     section 9's add/drop rule                       adddrop.run
-    4. stream      spend what the upgrades leave, this week only   streaming.run
+    4. stream      spend what the upgrades leave, this week only   streaming.run, or
+                   (mode "week") planned over the rest of the week  weekplan.run
     5. lineup      the z-scored exact solve at the lock            FullSystem.set_lineup
     6. trades      weekly, advisory                                section 9 step 3 (not here)
 
@@ -25,6 +26,7 @@ live runner section 10 needs later builds a real view and calls the same two met
 
 import adddrop
 import streaming
+import weekplan
 
 
 class DailyPlan:
@@ -34,6 +36,9 @@ class DailyPlan:
         self.manager = manager
         self.stream_params = stream_params
         self.log = []
+        # The week mode's plan for the rest of the week, as of the last day planned (weekplan.py):
+        # today's moves made, the later ones recommendations. Empty in the daily mode.
+        self.week_plan = []
 
     def before_lock(self, view) -> None:
         """Steps 1-4: everything that changes the roster."""
@@ -59,8 +64,14 @@ class DailyPlan:
         m.move_log += upgrades
         entry["upgrades"] = len(upgrades)
 
-        rentals = streaming.run(view, self.stream_params, m.params.horizon_weeks,
-                                m.params.rate_source, m.slot_order, m.accepts, m._fieldable, z=z)
+        if self.stream_params.mode == "week":
+            rentals, self.week_plan = weekplan.run(
+                view, self.stream_params, m.params.horizon_weeks, m.params.rate_source,
+                m.slot_order, m.accepts, m._fieldable, z=z)
+        else:
+            rentals = streaming.run(view, self.stream_params, m.params.horizon_weeks,
+                                    m.params.rate_source, m.slot_order, m.accepts, m._fieldable,
+                                    z=z)
         m.move_log += rentals
         entry["rentals"] = len(rentals)
         entry["moves_left_end"] = view.moves_left

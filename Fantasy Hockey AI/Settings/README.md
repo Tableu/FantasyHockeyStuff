@@ -143,6 +143,9 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `flat` | false | hold the bar at lam/2 all week instead of letting it fall |
 | | `claim` | true | a rental may be claimed off waivers, priced from his clear date |
 | | `shortlist` | 12 | free agents priced on the roster per pass |
+| | `mode` | `daily` | `daily`: each day's rentals on their own, against the falling `lam` bar; `week`: plan the rest of the week's moves together and make today's (Decisions/weekplan.py; no `lam`). The live leagues' strategies run `week`: seat-paired on 2024-25, 16 drafts, +2.01 +/- 0.62 pts/wk on the live settings (+1.79 +/- 0.80 on this file's) |
+| | `survival` | 1.0 | week mode: a move planned d days ahead ranks at survival^d x its edge (P(the free agent is still free)); 0.6 / 0.8 / 1.0 were within noise, 1.0 kept |
+| | `next_week` | 0.0 | week mode: a move made today on the week's last 2 days also counts next week's nights at this weight (with `gate`, this week's at phi(z)/phi(0)): buy next week's roster with moves about to expire. Off: on the live strategy, 2024-25, 8 drafts, every variant lost -- 0.5 -1.34 +/- 0.48, 1.0 -2.68 +/- 0.69, gate+0.5 -1.46 +/- 0.94, gate+1.0 -3.26 +/- 0.75 pts/wk -- and none raised the win rate (weekend rentals were traded for pickups Monday's fresh moves make anyway). Now only on the week's last day with P(win) >= 0.9 (needs `gate`): gate+0.5 -0.94 +/- 0.35, gate+1.0 -1.29 +/- 0.72; and with that Sunday's games not counted at all (what the code now does): -1.51 +/- 0.40 / -1.45 +/- 0.62 -- still off |
 | `rung3_streamer` | `horizon_weeks` | 1 | how far ahead rung 3 prices a swap |
 | `rung4_full_system` | `horizon_weeks` | 1 | how far ahead rung 4 prices an acquisition (matched to rung 3) |
 | | `drop_horizon_weeks` | 3 | window a forced IR-activation drop is priced over (rungs 2-4) |
@@ -171,10 +174,14 @@ was not touched.
 - **`adddrop.horizon_weeks = 3`** is section 9's plan. On the 2025-26 sensitivity check
   (`Season/docs/ladder-league_sens-*.md`) H = 1, 3 and the rest of the season all cleared hold,
   with 3 and season within noise of each other and ahead of 1.
-- **`tail = none`** in strategy.json; **`strategy-live.json`** (what `beagles` and `espn-la` use, via
-  their league file's `strategy`) is strategy.json with `tail = cost`. Seat-paired on 2024-25, `cost`
-  was neutral (+0.21 +/- 0.40 pts/wk pooled; +0.69 +/- 0.25 14-team points, -0.87 +/- 0.43 12-team
-  points) and `net` lost (-3.37 +/- 1.04). Keep strategy-live.json's other values equal to strategy.json.
+- **`tail = none`** in strategy.json; the live leagues use `tail = cost`. Seat-paired on 2024-25,
+  `cost` was neutral (+0.21 +/- 0.40 pts/wk pooled; +0.69 +/- 0.25 14-team points, -0.87 +/- 0.43
+  12-team points) and `net` lost (-3.37 +/- 1.04).
+- **Each league has its own strategy, `strategy-<league>.json`** (named in its league file's
+  `strategy`, shared with no other league): strategy.json but for the league-level choices --
+  `adddrop.tail`, `streaming.mode`, `streaming.gate`, `streaming.next_week` (verify.py 'live
+  strategy' refuses anything else). Today: `espn-la` and `espn` choose `tail = cost` and `mode =
+  week`; `beagles` also turns on the Sunday next-week pickup (`gate = true`, `next_week = 1.0`).
 - **`claim_premium = 0`** since 2026-09-23, when claims were made to resolve: a claim clears the
   same bar as an add and priority is treated as free. Unmeasured; a sweep over {0, 5} is planned.
 - **The streaming values** are the section 10 v1 settings; the ablations are in `Season/README.md`.

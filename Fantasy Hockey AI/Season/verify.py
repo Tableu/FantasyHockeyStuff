@@ -33,7 +33,8 @@ season-level result rather than as an error:
     tune guard      section 11 tuning on the final holdout
     opponents       a simulated leaguemate whose board is not his sources' consensus, whose draw
                     differs between paired runs, or who drafts past his goalie cap
-    live strategy   Settings/strategy-live.json differing from strategy.json anywhere but adddrop.tail
+    live strategy   a league without its own Settings/strategy-<league>.json, or one differing from
+                    strategy.json in more than the league-level choices (tail, streaming mode/gate/next_week)
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
     boom bust       boom/bust odds outside [0, 1], a par curve that rises, season draws or room
                     drafts that differ between two runs with one seed, or the saved-run reader
@@ -411,9 +412,10 @@ def check_streaming() -> str:
     or pushes a week past its budget."""
     from dataclasses import replace
 
-    def run(rungs, spots):
+    def run(rungs, spots, mode="daily", **stream):
         strategy = _strategy()
-        strategy = replace(strategy, streaming=replace(strategy.streaming, spots=spots))
+        strategy = replace(strategy, streaming=replace(strategy.streaming, spots=spots, mode=mode,
+                                                       **stream))
         season, _ = _small_season(rungs, strategy=strategy, sims=0)
         rate = {int(k): 1.0 for k in season.player_pool()}
         report = season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
@@ -423,17 +425,25 @@ def check_streaming() -> str:
     _, seven = run((2, 7), 0)
     assert five.equals(seven), "rung 7 with no streaming spots is not rung 5"
 
-    season, _ = run((2, 7), 2)
-    rentals = [r for m in season.field if m.rung == 7 for r in m.move_log if r["kind"] == "rental"]
-    assert rentals, "two streaming spots made no rentals over a season"
-    for r in rentals:
-        assert r["moves_left"] >= r["reserve"], f"a rental broke the reserve: {r}"
-        assert r["predicted_gain"] > r["bar"] >= r["drop_cost"], f"a rental under its floor: {r}"
-        assert r["outgoing"] is None or r["spot"], f"a rental dropped a non-spot player: {r}"
-    weekly = pd.DataFrame(season.state.transactions).groupby(["team", "week"]).size()
-    assert weekly.max() <= season.config.moves_per_week, "a week went over budget"
-    return (f"k=0 identical to rung 5; k=2: {len(rentals)} rentals, reserve, floor, spot-only "
-            f"drops and the weekly budget all held")
+    counts = {}
+    # The week mode (weekplan.py) is held to the same rules as the daily one, with the next-week
+    # pickup (the Fleaflicker league's) on as well as off.
+    arms = {"daily": {"mode": "daily"}, "week": {"mode": "week"},
+            "next-week": {"mode": "week", "gate": True, "next_week": 1.0}}
+    for mode, stream in arms.items():
+        season, _ = run((2, 7), 2, **stream)
+        rentals = [r for m in season.field if m.rung == 7 for r in m.move_log if r["kind"] == "rental"]
+        assert rentals, f"two streaming spots made no rentals over a season ({mode})"
+        for r in rentals:
+            assert r["moves_left"] >= r["reserve"], f"a {mode} rental broke the reserve: {r}"
+            assert r["predicted_gain"] > r["bar"] >= r["drop_cost"], f"a {mode} rental under its floor: {r}"
+            assert r["outgoing"] is None or r["spot"], f"a {mode} rental dropped a non-spot player: {r}"
+        weekly = pd.DataFrame(season.state.transactions).groupby(["team", "week"]).size()
+        assert weekly.max() <= season.config.moves_per_week, f"a week went over budget ({mode})"
+        counts[mode] = len(rentals)
+    return (f"k=0 identical to rung 5; k=2: {counts['daily']} daily / {counts['week']} week-mode / "
+            f"{counts['next-week']} next-week-pickup rentals, reserve, floor, spot-only drops and the "
+            f"weekly budget all held")
 
 
 def check_frozen_rosters() -> str:
@@ -1249,19 +1259,44 @@ def check_boom_bust(drafts=3, draws=300) -> str:
             f"({par[0]:.0f} -> {par[-1]:.0f}); odds in [0, 1]; reader matches {checked} saved rows")
 
 
+# What a live league's strategy may choose for itself; everything else is strategy.json's, the
+# values the backtests measured.
+LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"),
+                ("streaming", "next_week"))
+
+
 def check_live_strategy() -> str:
-    """strategy-live.json (the live leagues' strategy) is strategy.json but for adddrop.tail."""
+    """Every league in Settings/leagues/ has its own strategy file, strategy-<league>.json, used by
+    no other league, and it is strategy.json but for the league-level choices (LIVE_CHOICES)."""
     import json
-    blocks = []
-    for name in ("strategy", "strategy-live"):
+
+    def body(name):
         block = json.loads((paths.SETTINGS_DIR / f"{name}.json").read_text(encoding="utf-8"))
         block.pop("description")
-        block["adddrop"].pop("tail")
-        blocks.append(block)
-    differ = sorted(k for k in set(blocks[0]) | set(blocks[1]) if blocks[0].get(k) != blocks[1].get(k))
-    assert not differ, f"strategy-live.json drifted from strategy.json in {differ}"
-    tail = decisionlayer.load_strategy("strategy-live").adddrop.tail
-    return f"strategy-live.json equals strategy.json apart from adddrop.tail ({tail}), and loads"
+        return block
+
+    base = body("strategy")
+    seen, out = {}, []
+    for path in sorted((paths.SETTINGS_DIR / "leagues").glob("*.json")):
+        league = json.loads(path.read_text(encoding="utf-8"))
+        name = league["name"]
+        own = f"strategy-{name}"
+        assert league["strategy"] == own, f"league {name} uses {league['strategy']!r}, not its own {own!r}"
+        assert own not in seen, f"{own} is shared by {seen[own]} and {name}"
+        seen[own] = name
+        block = body(own)
+        chosen = []
+        for section, key in LIVE_CHOICES:
+            if block[section][key] != base[section][key]:
+                chosen.append(f"{section}.{key}={block[section][key]}")
+            block[section].pop(key)
+        rest = {k: ({kk: vv for kk, vv in v.items() if (k, kk) not in LIVE_CHOICES}
+                    if isinstance(v, dict) else v) for k, v in base.items()}
+        differ = sorted(k for k in set(rest) | set(block) if rest.get(k) != block.get(k))
+        assert not differ, f"{own}.json drifted from strategy.json in {differ}"
+        decisionlayer.load_strategy(own)
+        out.append(f"{name}: {', '.join(chosen) or 'as strategy.json'}")
+    return f"{len(seen)} leagues, each its own file, strategy.json but for -- " + "; ".join(out)
 
 
 def check_modules() -> str:

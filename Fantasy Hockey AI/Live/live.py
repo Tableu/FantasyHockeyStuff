@@ -504,11 +504,14 @@ class LiveRunner:
         # The rate a move was priced on: the add/drop rule's source (rest of season by default).
         source = self.strategy.adddrop.rate_source
         priced = lambda p: round(valuation_module.rate(v, p, source), 2)
+        # A pickup the week mode made for next week (a won week's last day, weekplan.py).
+        for_next_week = {q["incoming"] for q in manager.move_log if q.get("for_next_week")}
         moves = []
         for t in state.transactions:
             if t["team"] != snapshot.me:
                 continue
-            moves.append({"kind": t["kind"], "add": name(t["player_id"]),
+            moves.append({"kind": "pickup for next week" if t["player_id"] in for_next_week else t["kind"],
+                          "add": name(t["player_id"]),
                           "drop": name(t["dropped"]) if t["dropped"] is not None else None,
                           "add_rate": priced(t["player_id"]),
                           "drop_rate": priced(t["dropped"]) if t["dropped"] is not None else None,
@@ -529,7 +532,8 @@ class LiveRunner:
                             "bar": None if bar is None else round(bar, 1),
                             "edge": None if gain is None or bar is None else round(gain - bar, 1),
                             "clears": True, "in_plan": True,
-                            "note": "in plan: this week only" if rental else "in plan",
+                            "note": ("in plan: for next week" if q.get("for_next_week")
+                                     else "in plan: this week only" if rental else "in plan"),
                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
                             "add_games": q.get("incoming_games"),
                             "drop_games": q.get("outgoing_games") if d is not None else None})
@@ -562,6 +566,20 @@ class LiveRunner:
                             "drop_games": len(q["nights"].nights(d)) if d is not None else None})
             if ranked == OPTIONS_SHOWN:
                 break
+        # The week mode's plan (weekplan.py): every move it would make this week, today's made above,
+        # the later ones what it would do if nothing changes -- it plans again on every pass.
+        week_plan = []
+        for m in manager.plan.week_plan:
+            p, d = m["incoming"], m["outgoing"]
+            week_plan.append({"day": m["day"].date().isoformat(), "from": m["effective"].date().isoformat(),
+                              "today": m["today"], "for_next_week": m["for_next_week"],
+                              "kind": MOVE_KINDS[m["kind"]], "add": name(p),
+                              "drop": name(d) if d is not None else None,
+                              "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
+                              "add_games": m["incoming_games"],
+                              "drop_games": m["outgoing_games"] if d is not None else None,
+                              "gain": round(m["gain"], 1), "bar": round(m["bar"], 1),
+                              "edge": round(m["gain"] - m["bar"], 1)})
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]
@@ -619,7 +637,8 @@ class LiveRunner:
             "matchup_z": round(z, 2), "p_win": round(statistics.NormalDist().cdf(z), 3),
             "opponent": snapshot.teams[snapshot.opponent]["name"] if snapshot.opponent is not None else None,
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
-            "options": choices, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
+            "options": choices, "week_plan": week_plan,
+            "stream_mode": self.strategy.streaming.mode, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
             "lineup": slots, "bench": bench, "watch": watch,
             "goalies": [{"player": name(int(r.player_id)), "p_start": round(float(r.p_start), 3),
                          "note": _note(r.note)} for r in goalie_notes.itertuples()],
@@ -680,6 +699,25 @@ def render(plan: dict) -> str:
     actions += [f"- **Waiver claim:** {c['claim']}" + (f", dropping {c['drop']}" if c["drop"] else "") for c in plan["claims"]]
     actions += [f"- **Drop:** {p}" for p in plan["other_drops"]]
     lines += ["## Moves", *(actions or ["- None today."]), ""]
+    if plan.get("stream_mode") == "week":
+        lines += ["## This week's streaming plan", "",
+                  "Every rental the plan would make this week if nothing changes: today's are the moves "
+                  "above; the later ones are planned again on every run, as news and the free-agent pool "
+                  "change. Gain = lineup points this week (a pickup for next week: next week's, "
+                  "made on the last day of a week already won); bar = the drop cost (+ margin x sd).", ""]
+        if plan["week_plan"]:
+            lines += ["| Day | Move | Add | pts/g | games | Drop | pts/g | games | Gain | Bar | Edge | |",
+                      "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+            for w in plan["week_plan"]:
+                day = pd.Timestamp(w["day"]).strftime("%a %b %d")
+                start = "" if w["from"] == w["day"] else f" (from {pd.Timestamp(w['from']).strftime('%a')})"
+                lines.append(f"| {day}{start} | {w['kind']} | {w['add']} | {w['add_rate']} | {w['add_games']} | "
+                             f"{w['drop'] or '(open spot)'} | {'' if w['drop_rate'] is None else w['drop_rate']} | "
+                             f"{'' if w['drop_games'] is None else w['drop_games']} | {w['gain']:+.1f} | "
+                             f"{w['bar']:.1f} | {w['edge']:+.1f} | {'**today, for next week**' if w.get('for_next_week') else '**today**' if w['today'] else 'planned'} |")
+        else:
+            lines.append("- No rentals worth a move this week.")
+        lines.append("")
     if plan.get("options"):
         weeks = plan.get("horizon_weeks")
         window = "the rest of the season" if weeks is None else f"this week and the next {weeks}"

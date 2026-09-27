@@ -1,5 +1,5 @@
 {
-  "description": "The live plans' strategy (Settings/leagues/*.json 'strategy'): strategy.json with one change, adddrop.tail = 'cost' -- a swap must also cover the rest-of-season value it loses, so a better player is not dropped for a short schedule edge. Seat-paired on 2024-25 it was neutral (+0.21 +/- 0.40 pts/wk pooled over four formats), so the backtest default stays 'none'. Keep every other value equal to strategy.json.",
+  "description": "The espn-la league's strategy (Settings/leagues/espn-la.json): strategy.json with the live choices: adddrop.tail = 'cost' (a swap must also cover the rest-of-season value it loses; seat-paired on 2024-25 neutral, +0.21 +/- 0.40 pts/wk pooled) and streaming.mode = 'week' (Decisions/weekplan.py; +2.01 +/- 0.62 pts/wk, 2024-25, 16 drafts). Every other value equals strategy.json (verify.py 'live strategy').",
   "adddrop": {
     "horizon_weeks": 3,
     "margin": 1.0,
@@ -17,7 +17,10 @@
     "gate": false,
     "flat": false,
     "claim": true,
-    "shortlist": 12
+    "shortlist": 12,
+    "mode": "week",
+    "survival": 1.0,
+    "next_week": 0.0
   },
   "rung3_streamer": {
     "horizon_weeks": 1

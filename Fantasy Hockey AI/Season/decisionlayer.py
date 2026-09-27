@@ -38,9 +38,10 @@ import slots          # noqa: E402
 import strategy       # noqa: E402
 import streaming      # noqa: E402
 import valuation      # noqa: E402
+import weekplan       # noqa: E402
 
 __all__ = ["adddrop", "draft", "estimators", "managers", "orchestrator", "slots",
-           "strategy", "streaming", "valuation"]
+           "strategy", "streaming", "valuation", "weekplan"]
 
 
 def load_strategy(name=None):

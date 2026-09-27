@@ -10,7 +10,7 @@
   },
   "rules": "espn-la",
   "scoring": "espn-la",
-  "strategy": "strategy-live",
+  "strategy": "strategy-espn-la",
   "eligibility_platform": "espn",
   "adp_platform": "espn",
   "active": true,

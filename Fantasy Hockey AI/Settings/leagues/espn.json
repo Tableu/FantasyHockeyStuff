@@ -7,7 +7,7 @@
   "team": null,
   "rules": "espn-default",
   "scoring": "espn-default",
-  "strategy": null,
+  "strategy": "strategy-espn",
   "eligibility_platform": "espn",
   "adp_platform": "espn",
   "active": false,

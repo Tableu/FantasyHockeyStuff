@@ -58,11 +58,26 @@ class StreamParams:
     flat: bool                  # hold the bar at lam/2 all week (the falling bar's average)
     claim: bool                 # may claim a rental off waivers (priced from his clear date)
     shortlist: int              # free agents priced on the roster per pass
+    mode: str                   # "daily": this rule, a day at a time; "week": weekplan.py
+    survival: float             # week mode: P(a free agent is still free a day later), per day
+    next_week: float            # week mode: weight on next week's nights of a pickup (0 = off)
+
+    def __post_init__(self):
+        if self.mode not in MODES:
+            raise ValueError(f"streaming mode {self.mode!r}; use one of {MODES}")
 
     def describe(self) -> str:
         return (f"k={self.spots} r={self.reserve} lam={self.lam:g} ms={self.margin:g}"
                 f"{' gate' if self.gate else ''}{' flat' if self.flat else ''}"
-                f"{' claim' if self.claim else ''}")
+                f"{' claim' if self.claim else ''}"
+                f"{f' week s={self.survival:g}' if self.mode == 'week' else ''}"
+                f"{f' nw={self.next_week:g}' if self.mode == 'week' and self.next_week else ''}")
+
+
+# How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
+# as the week's moves expire (below); "week" plans the rest of the week's moves together and makes
+# only today's (weekplan.py).
+MODES = ("daily", "week")
 
 
 def _week_share_left(view) -> float:
