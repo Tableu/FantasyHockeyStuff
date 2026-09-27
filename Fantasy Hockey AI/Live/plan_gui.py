@@ -23,10 +23,11 @@ make the moves on the platform yourself.
                  who the plan would put in that slot after its moves; then his projected stat line
                  for tonight (per game, in the league's scored stats)
     Moves        IR moves, adds and drops, claims -- with the rate each was priced on
-    Options      the best pickups to choose from: the add/drop rule's own pricing of the top free
-                 agents on the roster you hold now, each with his best drop, the lineup points he
-                 gains over the pricing window, the bar a move must clear and the edge (gain -
-                 bar) they are ranked by; the plan's own picks highlighted
+    Options      the plan's moves, highlighted, each as the rule that made it priced it (a rental
+                 on this week alone), to compare with the pickups below them: the add/drop rule's
+                 own pricing of the top free agents on the roster you hold now, each with his best
+                 drop, the lineup points he gains over the pricing window, the bar a move must
+                 clear and the edge (gain - bar) they are ranked by
     Roster       every player you hold now: status, rate, points tonight, games left this week, and
                  the recommended action (drop, move to IR, ...)
     Free agents  the best available now by rate (sortable), the recommended adds marked
@@ -131,11 +132,11 @@ class PlanWindow:
                                                ("after", "After moves", 240)] + stat_columns)
         self.moves = self._table("Moves", [("kind", "Move", 110), ("add", "Add", 260), ("add_rate", "pts/g", 70),
                                            ("drop", "Drop", 260), ("drop_rate", "pts/g", 70), ("note", "Note", 200)])
-        self.options = self._table("Options", [("rank", "#", 36), ("kind", "Move", 60), ("add", "Add", 230),
+        self.options = self._table("Options", [("rank", "#", 36), ("kind", "Move", 90), ("add", "Add", 230),
                                                ("add_rate", "pts/g", 60), ("add_games", "Games", 60),
                                                ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
                                                ("drop_games", "Games", 60), ("gain", "Gain", 70),
-                                               ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 90)])
+                                               ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 150)])
         player_columns = [("player", "Player", 240), ("positions", "Pos", 80), ("status", "Status", 70),
                           ("rate", "Rate (pts/g)", 90), ("per_game", "Tonight's proj.", 100),
                           ("plays_tonight", "Plays tonight", 95), ("games_left", "Games left", 80),
@@ -283,6 +284,7 @@ class PlanWindow:
         opponent = p["opponent"] or "no opponent"
         self.headline.set(f"{p['team']} -- {p['game_date']} · week {p['week']} vs {opponent} · "
                           f"P(win) {p['p_win']:.0%} · moves left after the plan {p['moves_left']}"
+                          + (" · today's moves are free" if p.get("free_moves") else "")
                           + ("" if p.get("games_today", True) else " · no NHL games today"))
 
         rows = []
@@ -319,12 +321,13 @@ class PlanWindow:
         self.moves.set_rows(rows or [(("", "No moves today.", "", "", "", ""), ("empty",))])
 
         rows = []
-        for i, o in enumerate(p.get("options", []), 1):
-            note = "in plan" if o["in_plan"] else "clears bar" if o["clears"] else "below bar"
+        blank = lambda x, f="": "" if x is None else format(x, f)
+        for o in p.get("options", []):
             tags = ("plan",) if o["in_plan"] else () if o["clears"] else ("empty",)
-            rows.append(((i, o["kind"], o["add"], _num(o["add_rate"]), o["add_games"], o["drop"] or "(open spot)",
-                          _num(o["drop_rate"]), "" if o["drop_games"] is None else o["drop_games"],
-                          f"{o['gain']:+.1f}", f"{o['bar']:.1f}", f"{o['edge']:+.1f}", note), tags))
+            rows.append(((blank(o["rank"]), o["kind"], o["add"], _num(o["add_rate"]), blank(o["add_games"]),
+                          o["drop"] or "(open spot)", _num(o["drop_rate"]), blank(o["drop_games"]),
+                          blank(o["gain"], "+.1f"), blank(o["bar"], ".1f"), blank(o["edge"], "+.1f"),
+                          o["note"]), tags))
         self.options.set_rows(rows or [(("", "", "No pickups priced.") + ("",) * 9, ("empty",))])
 
         self._fill_players(self.roster, p["roster"], where=True)

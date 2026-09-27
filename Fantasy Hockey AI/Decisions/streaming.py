@@ -66,10 +66,11 @@ class StreamParams:
 
 
 def _week_share_left(view) -> float:
-    """f(t): the share of the matchup week still ahead after today. 0 on its last night."""
+    """f(t): the share of the matchup week still ahead after today. 0 on its last night; 1 on a
+    day before the week starts (the live planner runs on days a backtest never visits)."""
     week = view.calendar.weeks[view.week - 1]
     span = (week.end - week.start).days
-    return (week.end - view.day).days / span if span > 0 else 0.0
+    return min(1.0, max(0.0, (week.end - view.day).days / span)) if span > 0 else 0.0
 
 
 def reserve_today(view, params) -> int:
@@ -148,6 +149,8 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
     eligibility = state.eligibility
     # The flat arm tests whether letting the bar fall as moves expire is doing anything.
     share_left = 0.5 if params.flat else _week_share_left(view)
+    if state.free_moves:
+        share_left = 0.0                # a free move is not taken from a later stream: no lam
     scale = math.exp(-0.5 * z * z) if params.gate else 1.0
     done, reserved = [], set()
 
@@ -211,7 +214,8 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
                      "outgoing": outgoing, "predicted_gain": gain, "bar": bar,
                      "drop_cost": floor, "spot": outgoing in holders,
                      "reserve": reserve_today(view, params), "moves_left": view.moves_left,
-                     "incoming_games": len(nights.nights(incoming))})
+                     "incoming_games": len(nights.nights(incoming)),
+                     "outgoing_games": len(nights.nights(outgoing))})
         if claiming:
             # The claim resolves later; stop pricing against a roster that may change first.
             break

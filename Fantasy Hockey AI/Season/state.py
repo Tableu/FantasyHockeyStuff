@@ -92,6 +92,9 @@ class LeagueState:
         self.failed_claims = []                   # {date, team, player_id, reason}
         self.week = None
         self.transactions = []
+        # Moves cost nothing: Fleaflicker does not count a move made before the first week toward
+        # any week's limit. Only the live runner sets it; a backtest starts on opening night.
+        self.free_moves = False
 
     # ---------- queries ----------
 
@@ -147,6 +150,8 @@ class LeagueState:
 
     def _move_cost(self, action: str, drop=None) -> int:
         """What an action spends from the weekly budget, with its accompanying drop if any."""
+        if self.free_moves:
+            return 0
         return self.config.move_cost(action) + (self.config.move_cost("drop") if drop is not None
                                                 else 0)
 
@@ -175,7 +180,7 @@ class LeagueState:
         rules.move_cost["drop"] (0 in the target league) unless part of an add or activation,
         which charges it with the whole transaction."""
         team = self.teams[team_index]
-        cost = self.config.move_cost("drop") if charge else 0
+        cost = self._move_cost("drop") if charge else 0
         if team.moves_left < cost:
             raise IllegalMove(f"team {team_index} has no moves left to drop with")
         if player_id in team.roster:
@@ -199,7 +204,7 @@ class LeagueState:
             raise IllegalMove(f"{player_id} is not IR-eligible today")
         if len(team.ir) >= self.config.ir:
             raise IllegalMove(f"team {team_index} has no IR slot free")
-        cost = self.config.move_cost("ir_stash")
+        cost = self._move_cost("ir_stash")
         if team.moves_left < cost:
             raise IllegalMove(f"team {team_index} has no moves left to stash with")
         team.roster.remove(player_id)

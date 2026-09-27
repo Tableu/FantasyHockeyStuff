@@ -179,7 +179,7 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
             log.debug("team %d could not take %s: %s", view.team_index, incoming, error)
             continue
         done.append({"day": view.day, "kind": kind, "incoming": incoming,
-                     "outgoing": outgoing, "predicted_gain": gain,
+                     "outgoing": outgoing, "predicted_gain": gain, "bar": best["bar"],
                      "incoming_rate": rates[incoming], "outgoing_rate": rates.get(outgoing, 0.0),
                      "incoming_games": len(nights.nights(incoming)),
                      "outgoing_games": len(nights.nights(outgoing))})

@@ -64,7 +64,10 @@ DECISION_SIMS = 400
 FREE_AGENTS_SHOWN = 60
 OPTIONS_PRICED = 25        # free agents the options price on the roster (the rule itself prices 10)
 OPTIONS_SHOWN = 15         # pickups listed, each with its best drop
-PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
+# A logged move's kind as the Options table names it (managers.repair_roster, adddrop, streaming).
+MOVE_KINDS = {"repair": "Repair", "add": "Upgrade", "claim": "Claim", "rental": "Rental",
+              "rental claim": "Rental claim"}
+PLATFORM_NAMES ={"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
 
 
 def season_of(day: dt.date) -> str:
@@ -405,6 +408,8 @@ class LiveRunner:
                 state.owner[p] = index
                 state.pool.discard(p)
         state.waived = {int(p): pd.Timestamp(d) for p, d in snapshot.waivers.items()}
+        # Before the first week, a move counts toward no week's limit (Fleaflicker, 2026-09-27).
+        state.free_moves = day < self.calendar.weeks[0].start
         return state
 
     def _draws(self, skaters, goalies) -> dict:
@@ -510,23 +515,52 @@ class LiveRunner:
                           "add_status": state_status.get(t["player_id"])})
         claims = [{"claim": name(p), "drop": name(state.claim_drops.get((snapshot.me, p))) if state.claim_drops.get((snapshot.me, p)) else None}
                   for p, teams_ in state.pending_claims.items() if snapshot.me in teams_]
-        planned = ({t["player_id"] for t in state.transactions if t["team"] == snapshot.me}
-                   | {p for p, teams_ in state.pending_claims.items() if snapshot.me in teams_})
-        choices, seen = [], set()
+        # The plan's own moves first, each as the rule that made it priced it -- an upgrade over the
+        # window, a rental on this week alone (so its gain is not the upgrades' gain), a repair not
+        # at all -- so they can be compared with the pickups the upgrade rule priced below them.
+        choices = []
+        for q in manager.move_log:
+            p, d = q["incoming"], q["outgoing"]
+            gain, bar = q.get("predicted_gain"), q.get("bar")
+            rental = q["kind"] in ("rental", "rental claim")
+            choices.append({"rank": None, "kind": MOVE_KINDS[q["kind"]], "add": name(p),
+                            "drop": name(d) if d is not None else None,
+                            "gain": None if gain is None else round(gain, 1),
+                            "bar": None if bar is None else round(bar, 1),
+                            "edge": None if gain is None or bar is None else round(gain - bar, 1),
+                            "clears": True, "in_plan": True,
+                            "note": "in plan: this week only" if rental else "in plan",
+                            "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
+                            "add_games": q.get("incoming_games"),
+                            "drop_games": q.get("outgoing_games") if d is not None else None})
+        # An upgrade is the same pricing as its row below, so it takes that row's rank instead; a
+        # rental's pickup keeps his row, priced as an upgrade, for the comparison.
+        made = {(q["incoming"], q["outgoing"]): row for q, row in zip(manager.move_log, choices)
+                if q["kind"] in ("add", "claim")}
+        rented = {q["incoming"] for q in manager.move_log if q["kind"] in ("rental", "rental claim")}
+        added = {q["incoming"] for q in manager.move_log}
+        seen, ranked = set(), 0
         for q in options:                                # best first; each pickup with its best drop
             p, d = q["incoming"], q["outgoing"]
             if p in seen:
                 continue
             seen.add(p)
-            choices.append({"kind": "Claim" if q["claim"] else "Add", "add": name(p),
+            ranked += 1
+            clears = q["gain"] > q["bar"]
+            if (p, d) in made:                           # listed above, as the plan made it
+                made[(p, d)]["rank"] = ranked
+                continue
+            note = ("rental in plan" if p in rented else "in plan, other drop" if p in added
+                    else "clears bar" if clears else "below bar")
+            choices.append({"rank": ranked, "kind": "Claim" if q["claim"] else "Add", "add": name(p),
                             "drop": name(d) if d is not None else None,
                             "gain": round(q["gain"], 1), "bar": round(q["bar"], 1),
                             "edge": round(q["gain"] - q["bar"], 1),
-                            "clears": q["gain"] > q["bar"], "in_plan": p in planned,
+                            "clears": clears, "in_plan": False, "note": note,
                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
                             "add_games": len(q["nights"].nights(p)),
                             "drop_games": len(q["nights"].nights(d)) if d is not None else None})
-            if len(choices) == OPTIONS_SHOWN:
+            if ranked == OPTIONS_SHOWN:
                 break
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
@@ -580,7 +614,7 @@ class LiveRunner:
             "games_today": bool(len(rows)),
             "league_source": snapshot.source, "platform": PLATFORM_NAMES.get(self.league.platform, "the platform"),
             "team": snapshot.teams[snapshot.me]["name"],
-            "week": v.week, "moves_left": v.moves_left,
+            "week": v.week, "moves_left": v.moves_left, "free_moves": state.free_moves,
             "moves_used_before": before["moves_used"],
             "matchup_z": round(z, 2), "p_win": round(statistics.NormalDist().cdf(z), 3),
             "opponent": snapshot.teams[snapshot.opponent]["name"] if snapshot.opponent is not None else None,
@@ -634,6 +668,8 @@ def render(plan: dict) -> str:
              f"Generated {plan['generated_at']} UTC · week {plan['week']} · vs {plan['opponent'] or '-'} · "
              f"P(win) {plan['p_win']:.0%} (z {plan['matchup_z']:+.2f}) · moves left after this plan: {plan['moves_left']}",
              f"League data: {plan['league_source']}", ""]
+    if plan.get("free_moves"):
+        lines[-1:-1] = [f"Before week {plan['week']}: today's moves count toward no week's limit."]
     actions = []
     actions += [f"- **IR:** move {p} to IR" for p in plan["ir_to"]]
     actions += [f"- **IR:** activate {p}" for p in plan["ir_off"]]
@@ -648,17 +684,19 @@ def render(plan: dict) -> str:
         weeks = plan.get("horizon_weeks")
         window = "the rest of the season" if weeks is None else f"this week and the next {weeks}"
         lines += ["## Options", "",
-                  f"The best pickups on your roster as it stands, each with its best drop. Gain = lineup "
-                  f"points over {window}; a move is made only when the gain clears the bar (its own sd x "
-                  f"the margin, plus the claim premium for a claim). Ranked by edge = gain - bar, "
-                  f"as the rule ranks them.", "",
+                  f"The plan's moves first, each as the rule that made it priced it (a rental on this "
+                  f"week alone), then the best pickups on your roster as it stands, each with its best "
+                  f"drop. Gain = lineup points over {window}; a move is made only when the gain clears "
+                  f"the bar (its own sd x the margin, plus the claim premium for a claim). Ranked by "
+                  f"edge = gain - bar, as the rule ranks them.", "",
                   "| # | Move | Add | pts/g | games | Drop | pts/g | games | Gain | Bar | Edge | |",
                   "|---|---|---|---|---|---|---|---|---|---|---|---|"]
-        for i, o in enumerate(plan["options"], 1):
-            mark = "**in plan**" if o["in_plan"] else ("clears" if o["clears"] else "")
-            lines.append(f"| {i} | {o['kind']} | {o['add']} | {o['add_rate']} | {o['add_games']} | "
-                         f"{o['drop'] or '(open spot)'} | {'' if o['drop_rate'] is None else o['drop_rate']} | "
-                         f"{'' if o['drop_games'] is None else o['drop_games']} | {o['gain']:+.1f} | {o['bar']:.1f} | {o['edge']:+.1f} | {mark} |")
+        blank = lambda x, f="": "" if x is None else format(x, f)
+        for o in plan["options"]:
+            mark = f"**{o['note']}**" if o["in_plan"] else o["note"]
+            lines.append(f"| {blank(o['rank'])} | {o['kind']} | {o['add']} | {o['add_rate']} | {blank(o['add_games'])} | "
+                         f"{o['drop'] or '(open spot)'} | {blank(o['drop_rate'])} | {blank(o['drop_games'])} | "
+                         f"{blank(o['gain'], '+.1f')} | {blank(o['bar'], '.1f')} | {blank(o['edge'], '+.1f')} | {mark} |")
         lines.append("")
     if plan.get("games_today", True):
         lines += ["## Tonight's lineup", "", "| Slot | Player | Exp. pts | P(plays/starts) | Puck (UTC) | Flag |",
