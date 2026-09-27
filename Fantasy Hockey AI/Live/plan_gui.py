@@ -32,7 +32,8 @@ make the moves on the platform yourself.
                  Moves; the later ones are planned again on every run
     Roster       every player you hold now: status, rate, games left this week and his stats
                  (sortable); a player the plan acts on is highlighted
-    Free agents  the best available now by rate (sortable), the recommended adds highlighted
+    Free agents  the best available now by rate, with rest-of-season points (rate x his team's games
+                 left in the fantasy season; sortable), the recommended adds highlighted
 
 Roster, Free agents and the Matchup's opponent show each player's stats in the league's scored
 categories: the season so far once it has started (ModelFeatures/build_season_stats.py and the goalie
@@ -70,7 +71,7 @@ ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "empty": {"fg": "#9ca3af"},
 
 
 # Columns the Roster and Free agents tabs leave out of the shared player columns.
-ROSTER_HIDDEN = {"per_game", "plays_tonight", "plan", "where"}
+ROSTER_HIDDEN = {"per_game", "plays_tonight", "plan", "where", "ros_points"}
 FREE_AGENTS_HIDDEN = {"plan", "where"}
 
 
@@ -152,7 +153,8 @@ class PlanWindow:
                                          ("drop_games", "Games", 60), ("gain", "Gain", 70),
                                          ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 90)])
         player_columns = [("player", "Player", 240), ("positions", "Pos", 80), ("status", "Status", 70),
-                          ("rate", "Rate (pts/g)", 90), ("per_game", "Tonight's proj.", 100),
+                          ("rate", "Rate (pts/g)", 90), ("ros_points", "ROS pts", 70),
+                          ("per_game", "Tonight's proj.", 100),
                           ("plays_tonight", "Plays tonight", 95), ("games_left", "Games left", 80),
                           ("where", "", 90), ("plan", "Recommended", 110)]
         # The roster you hold: no tonight columns, no lineup/bench/IR column, no recommended action.
@@ -391,7 +393,8 @@ class PlanWindow:
                     ("on waivers" if r["on_waivers"] else "")
             tags = ("plan",) if r.get("plan") else (r["status"],) if r["status"] in STATUS_COLOURS else ()
             cells = {"player": r["player"], "positions": r["positions"], "status": r["status"] or "",
-                     "rate": _num(r["rate"]), "per_game": _num(r["per_game"]),
+                     "rate": _num(r["rate"]), "ros_points": _num(r.get("ros_points"), 1),
+                     "per_game": _num(r["per_game"]),
                      "plays_tonight": "" if r["plays_tonight"] is None else f"{r['plays_tonight']:.0%}",
                      "games_left": r["games_left"], "where": place, "plan": _action(r.get("plan")),
                      **dict(zip(self.stat_keys, self._stats(r.get("stats"))))}
@@ -413,7 +416,7 @@ class PlanWindow:
         numbers, A-Z for text."""
         state = self.sorts[name]
         state[1] = not state[1] if key == state[0] else key in (
-            "rate", "per_game", "plays_tonight", "games_left", *self.stat_keys)
+            "rate", "ros_points", "per_game", "plays_tonight", "games_left", *self.stat_keys)
         state[0] = key
         self._fill_sorted(name)
 

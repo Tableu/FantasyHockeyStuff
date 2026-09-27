@@ -684,6 +684,9 @@ class LiveRunner:
                 "positions": "/".join(sorted(self.eligibility.get(p, ()))),
                 "status": "GTD" if p in gtd else state_status.get(p) if state_status.get(p) != "ACTIVE" else None,
                 "rate": priced(p), "per_game": round(v.projected_rate(p), 2),
+                # The rate times his team's games left in the fantasy season (its playoffs included).
+                "ros_points": round(valuation_module.player_value(
+                    v, p, None, self.strategy.adddrop.rate_source), 1),
                 "games_left": v.games_remaining(p), "plays_tonight": tonight,
                 "in_lineup": lineup_ids is not None and p in lineup_ids, "on_ir": on_ir,
                 "on_waivers": bool(waivers), "plan": plan, "stats": self._season_stats(p)}
