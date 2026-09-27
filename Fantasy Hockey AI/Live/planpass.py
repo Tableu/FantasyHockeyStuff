@@ -46,14 +46,26 @@ def _run(command, cwd, echo, label):
         raise RuntimeError(f"{label} failed:\n" + "\n".join(lines[-8:]))
     useful = [l for l in lines if " INFO " in l or " WARNING " in l]
     echo(f"{label}: {(useful or lines or ['done'])[-1].split(' INFO ')[-1].split(' WARNING ')[-1]}")
+    return lines
 
 
-def snapshots(kinds=SNAPSHOT_KINDS, echo=print, force_goalies=False) -> None:
+def snapshots(kinds=SNAPSHOT_KINDS, echo=print, force_goalies=False, injuries_max_age=None) -> set:
+    """Returns the kinds fetched. `injuries_max_age` (minutes): reuse an injury report that recent
+    instead of fetching it -- Fleaflicker's is 44 pages, ~16 s, and is also taken at 10:00 and 15:00."""
+    fetched = set()
     for kind in kinds:
         command = ["snapshot_live.py", "--kind", kind] + (["--force"] if kind == "goalies" and force_goalies else [])
-        _run(command, PIPELINE, echo, f"snapshot {kind}")
+        if kind == "injuries" and injuries_max_age is not None:
+            command += ["--max-age", str(injuries_max_age)]
+        lines = _run(command, PIPELINE, echo, f"snapshot {kind}")
+        reused = [l for l in lines if ": skipped, last snapshot" in l]
+        if reused:
+            echo(f"snapshot {kind}: reused -- " + "; ".join(l.split(" INFO ")[-1] for l in reused))
+        else:
+            fetched.add(kind)
     if {"injuries", "lines"} & set(kinds):
         _run(["build_players.py"], MODEL_FEATURES, echo, "injury status export")
+    return fetched
 
 
 def tonight(day: dt.date, echo=print) -> bool:

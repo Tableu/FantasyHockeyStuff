@@ -9,13 +9,15 @@ Nothing is scheduled: the plan runs when the window opens and while it stays ope
 the same steps run_live.py takes):
 
     Full refresh    fresh injury, line-chart and goalie reports -> tonight's projections -> read the
-                    league from its platform -> the shipped manager's plan. Runs on opening.
+                    league from its platform -> the shipped manager's plan. Runs on opening, where
+                    an injury report under 30 minutes old is reused rather than fetched again.
     Quick refresh   goalie reports -> tonight's projections -> the plan again (lineup news, late
                     scratches) -- what the auto window runs.
     Auto window     while the window is open, a quick refresh about 30 minutes before each group of
                     games starts (Fleaflicker locks each player at his own game), once per group.
 
-Every run is also saved as reports/<league>/plans/plan_{date}_{time}.md + .json. Recommend-only:
+Every run is also saved as reports/<league>/plans/plan_{date}_{time}.md + .json, and on opening
+today's last saved plan is shown at once while the first refresh runs. Recommend-only:
 make the moves on the platform yourself.
 
     Tonight      tonight's lineup from the roster you hold now: expected points, chance he plays /
@@ -45,6 +47,7 @@ The tables show the league as it stands; the moves are only recommendations unti
 
 import argparse
 import datetime as dt
+import json
 import logging
 import queue
 import sys
@@ -58,11 +61,13 @@ import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import draft_board
 import leagues
 import live
+import livepaths
 import planpass
 import sheets
 import simlayer
 
 AUTO_CHECK_MS = 60_000          # how often the auto window looks at the clock
+OPENING_INJURIES_MAX_AGE = 30   # minutes: on opening, an injury report this fresh is reused
 PLAN_COLOUR = "#e0ecff"         # a row the plan recommends acting on
 STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": "#fff4d6"}
 # A row's look by its tags: a recommended action, an injury status, greyed (a placeholder message).
@@ -168,7 +173,10 @@ class PlanWindow:
 
         root.after(200, self._drain)
         root.after(AUTO_CHECK_MS, self._auto_check)
+        saved = self._show_saved()
         self.run("full")
+        if saved:
+            self.status_var.set(f"Showing the plan saved at {saved} -- full refresh running...")
 
     # ---------- layout ----------
 
@@ -225,6 +233,23 @@ class PlanWindow:
         self.log.pack(fill="both", expand=True)
         return side
 
+    def _show_saved(self):
+        """Today's last saved plan (reports/<league>/plans), shown at once while the opening
+        refresh runs -- instead of an empty window for most of a minute. Returns its time, or
+        None when there is none (or it predates a change to what the tables read)."""
+        plans = livepaths.league_reports(self.league.name) / "plans"
+        files = sorted(plans.glob(f"plan_{self.day.isoformat()}_*.json"), key=lambda f: f.stat().st_mtime)
+        if not files:
+            return None
+        try:
+            self.plan = json.loads(files[-1].read_text(encoding="utf-8"))
+            self.show()
+        except Exception as error:                     # noqa: BLE001 -- the refresh replaces it anyway
+            self.plan = None
+            self.echo(f"saved plan {files[-1].name} not shown: {type(error).__name__}: {error}")
+            return None
+        return dt.datetime.fromtimestamp(files[-1].stat().st_mtime).strftime("%I:%M %p").lstrip("0")
+
     # ---------- running a pass ----------
 
     def echo(self, text):
@@ -246,8 +271,12 @@ class PlanWindow:
             now = dt.datetime.fromisoformat(args.now) if args.now else utc_now()
             if not args.skip_snapshots:
                 kinds = planpass.SNAPSHOT_KINDS if mode == "full" else ("goalies",)
-                planpass.snapshots(kinds, self.echo)
-                for kind in kinds:
+                # Opening reuses a fresh injury report (the 10:00 / 15:00 runs, a window just
+                # closed); the Full refresh button always fetches.
+                opening = not self.last
+                fetched = planpass.snapshots(kinds, self.echo,
+                                             injuries_max_age=OPENING_INJURIES_MAX_AGE if opening else None)
+                for kind in fetched:                   # a reused report keeps its own time
                     self.last[kind] = dt.datetime.now()
             planpass.tonight(self.day, self.echo)
             self.last["projections"] = dt.datetime.now()

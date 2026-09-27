@@ -17,11 +17,13 @@ Usage:
     python snapshot_live.py --kind injuries
     python snapshot_live.py --kind lines --dry-run          # fetch + parse + diff, rolled back
     python snapshot_live.py --kind goalies --date 2026-10-01
+    python snapshot_live.py --kind injuries --max-age 30    # skip a source snapshotted < 30 min ago
 """
 
 import argparse
 import datetime as dt
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from nhl_pipeline import db, fantasy_leagues, name_resolver
 from nhl_pipeline.api import dailyfaceoff, espn_injuries, fleaflicker
@@ -32,13 +34,25 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("snapshot_live")
 
 SEASON = "2026-27"
+# Daily Faceoff's 32 line charts, fetched this many at a time (one after another took ~10 s).
+CHART_WORKERS = 4
 
 
-def run_source(conn, kind: str, source_key: str, work, dry_run: bool) -> None:
-    """One source, one transaction: `work(cursor, run_id)` returns (seen, written)."""
+def run_source(conn, kind: str, source_key: str, work, dry_run: bool, max_age=None) -> None:
+    """One source, one transaction: `work(cursor, run_id)` returns (seen, written). With
+    `max_age` (minutes), a source whose last successful snapshot of this kind is younger is
+    skipped: its rows are still current."""
     cursor = conn.cursor()
     source = live.source_id(cursor, source_key)
     at = live.utc_now()
+    if max_age is not None:
+        cursor.execute("SELECT MAX(SnapshotAt) FROM Live.SnapshotRuns WHERE Kind = ? AND SourceID = ? "
+                       "AND Error IS NULL AND RowsSeen IS NOT NULL", kind, source)
+        last = cursor.fetchone()[0]
+        if last is not None and at - last < dt.timedelta(minutes=max_age):
+            log.info("%s/%s: skipped, last snapshot %d min ago (max age %d)", kind, source_key,
+                     (at - last).total_seconds() // 60, max_age)
+            return
     try:
         run_id = live.start_run(cursor, kind, source, at)
         seen, written = work(cursor, run_id, source)
@@ -59,7 +73,7 @@ def run_source(conn, kind: str, source_key: str, work, dry_run: bool) -> None:
         log.info("%s/%s: %d seen, %d written", kind, source_key, seen, written)
 
 
-def snapshot_injuries(conn, season_id, teams, player_index, dry_run):
+def snapshot_injuries(conn, season_id, teams, player_index, dry_run, max_age=None):
     def fleaflicker_work(cursor, run_id, source):
         # Designations are the platform's, not the league's: read through the registry's active
         # Fleaflicker league (today 12090).
@@ -76,19 +90,26 @@ def snapshot_injuries(conn, season_id, teams, player_index, dry_run):
         _warn_unresolved("ESPN", status)
         return len(status), live.write_status(cursor, run_id, source, status)
 
-    run_source(conn, "injuries", "fleaflicker", fleaflicker_work, dry_run)
-    run_source(conn, "injuries", "espn", espn_work, dry_run)
+    run_source(conn, "injuries", "fleaflicker", fleaflicker_work, dry_run, max_age)
+    run_source(conn, "injuries", "espn", espn_work, dry_run, max_age)
 
 
 def snapshot_lines(conn, teams, player_index, dry_run):
     def work(cursor, run_id, source):
         resolver = live.injuries_resolver(cursor, source, player_index, "dailyfaceoff")
-        charts = []
-        for slug in dailyfaceoff.team_slugs():
+        def fetch(slug):
             try:
-                chart = dailyfaceoff.line_chart(slug)
+                return dailyfaceoff.line_chart(slug)
             except Exception:
                 log.exception("Daily Faceoff chart %s failed; its players keep their last status", slug)
+                return None
+
+        # Fetched CHART_WORKERS at a time; matched and resolved here, in order, on this cursor.
+        with ThreadPoolExecutor(max_workers=CHART_WORKERS) as pool:
+            fetched = list(pool.map(fetch, dailyfaceoff.team_slugs()))
+        charts = []
+        for chart in fetched:
+            if chart is None:
                 continue
             chart["team_id"] = teams.from_abbreviation(chart["team_abbreviation"]) or \
                 teams.from_name(chart["team_name"])
@@ -171,6 +192,8 @@ def main():
     parser.add_argument("--date", default=None, help="goalies: the game date (default: today)")
     parser.add_argument("--force", action="store_true", help="goalies: fetch even if every game has started")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--max-age", type=int, default=None,
+                        help="injuries: skip a source whose last good snapshot is younger (minutes)")
     args = parser.parse_args()
 
     conn = db.connect()
@@ -183,7 +206,7 @@ def main():
     player_index = name_resolver.load_player_index(cursor)
 
     if args.kind == "injuries":
-        snapshot_injuries(conn, season_id, teams, player_index, args.dry_run)
+        snapshot_injuries(conn, season_id, teams, player_index, args.dry_run, args.max_age)
         merge_status(conn, args.dry_run)
     elif args.kind == "lines":
         snapshot_lines(conn, teams, player_index, args.dry_run)
