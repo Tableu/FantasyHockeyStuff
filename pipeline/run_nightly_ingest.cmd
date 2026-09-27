@@ -3,6 +3,7 @@ rem Nightly job for Task Scheduler (schedule_live_tasks.ps1), output appended to
 rem   1. pipeline: yesterday's games, lineups, season totals, then the live injury spells
 rem   2. ModelFeatures: the season's variant-A lineup rows and goalie starts, which tonight's
 rem      P(start) reads as its in-season history (Projections/project_tonight.py)
+rem   3. ModelFeatures: the skaters' season lines so far, for the plan window's stats
 cd /d "%~dp0"
 if not exist logs\live mkdir logs\live
 set PYTHONIOENCODING=utf-8
@@ -11,3 +12,4 @@ python run_daily.py >> %LOG% 2>&1
 cd /d "%~dp0..\Fantasy Hockey AI\ModelFeatures"
 python build_lineup_features.py --season 2026-27 --variant A >> %LOG% 2>&1
 python build_goalie_starts.py --season 2026-27 >> %LOG% 2>&1
+python build_season_stats.py --season 2026-27 >> %LOG% 2>&1

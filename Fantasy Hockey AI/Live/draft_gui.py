@@ -42,6 +42,7 @@ from tksheet import Sheet
 
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import draft_assistant as da
+import draft_board
 from decisionlayer import draft as draft_module
 
 POSITION_COLOURS = {"C": "#cfe2ff", "LW": "#d1f0d8", "RW": "#fde2c4", "D": "#e6d8f5",
@@ -73,10 +74,7 @@ COLUMNS = [  # (key, heading, width, anchor)
 # during the fantasy playoffs.
 SCHEDULE_HEADINGS = {"off": "OFF", "pog": "POG"}
 # Every stat the league scores (draft_board.stat_lines: the line the value came from), + GP.
-STAT_HEADINGS = {"gp": "GP", "goals": "G", "assists": "A", "ppp": "PPP", "shp": "SHP",
-                 "hits": "HIT", "blocks": "BLK", "shots": "SOG", "pim": "PIM", "wins": "W",
-                 "losses": "L", "ot_losses": "OTL", "shutouts": "SO", "saves": "SV",
-                 "goals_against": "GA"}
+STAT_HEADINGS = draft_board.STAT_HEADINGS
 # The settings popup's scoring fields: every quantity the projections carry (Simulation/scoring.py
 # SIDES), labelled as the aggregate workbook labels them.
 SKATER_SCORING = (("goals", "G"), ("assists", "A"), ("ppp", "PPP"), ("shp", "SHP"),

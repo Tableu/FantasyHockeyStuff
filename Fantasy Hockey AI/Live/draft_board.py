@@ -310,6 +310,14 @@ def boom_bust_odds(season, scoreset, config):
     return odds
 
 
+# The stat line's columns (stat_lines) as the aggregate workbook heads them: the draft window's
+# stat columns and the plan window's.
+STAT_HEADINGS = {"gp": "GP", "goals": "G", "assists": "A", "ppp": "PPP", "shp": "SHP",
+                 "hits": "HIT", "blocks": "BLK", "shots": "SOG", "pim": "PIM", "wins": "W",
+                 "losses": "L", "ot_losses": "OTL", "shutouts": "SO", "saves": "SV",
+                 "goals_against": "GA"}
+
+
 def to_markdown(board: pd.DataFrame, top: int) -> str:
     cols = [c for c in board.columns]
     out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]

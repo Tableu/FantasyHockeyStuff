@@ -203,6 +203,33 @@ def reported_status(day: dt.date) -> pd.DataFrame:
     return pd.read_parquet(path)
 
 
+GOALIE_LINE = ("wins", "losses", "ot_losses", "shutouts", "goals_against", "saves")
+
+
+def season_lines(season: str) -> pd.DataFrame:
+    """Each player's stat line this season so far (index player_id, draft_board.STAT_HEADINGS
+    keys), empty before the season's first game: skaters from season_stats_{season}.parquet
+    (ModelFeatures/build_season_stats.py), goalies summed from goalie_starts_{season}.parquet --
+    both rebuilt by the nightly job."""
+    frames = []
+    skaters = paths.FEATURES_DIR / f"season_stats_{season}.parquet"
+    goalie_path = paths.goalie_starts(season)
+    goalies = pd.DataFrame()
+    if goalie_path.exists():
+        starts = pd.read_parquet(goalie_path)
+        starts = starts[starts["appeared"].astype(bool)]
+        if len(starts):
+            goalies = (starts.groupby("player_id")[list(GOALIE_LINE)].sum()
+                       .assign(gp=starts.groupby("player_id").size()))
+    if skaters.exists():
+        table = pd.read_parquet(skaters).set_index("player_id")
+        frames.append(table.drop(index=goalies.index, errors="ignore"))
+    frames.append(goalies)
+    lines = pd.concat([f for f in frames if len(f)]) if any(len(f) for f in frames) else pd.DataFrame()
+    lines.index = lines.index.astype(int) if len(lines) else lines.index
+    return lines[lines["gp"] > 0] if len(lines) else lines
+
+
 def latest_rates(day: dt.date, scoreset, expected_line: float) -> dict:
     """{player id: projected points per game} from the newest tonight file that has him, on or
     before `day` -- the live `latest_rate`: carried across nights his team is idle."""
@@ -239,6 +266,9 @@ class LiveRunner:
             self.season, draft_board.previous(self.season), league.rules, league.scoring,
             pd.Timestamp(day), self.strategy, eligibility_platform=league.eligibility_platform)
         self.slot_order = self.config.slot_order()
+        scored = set(self.scoreset.skaters) | set(self.scoreset.goalies)
+        self.stat_keys = [k for k in draft_board.STAT_HEADINGS
+                          if k in self.board.columns and (k == "gp" or k in scored)]
 
         games = pd.read_parquet(paths.schedule(self.season)).reset_index(drop=True)
         games["game_id"] = games.index
@@ -438,6 +468,34 @@ class LiveRunner:
         state_status = status.set_index("player_id")["status"].to_dict()
         gtd = set(status.loc[status["game_time_decision"].astype(bool), "player_id"].astype(int))
 
+        # Stats for the tables: tonight's per-game projection on the Tonight tab; the season so far
+        # elsewhere, or -- before the first game -- the projected season (the draft board's line).
+        so_far = season_lines(self.season)
+        board = self.board
+
+        def per_game(p):
+            row = by_player.loc[p] if p in by_player.index else None
+            if row is not None and row["kind"] == "skater":
+                plays, points = float(row["p_plays"]), float(row["lambda_goals"] + row["lambda_assists"])
+                line = {"goals": row["lambda_goals"], "assists": row["lambda_assists"],
+                        "ppp": points * row["pp_point_share"], "shp": points * row["sh_point_share"],
+                        "shots": row["lambda_shots"], "hits": row["lambda_hits"],
+                        "blocks": row["lambda_blocks"], "pim": row["lambda_pim"]}
+                return {k: round(float(line[k]) * plays, 2) for k in self.stat_keys if k in line}
+            if p not in board.index or not board.loc[p, "gp"] > 0:
+                return {}
+            share = float(row["p_start"]) if row is not None else 1.0    # a goalie tonight: P(start)
+            return {k: round(float(board.loc[p, k]) / float(board.loc[p, "gp"]) * share, 2)
+                    for k in self.stat_keys if k != "gp" and pd.notna(board.loc[p, k])}
+
+        def season(p):
+            source = so_far if len(so_far) else board
+            if p not in source.index:
+                return {"gp": 0} if len(so_far) else {}
+            return {k: int(round(float(source.loc[p, k]))) for k in self.stat_keys
+                    if k in source.columns and pd.notna(source.loc[p, k])}
+        self._season_stats = season
+
         # The rate a move was priced on: the add/drop rule's source (rest of season by default).
         source = self.strategy.adddrop.rate_source
         priced = lambda p: round(valuation_module.rate(v, p, source), 2)
@@ -490,7 +548,8 @@ class LiveRunner:
                               "locked": bool(row is not None and pd.notna(row["start_time_utc"])
                                              and pd.Timestamp(row["start_time_utc"]) <= pd.Timestamp(now)),
                               "p_plays": round(float(row["p_plays"] if row["kind"] == "skater" else row["p_start"]), 3) if row is not None else None,
-                              "flag": ("GTD" if p in gtd else state_status.get(p)) if (p in gtd or state_status.get(p) not in (None, "ACTIVE")) else None})
+                              "flag": ("GTD" if p in gtd else state_status.get(p)) if (p in gtd or state_status.get(p) not in (None, "ACTIVE")) else None,
+                              "stats": per_game(p)})
             return slots
         slots = slot_rows(lineup)
         bench = [name(p) for p in me.roster if p not in lineup.assigned.values()]
@@ -538,6 +597,9 @@ class LiveRunner:
             # Both as the league stands now; `plan` is the recommended action (add, drop, ...).
             "lineup_now": slots_now,
             "bench_now": [name(p) for p in me_now.roster if p not in lineup_now.assigned.values()],
+            "bench_now_stats": [per_game(p) for p in me_now.roster if p not in lineup_now.assigned.values()],
+            "stat_columns": [[k, draft_board.STAT_HEADINGS[k]] for k in self.stat_keys],
+            "stats_basis": "season so far" if len(so_far) else "projected season",
             "roster": [self._player_row(v, p, name, priced, state_status, gtd, by_player,
                                         lineup_ids=set(lineup_now.assigned.values()), on_ir=p in me_now.ir,
                                         plan=action.get(p))
@@ -563,7 +625,7 @@ class LiveRunner:
                 "rate": priced(p), "per_game": round(v.projected_rate(p), 2),
                 "games_left": v.games_remaining(p), "plays_tonight": tonight,
                 "in_lineup": lineup_ids is not None and p in lineup_ids, "on_ir": on_ir,
-                "on_waivers": bool(waivers), "plan": plan}
+                "on_waivers": bool(waivers), "plan": plan, "stats": self._season_stats(p)}
 
 
 def render(plan: dict) -> str:
