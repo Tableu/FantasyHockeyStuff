@@ -46,8 +46,10 @@ class Table:
         self.keys = [c[0] for c in columns]
         self.headings = [c[1] for c in columns]
         self.styles = styles
+        # A blank heading stays blank: tksheet otherwise shows the column's letter ("H").
         self.sheet = Sheet(parent, show_row_index=False, show_top_left=False, font=TABLE_FONT,
-                           header_font=HEADER_FONT, default_row_height=22, table_bg="white")
+                           header_font=HEADER_FONT, default_row_height=22, table_bg="white",
+                           show_default_header_for_empty=False)
         self.sheet.enable_bindings("single_select", "row_select", "column_width_resize",
                                    "arrowkeys", "copy")
         self.sheet.set_sheet_data([], reset_col_positions=True, redraw=False)

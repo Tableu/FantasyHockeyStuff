@@ -31,9 +31,9 @@ make the moves on the platform yourself.
     Week         the week's streaming plan (strategy mode 'week', Decisions/weekplan.py): every rental
                  it would make this week, by day, with its gain, bar and edge -- today's are the
                  Moves; the later ones are planned again on every run
-    Roster       every player you hold now: status, rate, points tonight, games left this week, and
-                 the recommended action (drop, move to IR, ...)
-    Free agents  the best available now by rate (sortable), the recommended adds marked
+    Roster       every player you hold now: status, rate, games left this week and his stats; a
+                 player the plan acts on is highlighted
+    Free agents  the best available now by rate (sortable), the recommended adds highlighted
 
 Roster, Free agents and the Matchup's opponent show each player's stats in the league's scored
 categories: the season so far once it has started (ModelFeatures/build_season_stats.py and the goalie
@@ -68,6 +68,11 @@ STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": 
 # A row's look by its tags: a recommended action, an injury status, greyed (locked, empty).
 ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "locked": {"fg": "#6b7280"}, "empty": {"fg": "#9ca3af"},
               **{status: {"bg": colour} for status, colour in STATUS_COLOURS.items()}}
+
+
+# Columns the Roster and Free agents tabs leave out of the shared player columns.
+ROSTER_HIDDEN = {"per_game", "plays_tonight", "plan", "where"}
+FREE_AGENTS_HIDDEN = {"plan", "where"}
 
 
 def utc_now() -> dt.datetime:
@@ -149,8 +154,12 @@ class PlanWindow:
                           ("rate", "Rate (pts/g)", 90), ("per_game", "Tonight's proj.", 100),
                           ("plays_tonight", "Plays tonight", 95), ("games_left", "Games left", 80),
                           ("where", "", 90), ("plan", "Recommended", 110)]
-        self.roster = self._table("Roster", player_columns + stat_columns)
-        self.free_agents = self._table("Free agents", player_columns + stat_columns, sortable=True)
+        # The roster you hold: no tonight columns, no lineup/bench/IR column, no recommended action.
+        self.roster = self._table("Roster", [c for c in player_columns + stat_columns
+                                             if c[0] not in ROSTER_HIDDEN])
+        self.free_agents = self._table("Free agents", [c for c in player_columns + stat_columns
+                                                       if c[0] not in FREE_AGENTS_HIDDEN],
+                                       sortable=True)
         self._build_matchup()
         body.add(self._build_sidebar(body), weight=1)
 
@@ -378,9 +387,12 @@ class PlanWindow:
             place = ("IR" if r["on_ir"] else "lineup" if r["in_lineup"] else "bench") if where else \
                     ("on waivers" if r["on_waivers"] else "")
             tags = ("plan",) if r.get("plan") else (r["status"],) if r["status"] in STATUS_COLOURS else ()
-            rows.append(((r["player"], r["positions"], r["status"] or "", _num(r["rate"]), _num(r["per_game"]),
-                          "" if r["plays_tonight"] is None else f"{r['plays_tonight']:.0%}", r["games_left"], place,
-                          _action(r.get("plan")), *self._stats(r.get("stats"))), tags))
+            cells = {"player": r["player"], "positions": r["positions"], "status": r["status"] or "",
+                     "rate": _num(r["rate"]), "per_game": _num(r["per_game"]),
+                     "plays_tonight": "" if r["plays_tonight"] is None else f"{r['plays_tonight']:.0%}",
+                     "games_left": r["games_left"], "where": place, "plan": _action(r.get("plan")),
+                     **dict(zip(self.stat_keys, self._stats(r.get("stats"))))}
+            rows.append((tuple(cells[k] for k in table.keys), tags))
         table.set_rows(rows, **sort)
 
     def _tab_of(self, table):
