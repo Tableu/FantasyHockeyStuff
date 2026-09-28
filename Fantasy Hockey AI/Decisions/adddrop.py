@@ -33,6 +33,7 @@ import math
 from dataclasses import dataclass
 
 import valuation
+import weekplan
 
 log = logging.getLogger("adddrop")
 
@@ -90,6 +91,11 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
     pool = [p for p in view.free_agents()
             if not view.on_waivers(p) or not math.isinf(params.claim_premium)]
     pool = [p for p in pool if p not in reserved]
+    # An injured free agent is a candidate only if he is expected back by the middle of the
+    # window (weekplan.long_absence); the window prices him from his return. (Skipping every
+    # injured player, 2026-09-27: +0.01 +/- 0.25 pts/wk, win -0.010 +/- 0.005.)
+    pool = [p for p in pool
+            if not weekplan.long_absence(view, p, view.nights_through(p, params.horizon_weeks))]
     forward = {p: valuation.player_value(view, p, params.horizon_weeks, params.rate_source)
                for p in pool + roster}
     candidates = sorted((p for p in pool if forward[p] > 0.0),

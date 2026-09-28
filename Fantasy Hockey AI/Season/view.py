@@ -62,7 +62,7 @@ class SlateView:
                  opponent_index, my_week_points, opponent_week_points,
                  decision_points=None, rate_estimate=None, ros_estimate=None, injured=None,
                  goalie_draw_column=None, future_draws=None, phase="regular", alive=True,
-                 on_bye=False, week_weight_mode="flat"):
+                 on_bye=False, week_weight_mode="flat", returns=None):
         self.day = pd.Timestamp(day)
         self.week = week
         self.config = config
@@ -110,6 +110,10 @@ class SlateView:
         # {player_id: rest-of-season points per team game}, from the latest rest-of-season row at
         # or before today, out of a build that held this season out. Empty unless the run has it.
         self.ros_estimate = ros_estimate or {}
+        # {player_id: the date an injured player is expected back} -- his injury type's typical
+        # remaining absence (ModelFeatures/build_injury_absence.py), in his team's games. Windows
+        # count his games from then; a player not in it is out tonight only, as before.
+        self.returns = returns or {}
         self._state = state
 
     # ---------- the manager's own holdings ----------
@@ -147,6 +151,17 @@ class SlateView:
 
     def startable(self, players) -> list:
         return [p for p in players if self.available(p)]
+
+    def expected_return(self, player_id):
+        """The date an injured player is expected back, or None (healthy, or not estimated)."""
+        return self.returns.get(int(player_id))
+
+    def out_on(self, player_id, night) -> bool:
+        """Whether he is expected to miss `night`: tonight's report, or before his return."""
+        if night == self.day and player_id in self.unavailable:
+            return True
+        back = self.returns.get(int(player_id))
+        return back is not None and night < back
 
     def ir_eligible(self) -> set:
         """On this harness, IR eligibility is an injury spell today. The live snapshot job would
@@ -345,3 +360,25 @@ class SlateView:
                 points[int(row.player_id)] = float(
                     getattr(row, self.p_start_column) * row.expected_line)
         return points
+
+
+def expected_returns(injured, type_of, absence, nhl_team, calendar, day) -> dict:
+    """{player: expected return date} for each injured player: his injury type group's typical
+    remaining absence (`absence`: {group: games}, key -1 for an unknown type) counted in his team's
+    games from `day`. A player with no team has none (out tonight only, as before)."""
+    out = {}
+    fallback = absence.get(-1)
+    day = pd.Timestamp(day)
+    for player_id in injured:
+        team = nhl_team.get(player_id)
+        if team is None:
+            continue
+        missed = absence.get(type_of.get(player_id, -1), fallback)
+        if missed is None:
+            continue
+        games = calendar.team_days(team, day, None)
+        missed = int(round(missed))
+        out[int(player_id)] = (games[missed] if missed < len(games)
+                               else (games[-1] if games else day) + pd.Timedelta(days=1))
+    return out
+

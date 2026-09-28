@@ -68,10 +68,32 @@ def player_status(cursor, at: dt.datetime) -> dict:
     return {r.PlayerID: (r.Status, r.TeamID, bool(r.GameTimeDecision)) for r in cursor.fetchall()}
 
 
-def status_frame(status: dict) -> pd.DataFrame:
-    """`player_status` as the table build_tonight.py writes (tonight_{date}_status.parquet)."""
-    return pd.DataFrame([(p, st, t, g) for p, (st, t, g) in status.items()],
-                        columns=["player_id", "status", "team_id", "game_time_decision"])
+def injury_parts(cursor, at: dt.datetime) -> dict:
+    """{PlayerID: the injury's body part as reported} -- Fleaflicker's Detail ("Hip",
+    "Lower-body") when it gives one, else ESPN's second field ("IR | Hip | ..."); the live plan maps
+    it to an injury type group (ModelFeatures/build_injury_absence.py) for his expected return."""
+    cursor.execute("""
+        SELECT x.PlayerID, src.SourceName, x.Detail
+        FROM (SELECT i.*, r.SourceID, ROW_NUMBER() OVER (PARTITION BY r.SourceID, i.PlayerID
+                                                         ORDER BY r.SnapshotAt DESC) AS rn
+              FROM Live.InjuryStatus i JOIN Live.SnapshotRuns r ON r.SnapshotRunID = i.SnapshotRunID
+              WHERE r.SnapshotAt <= ? AND i.PlayerID IS NOT NULL) x
+        JOIN Injuries.Sources src ON src.SourceID = x.SourceID
+        WHERE x.rn = 1 AND x.Detail IS NOT NULL AND x.MappedStatus <> 'ACTIVE'""", at)
+    parts: dict = {}
+    for r in cursor.fetchall():
+        part = r.Detail.split("|")[1].strip() if "|" in r.Detail else r.Detail.strip()
+        if part and (r.SourceName == "Fleaflicker" or r.PlayerID not in parts):
+            parts[r.PlayerID] = part
+    return parts
+
+
+def status_frame(status: dict, parts: dict | None = None) -> pd.DataFrame:
+    """`player_status` as the table build_tonight.py writes (tonight_{date}_status.parquet), with
+    each injured player's reported body part (`injury_parts`)."""
+    parts = parts or {}
+    return pd.DataFrame([(p, st, t, g, parts.get(p)) for p, (st, t, g) in status.items()],
+                        columns=["player_id", "status", "team_id", "game_time_decision", "injury"])
 
 
 def line_charts(cursor, at: dt.datetime) -> dict:
@@ -233,4 +255,4 @@ def build(cursor, game_date: dt.date, at: dt.datetime) -> dict:
              game_date, at, len(games), len(table), len(goalie_rows),
              dict(pd.Series([c["lineup_source"] for c in context_rows]).value_counts()))
     return {"skaters": table, "goalies": goalie_rows, "context": pd.DataFrame(context_rows),
-            "questionable": questionable, "status": status_frame(status)}
+            "questionable": questionable, "status": status_frame(status, injury_parts(cursor, at))}

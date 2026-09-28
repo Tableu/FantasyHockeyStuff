@@ -364,6 +364,7 @@ class LiveRunner:
         # Skaters' rest-of-season rate from the preseason board; goalies' from their projected
         # share of their team's remaining starts x the league-average line (goalie_ros).
         ros_estimate = {**self.ros_seed, **self.goalie_ros()}
+        returns = self.expected_returns(injured, status, nhl_team)
         rate_estimate.update(latest_rates(self.day, self.scoreset, self.goalie_line_mean))
         decision_points = self._draws(skaters, goalies)
 
@@ -383,7 +384,7 @@ class LiveRunner:
                 decision_points=decision_points, goalie_draw_column="p_start_model", future_draws=None,
                 phase=phase, alive=True, on_bye=False,
                 week_weight_mode=self.strategy.playoff_week_weight,
-                rate_estimate=rate_estimate, ros_estimate=ros_estimate)
+                rate_estimate=rate_estimate, ros_estimate=ros_estimate, returns=returns)
 
         before = copy.deepcopy(state.teams[snapshot.me].__dict__)
         # The league as it stands, kept apart: the window shows the roster and tonight's lineup
@@ -407,6 +408,25 @@ class LiveRunner:
                                        manager_now.accepts, manager_now._fieldable, shortlist=OPTIONS_PRICED)
         return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
                               state_now, lineup_now, options)
+
+    def expected_returns(self, injured, status, nhl_team) -> dict:
+        """{injured player: expected return date}: his reported body part's injury type group and
+        its typical remaining absence, from history only (ModelFeatures/build_injury_absence.py;
+        ESPN's own return dates are not used until measured -- plans/injury-absence.md step 4)."""
+        table_path = paths.FEATURES_DIR / f"injury_absence_{self.season}.parquet"
+        types_path = paths.FEATURES_DIR / f"injury_types_{self.season}.parquet"
+        if not table_path.exists() or not types_path.exists():
+            return {}
+        table = pd.read_parquet(table_path)
+        absence = dict(zip(table["InjuryTypeGroup"].astype(int), table["remaining"].astype(float)))
+        norm = lambda text: " ".join(str(text).lower().replace("-", " ").split())
+        types = pd.read_parquet(types_path)
+        group_of = dict(zip(types["InjuryType"].map(norm), types["InjuryTypeGroup"].astype(int)))
+        parts = (dict(zip(status["player_id"].astype(int), status["injury"]))
+                 if "injury" in status.columns else {})
+        type_of = {p: group_of.get(norm(parts[p]), -1) for p in injured if parts.get(p)}
+        return view_module.expected_returns(injured, type_of, absence, nhl_team, self.calendar,
+                                            pd.Timestamp(self.day))
 
     def goalie_ros(self) -> dict:
         """{goalie: rest-of-season points per team game} from today's (or the latest earlier)

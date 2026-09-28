@@ -88,9 +88,12 @@ class RosterNights:
         return value
 
     def _solve(self, players, night) -> float:
+        # Out tonight by the report, and on any night before his expected return (view.returns).
+        out_on = getattr(self.view, "out_on", None)
         today = night == self.view.day
         startable = {p: self.values[p] for p in players
-                     if not (today and p in self.view.unavailable)}
+                     if not (out_on(p, night) if out_on is not None
+                             else today and p in self.view.unavailable)}
         if not startable:
             return 0.0
         return slots_module.assign_value(self.slot_order, startable, self.eligibility,

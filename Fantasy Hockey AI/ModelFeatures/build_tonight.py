@@ -55,7 +55,8 @@ def main():
     files = output_paths(game_date)
     if not out:
         # No games: still today's injury report, which the day's IR moves and pickups read.
-        tonight.status_frame(tonight.player_status(cursor, at)).to_parquet(files["status"], index=False)
+        tonight.status_frame(tonight.player_status(cursor, at), tonight.injury_parts(cursor, at)).to_parquet(
+            files["status"], index=False)
         log.info("no games: wrote %s only", files["status"].name)
         return
     out["skaters"].to_parquet(files["skaters"], index=False)

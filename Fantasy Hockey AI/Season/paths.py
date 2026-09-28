@@ -137,6 +137,13 @@ def holdout_predictions(season: str, variant: str = "A") -> Path:
     return PROJECTIONS_REPORTS / f"predictions_{variant}_{season}.parquet"
 
 
+def injury_absence(season: str) -> tuple:
+    """(typical remaining absence by injury type group, the season's spells) --
+    ModelFeatures/build_injury_absence.py --build."""
+    return (FEATURES_DIR / f"injury_absence_{season}.parquet",
+            FEATURES_DIR / f"injury_spells_{season}.parquet")
+
+
 def goalie_ros(season: str) -> Path:
     """Each goalie's projected start share by day (Projections/goalie_workload.py --build)."""
     return PROJECTIONS_REPORTS / f"goalie_ros_{season}.parquet"

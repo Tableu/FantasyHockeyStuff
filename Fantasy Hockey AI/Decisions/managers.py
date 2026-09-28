@@ -186,7 +186,9 @@ class Manager:
             have = self._fillable(roster, eligibility)
             if have >= need:
                 break
-            pool = sorted((p for p in view.free_agents() if not view.on_waivers(p)),
+            # A player reported out cannot fill the slot, so he repairs nothing.
+            pool = sorted((p for p in view.free_agents()
+                           if not view.on_waivers(p) and p not in view.injured),
                           key=lambda p: (-value(p), p))
             move = None
             for incoming in pool:

@@ -48,6 +48,19 @@ import valuation
 
 log = logging.getLogger("weekplan")
 
+def long_absence(view, player_id, nights) -> bool:
+    """Whether an injured player is out for most of a window (`nights`, his team's nights in it):
+    expected back after its middle night -- the user's rule, 2026-09-27 (plans/injury-absence.md).
+    Against skipping every injured player: 2024-25, strategy-espn-la, 32 drafts, +0.51 +/- 0.34
+    pts/wk, win +0.002 +/- 0.008 -- neutral, kept as the user's rule."""
+    if player_id not in view.injured:
+        return False
+    back = view.expected_return(player_id)
+    if back is None:
+        return True                     # injured with no estimate: as before, skipped
+    return not nights or back > nights[len(nights) // 2]
+
+
 # Goalie rentals never drop a goalie projected to start this share of his team's remaining games.
 STARTER_SHARE = 0.5
 
@@ -111,8 +124,10 @@ class WeekPlanner:
         # (fresh half +1.50 +/- 0.79), win +0.010 +/- 0.009, ~10 more moves a season -- priced on
         # tonight's simulated line below; on P(start) x the average line alone, +0.26 +/- 0.60.
         self.goalies = params.goalies
-        free = [p for p in view.free_agents()
-                if self.goalies or not streaming.is_goalie(eligibility, p)]
+        # An injured free agent is rented only if he is expected back by the middle of the rest
+        # of the week (long_absence); before his return he counts for nothing either way.
+        free = [p for p in view.free_agents() if not long_absence(view, p, view.nights_through(p, 0))
+                and (self.goalies or not streaming.is_goalie(eligibility, p))]
         self.claimable = [p for p in free if view.on_waivers(p)] if params.claim else []
         self.addable = [p for p in free if not view.on_waivers(p)]
         pool = self.addable + self.claimable
@@ -233,7 +248,7 @@ class WeekPlanner:
     def night_value(self, night, held) -> float:
         playing = sorted(p for p in held if (night in self.nights_of(p)
                                              or night in self.next_nights_of(p))
-                         and not (night == self.today and p in self.view.unavailable))
+                         and not self.view.out_on(p, night))
         key = (night, tuple(playing))
         if key not in self._memo:
             values = {p: (self.tonight[p] if night == self.today and p in self.tonight
@@ -386,6 +401,7 @@ class WeekPlanner:
             done.append({"day": self.today, "kind": "rental claim" if m["kind"] == "claim" else "rental",
                          "incoming": incoming, "outgoing": outgoing, "predicted_gain": m["gain"],
                          "for_next_week": m.get("for_next_week", False),
+                         "incoming_out_long": long_absence(self.view, incoming, self.nights_of(incoming)),
                          "bar": m["bar"], "drop_cost": m["drop_cost"],
                          "spot": outgoing in self.spots,
                          "reserve": streaming.reserve_today(self.view, self.params),

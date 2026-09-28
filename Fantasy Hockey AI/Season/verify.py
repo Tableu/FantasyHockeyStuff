@@ -18,7 +18,9 @@ season-level result rather than as an error:
     ir              a healthy player left on IR, an injured one activated on a dark night, or an
                     activation's forced drop spending a move
     streaming       rung 7 at zero spots differing from rung 5, or a rental breaking the reserve,
-                    its drop-cost floor, the spot rule or the weekly budget
+                    its drop-cost floor, the spot rule or the weekly budget, or adding a player out long
+    injury returns  an injured player with no expected return, one before today or read off his
+                    spell's end, or a window counting him before it
     frozen rosters  a transacting team left short of its slots with a fix available (a goalie on IR)
     vor board       a draft board that read past draft day, or a VOR draft that leaves a roster short
     consensus board an external source published after the opener, a missing stat counted as zero,
@@ -442,6 +444,7 @@ def check_streaming() -> str:
             assert r["moves_left"] >= r["reserve"], f"a {mode} rental broke the reserve: {r}"
             assert r["predicted_gain"] > r["bar"] >= r["drop_cost"], f"a {mode} rental under its floor: {r}"
             assert r["outgoing"] is None or r["spot"], f"a {mode} rental dropped a non-spot player: {r}"
+            assert not r.get("incoming_out_long"), f"a {mode} rental added a player out long: {r}"
         weekly = pd.DataFrame(season.state.transactions).groupby(["team", "week"]).size()
         assert weekly.max() <= season.config.moves_per_week, f"a week went over budget ({mode})"
         counts[mode] = len(rentals)
@@ -463,6 +466,32 @@ def check_streaming() -> str:
             f"{counts['next-week']} next-week-pickup / {counts['goalie']} goalie-rental rentals, reserve, "
             f"floor, spot-only drops and the weekly budget all held; {counts['goalie drops']} goalies "
             f"dropped for rentals, none a starter")
+
+
+def check_injury_returns() -> str:
+    """Each injured player's expected return (ModelFeatures/build_injury_absence.py): every injured
+    player with a team gets one, never before today, from his current spell's TYPE -- the table
+    the engine reads carries no end -- and a window leaves him out before it, in from it."""
+    season, calendar = _small_season((2,))
+    day = calendar.days[60]
+    for d in calendar.days[:61]:
+        season.latest_team.update(season.nhl_team_by_day.get(d, {}))
+        season.injured_status.update(season.status_by_day.get(d, {}))
+    season.injured = {p for p, hurt in season.injured_status.items() if hurt}
+    known = season.data.get("injury_absence")
+    assert known is not None, "no injury absence table loaded"
+    assert not {"end_date", "EndDate", "GamesMissed"} & set(known["spells"].columns),         "the engine's spells carry their end: an expected return could read it"
+    returns = season._expected_returns(day)
+    with_team = [p for p in season.injured if season.latest_team.get(p) is not None]
+    assert with_team and all(p in returns for p in with_team), "an injured player has no return"
+    assert all(back >= day for back in returns.values()), "an expected return before today"
+    player, back = next((p, b) for p, b in sorted(returns.items()) if b > day)
+    v = view_module.SlateView.__new__(view_module.SlateView)
+    v.day, v.unavailable, v.returns = day, set(), returns
+    assert v.out_on(player, day) and not v.out_on(player, back), "a window ignores the return"
+    later = sorted(b for b in returns.values())
+    return (f"{len(season.injured)} injured on {day.date()}: {len(returns)} expected returns, "
+            f"median {pd.Series(later).sub(day).dt.days.median():.0f} days out; windows skip them until then")
 
 
 def check_frozen_rosters() -> str:
@@ -1331,6 +1360,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
+          ("injury returns", check_injury_returns),
           ("frozen rosters", check_frozen_rosters),
           ("vor board", check_vor_board), ("consensus board", check_consensus_board),
           ("draft lottery", check_draft_lottery), ("claims", check_claims),

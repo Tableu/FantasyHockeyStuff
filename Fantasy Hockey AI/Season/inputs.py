@@ -168,6 +168,23 @@ def load_ros(season: str):
     return out
 
 
+def load_injury_absence(season: str):
+    """{"absence": {type group: remaining games}, "spells": the season's spells (player, start,
+    type group)} -- the injury type a manager sees at a lock, never the spell's end. None when
+    not built."""
+    table_path, spells_path = paths.injury_absence(season)
+    if not table_path.exists() or not spells_path.exists():
+        log.info("no injury absence table for %s", season)
+        return None
+    table = pd.read_parquet(table_path)
+    spells = pd.read_parquet(spells_path)
+    spells["start_date"] = pd.to_datetime(spells["start_date"])
+    log.info("injury absence: %d type groups (fit %s), %d spells", len(table) - 1,
+             table["fit_seasons"].iloc[0], len(spells))
+    return {"absence": dict(zip(table["InjuryTypeGroup"].astype(int), table["remaining"].astype(float))),
+            "spells": spells.sort_values("start_date")}
+
+
 def load_goalie_ros(season: str):
     """Each goalie's projected share of his team's remaining starts, by day, as of that day's lock
     (Projections/goalie_workload.py). Optional: None when not built. Alone it moved nothing
@@ -346,6 +363,7 @@ def load_season(season: str, variant: str = "A") -> dict:
         "p_start": load_p_start(season),
         "ros": load_ros(season),
         "goalie_ros": load_goalie_ros(season),
+        "injury_absence": load_injury_absence(season),
     }
 
 

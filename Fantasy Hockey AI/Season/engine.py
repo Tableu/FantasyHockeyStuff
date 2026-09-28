@@ -18,6 +18,7 @@ solver, the draft rule, rung 3's estimator (`decisionlayer.py`). Everything else
 """
 
 import logging
+import os
 import sys
 from collections import defaultdict
 
@@ -243,6 +244,8 @@ class Season:
                 self.status_by_day[day][int(player_id)] = bool(hurt)
         self.injured_status = {}
         self.injured = set()
+        # Injured players' expected return dates, recomputed each day (view.expected_returns).
+        self.returns = {}
 
         # Naive goalie start share, which is all rung 3 has: appearances over team games to date.
         self.goalie_starts_to_date = defaultdict(float)
@@ -509,6 +512,18 @@ class Season:
         self._slate_cache = (day, frame, playing)
         return frame, playing
 
+    def _expected_returns(self, day) -> dict:
+        """Each injured player's expected return: his current spell's type (the latest spell that
+        began by today -- its type, never its end) and that type's typical remaining absence."""
+        known = self.data.get("injury_absence")
+        if known is None:
+            return {}
+        spells = known["spells"]
+        begun = spells[spells["start_date"] <= pd.Timestamp(day)]
+        type_of = dict(zip(begun["player_id"].astype(int), begun["type_group"].astype(int)))
+        return view_module.expected_returns(self.injured, type_of, known["absence"],
+                                            self.latest_team, self.calendar, day)
+
     def _view_for(self, team_index, day, week, opponent, history, goalie_projections):
         projections, playing = self._slate_for(day)
         return view_module.SlateView(
@@ -528,7 +543,7 @@ class Season:
             future_draws=(lambda _d=day, _w=week: self.future_draws(_d, _w)),
             **self._season_shape(team_index, week, opponent),
             rate_estimate=self.latest_rate,
-            ros_estimate=self.latest_ros)
+            ros_estimate=self.latest_ros, returns=self.returns)
 
     # ---------- the loop ----------
 
@@ -589,6 +604,7 @@ class Season:
             # Tonight's lockout report updates the players it lists; everyone else keeps his last.
             self.injured_status.update(self.status_by_day.get(day, {}))
             self.injured = {p for p, hurt in self.injured_status.items() if hurt}
+            self.returns = self._expected_returns(day)
 
             # A claim whose drop has left the roster asks its manager again, with today's view.
             def redrop(team_index, player_id, _day=day, _week=week):
