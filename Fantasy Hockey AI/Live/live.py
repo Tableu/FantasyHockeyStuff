@@ -64,8 +64,8 @@ DECISION_SIMS = 400
 FREE_AGENTS_SHOWN = 60
 OPTIONS_PRICED = 25        # free agents the options price on the roster (the rule itself prices 10)
 OPTIONS_SHOWN = 15         # pickups listed, each with its best drop
-# Week plans shown beside the one made, each adding a different player first (weekplan.run):
-# ten plans in all, where that many first pickups are worth a move.
+# Week plans shown beside the one made, each built around a different pickup (weekplan.run):
+# ten plans in all, where that many are worth a move.
 WEEK_ALTERNATIVES = 9
 # A logged move's kind as the plan names it (managers.repair_roster, adddrop, streaming).
 MOVE_KINDS = {"repair": "Repair", "add": "Upgrade", "claim": "Claim", "rental": "Rental",
@@ -634,7 +634,7 @@ class LiveRunner:
                              "edge": round(m["gain"] - m["bar"], 1)})
             return rows
         week_plan = week_rows(manager.plan.week_plan)
-        # The plan made (A) and the alternatives (B, C, ...), each adding a different player first.
+        # The plan made (A) and the alternatives (B, C, ...), each built around a different pickup.
         week_plans = [{"label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
                        "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
                        "moves": week_rows(w["moves"])}
@@ -782,10 +782,10 @@ def render(plan: dict) -> str:
         lines.append("")
         if len(plan.get("week_plans", [])) > 1:
             a = plan["week_plans"][0]
-            lines += [f"Plan A, above, adds {a['first']} first: {a['week_gain']:+.1f} lineup points this week. "
-                      f"The other first pickups, each with the rest of the week planned around it (in the "
+            lines += [f"Plan A, above, starts with {a['first']}: {a['week_gain']:+.1f} lineup points this week. "
+                      f"Other plans, each built around a different pickup with the rest of the week planned around it (in the "
                       f"plan window, click a plan for its moves):", "",
-                      "| Plan | Day | Add first | Drop | Week | vs A | Moves |", "|---|---|---|---|---|---|---|"]
+                      "| Plan | Day | Built around | Drop | Week | vs A | Moves |", "|---|---|---|---|---|---|---|"]
             for w in plan["week_plans"][1:]:
                 m = next(m for m in w["moves"] if m["add"] == w["first"])
                 lines.append(f"| {w['label']} | {pd.Timestamp(m['day']).strftime('%a %b %d')} | {m['add']} | "

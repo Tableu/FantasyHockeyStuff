@@ -32,8 +32,9 @@ make the moves on the platform yourself.
     Week         the week's streaming plan (strategy mode 'week', Decisions/weekplan.py): every rental
                  it would make this week, by day, with its gain, bar and edge -- today's are the
                  Moves; the later ones are planned again on every run. One row per plan: plan A
-                 (the one made) and up to nine others that each add a different player first,
-                 with what the whole plan adds this week; click a plan to see the rest of it
+                 (the one made) and up to nine others, each built around a different pickup (its
+                 row is that move), with what the whole plan adds this week; click a plan to see
+                 the rest of it
     Roster       every player you hold now: status, rate, rest-of-season points, games left this
                  week and his stats (sortable); injured players coloured by status
     Free agents  the best available now by rate, with rest-of-season points (rate x his team's games
