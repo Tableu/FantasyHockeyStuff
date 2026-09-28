@@ -86,16 +86,19 @@ def run(view, params: streaming.StreamParams, horizon, source, slot_order, accep
     plan = planner.plan(record=alternatives > 0)
     plans = [(plan, planner.first_pickup(plan))]
     if plan and alternatives > 0:
-        # Its first pickup day, and the best pickups that day by their value as an opening move.
-        day = plan[0]["day"]
+        # The best opening moves on ANY night, each plan built from its own: nothing earlier than
+        # its opening's day, so he is the player it adds first, and none of the other plans' firsts.
+        # (Openings once had to fall on plan A's first pickup day: a day with two worthwhile
+        # pickups showed two plans while a dozen good openings sat on the nights around it.)
         firsts = {plans[0][1]}
         for opening in planner.openings:
             if len(plans) > alternatives:
                 break
             incoming = opening[1][-1]["incoming"]
-            if opening[4] != day or incoming in firsts:
+            if incoming in firsts:
                 continue
-            alternative = planner.plan(first=opening, banned=firsts - {incoming})
+            alternative = planner.plan(first=opening, banned=firsts - {incoming},
+                                       not_before=opening[4])
             plans.append((alternative, incoming))
             firsts.add(incoming)
     # Only the first plan is made. Making the best of 3 by week total instead measured nothing
@@ -292,10 +295,11 @@ class WeekPlanner:
                    <= self.moves_left - self.reserve_on(later)
                    for later in self.move_days if later >= day)
 
-    def plan(self, first=None, record=False, banned=()) -> list:
+    def plan(self, first=None, record=False, banned=(), not_before=None) -> list:
         """Greedy insertion, from an empty plan -- or from `first`, an opening move chosen by the
-        caller (an alternative plan), never adding a `banned` player. With `record`, the first
-        pass keeps each player's best opening move per day in `self.openings`, best first."""
+        caller (an alternative plan), never adding a `banned` player nor moving before
+        `not_before`. With `record`, the first pass keeps each player's best opening move per day
+        in `self.openings`, best first."""
         moves, spent = [], {}
         open_spots = self.view.roster_room()
         if first is not None:
@@ -309,7 +313,8 @@ class WeekPlanner:
             dropped = {m["outgoing"]: m for m in moves if m["outgoing"] is not None}
             picked_up = {m["incoming"]: m["effective"] for m in moves}
             for incoming, day, effective in self.candidates:
-                if incoming in added or incoming in dropped or incoming in banned:
+                if (incoming in added or incoming in dropped or incoming in banned
+                        or (not_before is not None and day < not_before)):
                     continue
                 kind = "claim" if incoming in self.claimable else "add"
                 before = self.roster_at(self.roster, moves, effective)
