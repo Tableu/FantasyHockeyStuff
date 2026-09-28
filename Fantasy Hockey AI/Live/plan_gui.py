@@ -34,8 +34,8 @@ make the moves on the platform yourself.
                  Moves; the later ones are planned again on every run. One row per plan: plan A
                  (the one made) and up to nine others that each add a different player first,
                  with what the whole plan adds this week; click a plan to see the rest of it
-    Roster       every player you hold now: status, rate, games left this week and his stats
-                 (sortable); injured players coloured by status
+    Roster       every player you hold now: status, rate, rest-of-season points, games left this
+                 week and his stats (sortable); injured players coloured by status
     Free agents  the best available now by rate, with rest-of-season points (rate x his team's games
                  left in the fantasy season; sortable); injured players coloured by status
 
@@ -78,7 +78,7 @@ ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "empty": {"fg": "#9ca3af"},
 
 
 # Columns the Roster and Free agents tabs leave out of the shared player columns.
-ROSTER_HIDDEN = {"per_game", "plays_tonight", "plan", "where", "ros_points"}
+ROSTER_HIDDEN = {"per_game", "plays_tonight", "plan", "where"}
 FREE_AGENTS_HIDDEN = {"plan", "where"}
 
 
