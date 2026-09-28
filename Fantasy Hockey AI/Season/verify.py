@@ -406,6 +406,9 @@ def check_ir() -> str:
             f"0 while injured, {forced} forced drops, no healthy player left on IR")
 
 
+STARTER_SHARE = 0.5         # a goalie projected to start this share of his team's rest is a starter
+
+
 def check_streaming() -> str:
     """Rung 7 (section 10): with zero streaming spots it is rung 5 seat for seat; with spots, no
     rental breaks the reserve, clears less than its drop cost, drops anyone but a designated spot,
@@ -442,9 +445,24 @@ def check_streaming() -> str:
         weekly = pd.DataFrame(season.state.transactions).groupby(["team", "week"]).size()
         assert weekly.max() <= season.config.moves_per_week, f"a week went over budget ({mode})"
         counts[mode] = len(rentals)
+        if mode == "goalie":
+            # A starter is never rented away: no goalie projected to start half or more of his
+            # team's remaining games (Projections/goalie_workload.py) is a rental's drop.
+            shares = season.data.get("goalie_ros")
+            assert shares is not None, "goalie rest-of-season rows not loaded"
+            shares = shares.sort_values("game_date")
+            eligibility = season.state.eligibility
+            dropped = [r for r in rentals if r["outgoing"] is not None
+                       and "G" in eligibility.get(r["outgoing"], ())]
+            for r in dropped:
+                known = shares[(shares["player_id"] == r["outgoing"]) & (shares["game_date"] <= r["day"])]
+                share = float(known["start_share"].iloc[-1]) if len(known) else 0.0
+                assert share < STARTER_SHARE, f"a starter ({share:.0%} of starts) rented away: {r}"
+            counts["goalie drops"] = len(dropped)
     return (f"k=0 identical to rung 5; k=2: {counts['daily']} daily / {counts['week']} week-mode / "
             f"{counts['next-week']} next-week-pickup / {counts['goalie']} goalie-rental rentals, reserve, "
-            f"floor, spot-only drops and the weekly budget all held")
+            f"floor, spot-only drops and the weekly budget all held; {counts['goalie drops']} goalies "
+            f"dropped for rentals, none a starter")
 
 
 def check_frozen_rosters() -> str:

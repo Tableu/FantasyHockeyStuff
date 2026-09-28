@@ -48,6 +48,9 @@ import valuation
 
 log = logging.getLogger("weekplan")
 
+# Goalie rentals never drop a goalie projected to start this share of his team's remaining games.
+STARTER_SHARE = 0.5
+
 # `next_week` prices next week's nights only for a move made TODAY on the week's last LATE_DAYS
 # days with the week won (z >= CLEAR_WIN_Z, P(win) >= 0.9; the z needs `gate`), and that move's
 # nights this week count for nothing. It is off: every version tried lost (2024-25, live strategy,
@@ -115,6 +118,15 @@ class WeekPlanner:
         pool = self.addable + self.claimable
         self.spots = streaming.spots(view, params, horizon, source, pool, eligibility,
                                      goalies=self.goalies)
+        if self.goalies:
+            # A starter is never rented away, even when a free agent projects as well: a goalie
+            # projected to start STARTER_SHARE of his team's remaining games (his rest-of-season
+            # rate over the league-average line; Projections/goalie_workload.py) keeps his spot.
+            lines = view.goalie_projections["expected_line"]
+            line = float(lines.iloc[0]) if len(lines) else None
+            if line:
+                self.spots = [p for p in self.spots if not streaming.is_goalie(eligibility, p)
+                              or (view.ros_rate(p) or 0.0) < STARTER_SHARE * line]
         self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True)
         self.horizon = horizon
 

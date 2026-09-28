@@ -168,6 +168,22 @@ def load_ros(season: str):
     return out
 
 
+def load_goalie_ros(season: str):
+    """Each goalie's projected share of his team's remaining starts, by day, as of that day's lock
+    (Projections/goalie_workload.py). Optional: None when not built. Alone it moved nothing
+    measurable (2024-25, strategy-espn-la, 16 drafts: -0.66 +/- 1.13 pts/wk); it is what lets a
+    goalie's value tell a starter from a backup, which goalie rentals need."""
+    path = paths.goalie_ros(season)
+    if not path.exists():
+        log.info("no goalie rest-of-season rows at %s", path)
+        return None
+    table = pd.read_parquet(path)
+    table["game_date"] = pd.to_datetime(table["game_date"])
+    log.info("goalie rest-of-season: %d rows, %d goalies (%s)", len(table),
+             table["player_id"].nunique(), path.name)
+    return table
+
+
 def load_external_projections(season: str, opener, undated: str) -> pd.DataFrame:
     """The external sources' preseason projections for `season`, one row per (source, player).
 
@@ -329,6 +345,7 @@ def load_season(season: str, variant: str = "A") -> dict:
         "availability": load_availability(season, variant),
         "p_start": load_p_start(season),
         "ros": load_ros(season),
+        "goalie_ros": load_goalie_ros(season),
     }
 
 

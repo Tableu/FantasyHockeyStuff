@@ -291,6 +291,14 @@ class Season:
                                   "rate": per_game})
             for day, rows in frame.groupby("game_date"):
                 self.ros_by_day[pd.Timestamp(day)] = dict(zip(rows["player_id"], rows["rate"]))
+        # Goalies: projected share of his team's remaining starts x the league-average line
+        # (Projections/goalie_workload.py) -- workload, not quality, which does not project.
+        goalie_ros = self.data.get("goalie_ros")
+        if goalie_ros is not None and len(goalie_ros):
+            for day, rows in goalie_ros.groupby("game_date"):
+                self.ros_by_day.setdefault(pd.Timestamp(day), {}).update(
+                    zip(rows["player_id"].astype(int),
+                        rows["start_share"].astype(float) * self.goalie_line_mean))
 
         # Opening-week seed for both rates, for the same reason `latest_team` is seeded: both fill
         # only once a player's team has played, so on the first nights a star whose club had not

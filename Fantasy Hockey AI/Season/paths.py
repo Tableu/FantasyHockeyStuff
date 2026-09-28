@@ -137,6 +137,11 @@ def holdout_predictions(season: str, variant: str = "A") -> Path:
     return PROJECTIONS_REPORTS / f"predictions_{variant}_{season}.parquet"
 
 
+def goalie_ros(season: str) -> Path:
+    """Each goalie's projected start share by day (Projections/goalie_workload.py --build)."""
+    return PROJECTIONS_REPORTS / f"goalie_ros_{season}.parquet"
+
+
 def ros_predictions(season: str, horizon: str = "season") -> Path:
     """Rest-of-season projections from a build that held `season` out.
 

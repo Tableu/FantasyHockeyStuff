@@ -7,7 +7,8 @@ window). Nothing here is scheduled -- a pass runs when one of them asks.
                        merged status re-exported for the draft window's Status column
                        (ModelFeatures/build_players.py)
     tonight(day)       tonight's rows and projections (ModelFeatures/build_tonight.py, then
-                       Projections/project_tonight.py); on a day with no games, the injury report only
+                       Projections/project_tonight.py) and every goalie's projected start share
+                       (Projections/goalie_workload.py); on a day with no games, no projections
     read_league(...)   the league as its platform shows it now (or a snapshot file)
     plan(...)          the shipped manager's plan (live.LiveRunner)
     save(...)          reports/<league>/plans/plan_{date}_{stem}.md + .json + plan_latest.md
@@ -72,6 +73,10 @@ def tonight(day: dt.date, echo=print) -> bool:
     """Tonight's rows and projections; False on a day with no games, which still gets its injury
     report and a plan (roster, IR, pickups -- no lineup)."""
     _run(["build_tonight.py", "--date", day.isoformat()], MODEL_FEATURES, echo, "tonight's rows")
+    # Every goalie's projected share of his team's remaining starts, as of today (the rest-of-
+    # season goalie value; also on a day with no games, for the upgrade and drop decisions).
+    _run(["goalie_workload.py", "--build", "--season", live.season_of(day), "--date", day.isoformat()],
+         paths.PROJECTIONS_DIR, echo, "goalie workload")
     if not (live.STATUS_DIR / f"tonight_{day.isoformat()}_skaters.parquet").exists():
         echo(f"no regular-season NHL games on {day.isoformat()}: planning moves, no lineup")
         return False

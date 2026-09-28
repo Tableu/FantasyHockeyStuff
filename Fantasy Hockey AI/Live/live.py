@@ -361,6 +361,9 @@ class LiveRunner:
             "p_start_model": goalies["p_start"].to_numpy(),
             "expected_line": self.goalie_line_mean, "line_sd": self.goalie_line_sd})
         rate_estimate = dict(self.seed_rate)
+        # Skaters' rest-of-season rate from the preseason board; goalies' from their projected
+        # share of their team's remaining starts x the league-average line (goalie_ros).
+        ros_estimate = {**self.ros_seed, **self.goalie_ros()}
         rate_estimate.update(latest_rates(self.day, self.scoreset, self.goalie_line_mean))
         decision_points = self._draws(skaters, goalies)
 
@@ -380,7 +383,7 @@ class LiveRunner:
                 decision_points=decision_points, goalie_draw_column="p_start_model", future_draws=None,
                 phase=phase, alive=True, on_bye=False,
                 week_weight_mode=self.strategy.playoff_week_weight,
-                rate_estimate=rate_estimate, ros_estimate=self.ros_seed)
+                rate_estimate=rate_estimate, ros_estimate=ros_estimate)
 
         before = copy.deepcopy(state.teams[snapshot.me].__dict__)
         # The league as it stands, kept apart: the window shows the roster and tonight's lineup
@@ -404,6 +407,22 @@ class LiveRunner:
                                        manager_now.accepts, manager_now._fieldable, shortlist=OPTIONS_PRICED)
         return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
                               state_now, lineup_now, options)
+
+    def goalie_ros(self) -> dict:
+        """{goalie: rest-of-season points per team game} from today's (or the latest earlier)
+        goalie workload rows (Projections/goalie_workload.py, built by planpass.tonight): his
+        projected share of his team's remaining starts x the league-average line. Empty when
+        none are built -- goalies then fall back to their latest P(start), as before."""
+        path = paths.PROJECTIONS_REPORTS / f"goalie_ros_{self.season}.parquet"
+        if not path.exists():
+            return {}
+        rows = pd.read_parquet(path)
+        rows = rows[pd.to_datetime(rows["game_date"]) <= pd.Timestamp(self.day)]
+        if not len(rows):
+            return {}
+        rows = rows[rows["game_date"] == rows["game_date"].max()]
+        return {int(p): float(s) * self.goalie_line_mean
+                for p, s in zip(rows["player_id"], rows["start_share"])}
 
     def _state(self, snapshot, day) -> state_module.LeagueState:
         if len(snapshot.teams) != self.config.teams:
