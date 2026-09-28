@@ -37,7 +37,7 @@ with a consensus projection or a start that season, each candidate projects his 
 as a share of his current team's remaining games, as of the checkpoint:
 
     a  current     the latest fitted P(start) before the checkpoint, else the 50% prior
-    b  consensus   the preseason sources' games started / 82 (GS missing: games x the sources'
+    b  consensus   the preseason sources' games started / season length (GS missing: games x the sources'
                    GS/GP ratio), averaged over sources; 0 for a goalie none projects
     c  to-date     his starts / his team's games so far, else the 50% prior
     d  blend       (k x consensus + starts so far) / (k + team games so far): consensus early,
@@ -61,7 +61,6 @@ log = logging.getLogger("goalie_workload")
 
 CHECK_WEEKS = (0, 1, 3, 7, 11, 15, 19)     # opening day, then weeks 2, 4, 8, 12, 16, 20
 PRIOR = 0.5                                 # the P(start) prior a goalie with no history gets
-SEASON_GAMES = 82
 K_GRID = (0, 2, 5, 10, 15, 20, 30, 40, 60, 82, 120, 200)
 K = 15                                      # fitted on 2024-25, held out on 2025-26 (above)
 CANDIDATES = ("a_current", "b_consensus", "c_to_date", "d_blend", "e_blend_team")
@@ -69,21 +68,36 @@ CANDIDATES = ("a_current", "b_consensus", "c_to_date", "d_blend", "e_blend_team"
 
 # ---------- inputs ----------
 
+def source_season_games(external: pd.DataFrame) -> pd.Series:
+    """Each source's season length: the most games it projects for anyone -- 82 through 2025-26,
+    84 from 2026-27 (one 2026-27 source still projects 82). A source with no games column takes
+    the season's usual length."""
+    games = external.groupby("source")["games"].max().round()
+    usual = games.mode().iloc[0] if games.notna().any() else 82.0
+    return games.fillna(usual)
+
+
 def consensus_share(season: str) -> pd.DataFrame:
-    """Each goalie's preseason projected share of 82 starts, and his projected team."""
+    """Each goalie's preseason projected share of his team's starts, and his projected team.
+
+    A share is each source's games started over that source's own season length, averaged over
+    sources. (Until 2026-09-28 every source was divided by a fixed 82, which put 2026-27's
+    84-game projections 2.4% high.)"""
     x = pd.read_parquet(paths.FEATURES_DIR / f"external_projections_{season}.parquet")
+    length = source_season_games(x)
     g = x[x["is_goalie"].astype(bool)].copy()
     both = g.dropna(subset=["games", "games_started"])
     ratio = both["games_started"].sum() / both["games"].sum()
     g["gs"] = g["games_started"].fillna(g["games"] * ratio)
     g = g.dropna(subset=["gs"])
+    g["share"] = (g["gs"] / g["source"].map(length)).clip(upper=1.0)
     team = g.dropna(subset=["team_id"]).groupby("player_id")["team_id"].agg(lambda t: t.mode().iloc[0])
-    out = g.groupby("player_id")["gs"].mean().clip(upper=SEASON_GAMES).to_frame("consensus_gs")
-    out["consensus_share"] = out["consensus_gs"] / SEASON_GAMES
+    out = g.groupby("player_id")["share"].mean().to_frame("consensus_share")
+    out["consensus_gs"] = out["consensus_share"] * length.mode().iloc[0]
     out["consensus_team"] = team
-    log.info("%s consensus: %d goalies, %d sources, GS/GP ratio %.3f", season, len(out),
-             g["source"].nunique(), ratio)
-    return out
+    log.info("%s consensus: %d goalies, %d sources, GS/GP ratio %.3f, season lengths %s", season,
+             len(out), g["source"].nunique(), ratio, sorted(set(length.astype(int))))
+    return out[["consensus_gs", "consensus_share", "consensus_team"]]
 
 
 def load(season: str):

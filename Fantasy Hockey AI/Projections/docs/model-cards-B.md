@@ -12,31 +12,31 @@ These models project **stats**, not fantasy points -- no scoring system is assum
 
 | target | mean actual | mean predicted | MAE | best baseline MAE | Spearman | CRPS | PIT deviation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `shots` | 1.545 | 1.566 | 1.013 | 1.043 | 0.432 | 0.682 | 0.009 |
-| `hits` | 1.131 | 1.111 | 0.856 | 0.878 | 0.529 | 0.554 | 0.005 |
-| `blocks` | 0.787 | 0.827 | 0.728 | 0.732 | 0.405 | 0.442 | 0.019 |
-| `assists` | 0.290 | 0.284 | 0.399 | 0.399 | 0.270 | 0.214 | 0.004 |
-| `goals` | 0.171 | 0.164 | 0.264 | 0.266 | 0.259 | 0.139 | 0.004 |
-| `pim` | 0.484 | 0.426 | 0.742 | 0.773 | 0.145 | 0.423 | 0.048 |
+| `shots` | 1.546 | 1.557 | 1.012 | 1.050 | 0.432 | 0.682 | 0.006 |
+| `hits` | 1.136 | 1.109 | 0.856 | 0.887 | 0.531 | 0.555 | 0.005 |
+| `blocks` | 0.788 | 0.825 | 0.727 | 0.734 | 0.407 | 0.442 | 0.018 |
+| `assists` | 0.289 | 0.284 | 0.400 | 0.397 | 0.270 | 0.214 | 0.003 |
+| `goals` | 0.171 | 0.166 | 0.265 | 0.264 | 0.260 | 0.138 | 0.004 |
+| `pim` | 0.484 | 0.430 | 0.744 | 0.770 | 0.143 | 0.423 | 0.046 |
 
 ## P(plays)
 
 *Trained on 2023-24 + 2024-25, scored on held-out 2025-26 — **not** the deployed boosters (see the note at the top).*
 
-AUC 0.9886, Brier 0.0340, log loss 0.1140 against a base rate of 0.754. Reliability by decile of predicted probability:
+AUC 0.9887, Brier 0.0333, log loss 0.1130 against a base rate of 0.756. Reliability by decile of predicted probability:
 
 | predicted bin | n | mean predicted | observed rate |
 | --- | --- | --- | --- |
-| 0.0-0.1 | 35,217 | 0.019 | 0.0174 |
-| 0.1-0.2 | 3,043 | 0.1417 | 0.161 |
-| 0.2-0.3 | 1,236 | 0.2581 | 0.2508 |
-| 0.3-0.4 | 1,236 | 0.3247 | 0.3568 |
-| 0.4-0.5 | 260 | 0.4899 | 0.4808 |
-| 0.5-0.6 | 4,598 | 0.5825 | 0.5526 |
-| 0.6-0.7 | 2,470 | 0.6422 | 0.6498 |
-| 0.7-0.8 | 3,748 | 0.7397 | 0.7116 |
-| 0.8-0.9 | 7,752 | 0.8525 | 0.8123 |
-| 0.9-1.0 | 126,017 | 0.9907 | 0.9909 |
+| 0.0-0.1 | 36,480 | 0.0179 | 0.0203 |
+| 0.1-0.2 | 1,242 | 0.1667 | 0.1763 |
+| 0.2-0.3 | 1,996 | 0.2385 | 0.2415 |
+| 0.3-0.4 | 2,022 | 0.3572 | 0.36 |
+| 0.4-0.5 | 30 | 0.4545 | 0.7333 |
+| 0.5-0.6 | 2,173 | 0.5322 | 0.5108 |
+| 0.6-0.7 | 6,680 | 0.651 | 0.6645 |
+| 0.7-0.8 | 940 | 0.763 | 0.7266 |
+| 0.8-0.9 | 8,141 | 0.8559 | 0.8227 |
+| 0.9-1.0 | 127,769 | 0.9906 | 0.9906 |
 
 ## Ice time
 
@@ -44,9 +44,9 @@ AUC 0.9886, Brier 0.0340, log loss 0.1140 against a base rate of 0.754. Reliabil
 
 | target | mean actual | MAE | RMSE | Spearman |
 | --- | --- | --- | --- | --- |
-| `toi` | 992s | 108.2s | 143.3s | 0.868 |
-| `ev_toi` | 837s | 110.4s | 143.4s | 0.786 |
-| `pp_toi` | 85s | 46.2s | 69.6s | 0.775 |
+| `toi` | 992s | 108.1s | 143.2s | 0.868 |
+| `ev_toi` | 837s | 110.3s | 143.3s | 0.786 |
+| `pp_toi` | 86s | 46.1s | 69.5s | 0.775 |
 
 ## Under `points-league` scoring
 
@@ -56,12 +56,12 @@ Head-to-head weekly points league: balanced, with PP/SH point bonuses.
 
 Weights: `goals` 4, `assists` 2.5, `ppp` 1, `shp` 1.25, `hits` 0.4, `blocks` 0.4, `shots` 0.25, `pim` 0.2.
 
-MAE 1.856 on a mean of 2.77 points per game, Spearman 0.350, top-100 start/sit capture 0.702 (the share of each day's best-100 points the model's own best 100 actually collected).
+MAE 1.858 on a mean of 2.77 points per game, Spearman 0.350, top-100 start/sit capture 0.702 (the share of each day's best-100 points the model's own best 100 actually collected).
 
 | baseline | MAE |
 | --- | --- |
-| rate x TOI | 1.897 |
-| last-10 | 1.920 |
+| rate x TOI | 1.909 |
+| last-10 | 1.931 |
 
 ## Under `banger-league` scoring
 
@@ -71,44 +71,29 @@ Peripheral-heavy: hits, blocks and PIM carry most of the value.
 
 Weights: `goals` 3, `assists` 2, `ppp` 0.5, `shp` 0.5, `hits` 1.5, `blocks` 1.5, `shots` 0.5, `pim` 1.
 
-MAE 2.537 on a mean of 5.28 points per game, Spearman 0.398, top-100 start/sit capture 0.755 (the share of each day's best-100 points the model's own best 100 actually collected).
+MAE 2.538 on a mean of 5.29 points per game, Spearman 0.398, top-100 start/sit capture 0.756 (the share of each day's best-100 points the model's own best 100 actually collected).
 
 | baseline | MAE |
 | --- | --- |
-| rate x TOI | 2.631 |
-| last-10 | 2.671 |
-
-## Walk-forward -- the honesty check
-
-*Trained on 2023-24 + 2024-25, scored on held-out 2025-26 — **not** the deployed boosters (see the note at the top).*
-
-Refit monthly on an expanding window across the holdout season, which is how the season simulator will actually consume these models. It buys little on accuracy and helps mainly with level -- tracking the season's own rates narrows the categories that drifted (see the bias column) -- so the single fit stays the default.
-
-| target | bias, single -> walk-forward | walk-forward MAE | single-fit MAE | PIT deviation |
-| --- | --- | --- | --- | --- |
-| `shots` | +1.3% -> +0.5% | 1.012 | 1.013 | 0.007 |
-| `hits` | -1.7% -> -0.6% | 0.857 | 0.856 | 0.004 |
-| `blocks` | +5.0% -> +4.7% | 0.726 | 0.728 | 0.017 |
-| `assists` | -2.0% -> -2.3% | 0.400 | 0.399 | 0.004 |
-| `goals` | -4.2% -> -3.9% | 0.265 | 0.264 | 0.004 |
-| `pim` | -12.0% -> -9.9% | 0.747 | 0.742 | 0.046 |
+| rate x TOI | 2.673 |
+| last-10 | 2.712 |
 
 ## Dispersion handed to the Monte Carlo layer
 
 *Trained on 2023-24 + 2024-25, scored on held-out 2025-26 — **not** the deployed boosters (see the note at the top).*
 
-`Var = mu + theta * mu^2`, fit by maximum likelihood on the holdout. The shared game-quality variance is the Gamma multiplier's variance: **0.0212**.
+`Var = mu + theta * mu^2`, fit by maximum likelihood on the holdout. The shared game-quality variance is the Gamma multiplier's variance: **0.0211**.
 
 `Var(Y) = E[Var(Y|mu)] + Var(mu)`, so the observed column is the sum of the last two, not something the NB column should match on its own.
 
 | category | theta | mean lambda | observed variance | NB conditional variance | Var(lambda) | gap |
 | --- | --- | --- | --- | --- | --- | --- |
-| `shots` | 0.064 | 1.5656 | 2.1772 | 1.751 | 0.4467 | -0.0205 |
-| `hits` | 0.1102 | 1.1111 | 1.93 | 1.3099 | 0.5699 | 0.0502 |
-| `blocks` | 0.0893 | 0.8269 | 1.0784 | 0.9078 | 0.2222 | -0.0516 |
-| `assists` | 0.0001 | 0.2837 | 0.3164 | 0.2837 | 0.0258 | 0.0069 |
-| `goals` | 0.0018 | 0.1643 | 0.185 | 0.1644 | 0.0126 | 0.008 |
-| `pim` | 7.498 | 0.4257 | 1.9995 | 2.1064 | 0.0429 | -0.1499 |
+| `shots` | 0.0631 | 1.5568 | 2.1789 | 1.7367 | 0.4271 | 0.015 |
+| `hits` | 0.1096 | 1.1087 | 1.9399 | 1.3072 | 0.581 | 0.0516 |
+| `blocks` | 0.0861 | 0.8245 | 1.0795 | 0.9019 | 0.218 | -0.0404 |
+| `assists` | 0.0001 | 0.2837 | 0.3166 | 0.2837 | 0.0247 | 0.0081 |
+| `goals` | 0.0003 | 0.166 | 0.1849 | 0.166 | 0.0128 | 0.0062 |
+| `pim` | 7.466 | 0.4304 | 1.9961 | 2.1777 | 0.0488 | -0.2305 |
 
 ## Per-model detail
 
@@ -118,94 +103,94 @@ Refit monthly on an expanding window across the holdout season, which is how the
 
 Multiplies every other projection: a projection is worth zero if he is a healthy scratch. Fit on every lockout-knowable candidate, not just players who dressed.
 
-- objective `binary`, fit on 501,990 rows (all)
-- 344 trees, 56.2s, early-stop binary_logloss 0.1222, auc 0.9880
-- top features by gain: `feat_dressed` 53.6%, `feat_starting_goalie` 11.8%, `games_dressed_lookback` 7.2%, `injured_at_lockout` 5.4%, `feat_line` 2.5%, `pair_known` 2.2%
+- objective `binary`, fit on 507,627 rows (all)
+- 372 trees, 85.9s, early-stop binary_logloss 0.1224, auc 0.9876
+- top features by gain: `feat_dressed` 53.9%, `feat_starting_goalie` 11.9%, `games_dressed_lookback` 7.1%, `injured_at_lockout` 5.3%, `feat_line` 2.8%, `pair_known` 2.2%
 
 ### `toi`
 
 Total ice time in seconds. In-game injury truncation is unforecastable but rare (0.5% of played rows under five minutes), so plain L2 holds.
 
-- objective `regression`, fit on 384,861 rows (played)
-- 281 trees, 137.6s, early-stop l2 19794.7853, l1 106.0190
-- top features by gain: `mean_toi_l5` 42.5%, `mean_toi_l10` 31.5%, `mean_toi_l20` 10.2%, `mean_toi_std` 7.2%, `feat_line` 1.1%, `feat_pair` 0.6%
+- objective `regression`, fit on 390,033 rows (played)
+- 271 trees, 141.9s, early-stop l2 19804.2407, l1 106.0450
+- top features by gain: `mean_toi_l5` 49.1%, `mean_toi_l10` 23.6%, `mean_toi_l20` 11.0%, `mean_toi_std` 6.7%, `feat_line` 1.2%, `feat_pair` 0.8%
 
 ### `ev_toi`
 
 Even-strength seconds.
 
-- objective `regression`, fit on 384,861 rows (played)
-- 156 trees, 26.3s, early-stop l2 20104.0518, l1 109.2926
-- top features by gain: `mean_ev_toi_l10` 31.5%, `mean_ev_toi_l20` 29.8%, `mean_ev_toi_std` 12.3%, `mean_ev_toi_l5` 9.0%, `mean_toi_l5` 4.2%, `feat_line` 2.2%
+- objective `regression`, fit on 390,033 rows (played)
+- 111 trees, 31.5s, early-stop l2 20095.3570, l1 109.2975
+- top features by gain: `mean_ev_toi_l10` 32.7%, `mean_ev_toi_l20` 32.1%, `mean_ev_toi_l5` 10.8%, `mean_ev_toi_std` 8.7%, `mean_toi_l5` 3.8%, `feat_line` 2.7%
 
 ### `pp_toi`
 
 Power-play seconds: a large zero mass for anyone off both units. Tweedie is the obvious shape for that and is again slightly worse -- measured on the early-stop slice, p=1.4 biases the top PP decile -2.9% against Poisson's -0.8% at the same MAE. Same lesson as PIM: Tweedie over-shrinks the tail.
 
-- objective `poisson`, fit on 384,861 rows (played)
-- 311 trees, 36.6s, early-stop poisson -312.4723, l1 44.8244
-- top features by gain: `mean_pp_toi_l5` 37.3%, `mean_pp_toi_l10` 28.3%, `mean_pp_toi_l20` 8.1%, `mean_pp_toi_std` 5.3%, `feat_pp` 4.5%, `pp_known` 0.7%
+- objective `poisson`, fit on 390,033 rows (played)
+- 474 trees, 71.9s, early-stop poisson -312.5133, l1 44.6542
+- top features by gain: `mean_pp_toi_l5` 33.9%, `mean_pp_toi_l10` 27.9%, `mean_pp_toi_l20` 8.3%, `feat_pp` 4.7%, `mean_pp_toi_std` 4.4%, `pp_known` 0.7%
 
 ### `shots`
 
 High volume and fairly stable; the sanity check for the whole offset scheme, since every other count offsets on the same predicted ice time.
 
-- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +1.7641, fit on 384,861 rows (played)
-- 271 trees, 132.6s, early-stop poisson 0.7444, l1 0.9965
-- top features by gain: `iff_all_p60_std` 35.1%, `ev_shots_p60_std` 6.4%, `icf_all_p60_std` 5.1%, `shots_p60_std` 5.0%, `ixg_all_p60_std` 4.8%, `prev_shots_p60` 4.6%
+- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +1.7598, fit on 390,033 rows (played)
+- 318 trees, 138.6s, early-stop poisson 0.7444, l1 0.9962
+- top features by gain: `iff_all_p60_std` 34.2%, `ev_shots_p60_std` 9.3%, `ixg_all_p60_std` 4.7%, `prev_shots_p60` 4.6%, `icf_all_p60_std` 3.6%, `shots_p60_std` 2.9%
 
 ### `hits`
 
 The most scorekeeper-contaminated stat on the sheet -- rink-to-rink variance is large and persistent -- so arena_hit_factor is load-bearing here, not a refinement. Role-driven and sticky, hence one of the better-projected counts.
 
-- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +1.4722, fit on 384,861 rows (played)
-- 423 trees, 45.6s, early-stop poisson 0.7481, l1 0.8497
-- top features by gain: `hits_p60_std` 42.0%, `hits_p60_l20` 20.1%, `hits_p60_l10` 7.9%, `prev_hits_p60` 3.0%, `hits_p60_l5` 1.7%, `hits_l5` 1.7%
+- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +1.4697, fit on 390,033 rows (played)
+- 292 trees, 55.7s, early-stop poisson 0.7492, l1 0.8523
+- top features by gain: `hits_p60_std` 42.6%, `hits_p60_l20` 23.4%, `hits_p60_l10` 8.1%, `prev_hits_p60` 3.4%, `hits_p60_l5` 1.7%, `hits_l5` 1.7%
 
 ### `blocks`
 
 Penalty-kill and defensive-zone deployment drive it, which makes it far more predictable for defencemen than for forwards.
 
-- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +1.1202, fit on 384,861 rows (played)
-- 332 trees, 35.9s, early-stop poisson 0.8467, l1 0.7008
-- top features by gain: `position` 30.8%, `blocks_p60_std` 20.8%, `prev_blocks_p60` 3.6%, `feat_pair` 3.0%, `blocks_p60_l20` 2.6%, `opp_blocks_against_per_game_std` 1.0%
+- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +1.1115, fit on 390,033 rows (played)
+- 349 trees, 56.5s, early-stop poisson 0.8459, l1 0.7009
+- top features by gain: `position` 32.0%, `blocks_p60_std` 19.0%, `feat_pair` 4.3%, `prev_blocks_p60` 3.9%, `blocks_p60_l20` 2.8%, `opp_blocks_against_per_game_std` 1.1%
 
 ### `assists`
 
 Its own model rather than a twin of goals: an assist depends on line-mates' finishing, which is a different generating process from a player's own.
 
-- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +0.0389, fit on 384,861 rows (played)
-- 120 trees, 22.2s, early-stop poisson 0.6027, l1 0.4037
-- top features by gain: `mean_pp_toi_std` 12.7%, `mean_pp_toi_l10` 10.9%, `mean_pp_toi_l20` 7.6%, `mean_pp_toi_l5` 7.1%, `assists_p60_std` 3.5%, `ev_points_p60_std` 2.4%
+- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +0.0391, fit on 390,033 rows (played)
+- 155 trees, 35.2s, early-stop poisson 0.6024, l1 0.4030
+- top features by gain: `mean_pp_toi_l10` 13.5%, `mean_pp_toi_std` 8.8%, `mean_pp_toi_l20` 7.5%, `mean_pp_toi_l5` 6.0%, `assists_p60_std` 3.5%, `prev_assists_p60` 1.6%
 
 ### `pim`
 
 83% zeros with a lump at 2 and a thin major/misconduct tail. Tweedie was the obvious shape and was measurably worse: at variance powers 1.6/1.3/1.1 it under-predicted the holdout mean by 21.5/16.9/13.0% against Poisson's 10.7%, and lost on RMSE too. Poisson on the minutes it is. The weakest model in the stack -- barely predictable at game level.
 
-- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +0.5413, fit on 384,861 rows (played)
-- 154 trees, 23.1s, early-stop poisson 0.7927, l1 0.7753
-- top features by gain: `pim_p60_std` 12.9%, `hits_p60_std` 5.8%, `prev_pim_p60` 5.0%, `hits_p60_l20` 3.6%, `hits_p60_l10` 2.8%, `pim_p60_l20` 1.9%
+- objective `poisson`, offset `log(toi)` with a mean-matching intercept of +0.5476, fit on 390,033 rows (played)
+- 182 trees, 36.1s, early-stop poisson 0.7945, l1 0.7747
+- top features by gain: `pim_p60_std` 13.1%, `prev_pim_p60` 5.1%, `hits_p60_std` 4.6%, `hits_p60_l20` 4.1%, `hits_p60_l10` 2.3%, `prev_pim` 1.7%
 
 ### `goals`
 
 Chained through shots: with log(E[shots]) as the offset the trees can only learn a log-shooting-percentage correction, and the tight leaf/L2 budget is the heavy shrinkage that keeps it from fitting hot-hand noise. Deliberately NOT loosened: the elite under-projection seen on the 2025-26 holdout is league drift (shooting% has risen ~4% a season), not over-shrinkage. On the early-stop slice this setting gives +0.6% elite bias, and leaves31/min500/L2=20 and leaves63/min200/L2=5 give +1.7% and +1.2% at equal deviance and AUC -- looser is not better, just noisier. Drift is handled by drift.py.
 
-- objective `poisson`, offset `log(shots)` with a mean-matching intercept of -2.2466, fit on 384,861 rows (played)
-- 95 trees, 13.1s, early-stop poisson 0.4362, l1 0.2679
-- top features by gain: `position` 36.5%, `feat_pair` 9.7%, `ixg_all_p60_std` 8.5%, `pair_known` 5.5%, `ixg_all_p60_l20` 2.8%, `mean_toi_l10` 2.3%
+- objective `poisson`, offset `log(shots)` with a mean-matching intercept of -2.2424, fit on 390,033 rows (played)
+- 106 trees, 18.4s, early-stop poisson 0.4362, l1 0.2678
+- top features by gain: `position` 36.2%, `feat_pair` 11.6%, `ixg_all_p60_std` 6.8%, `pair_known` 5.5%, `ixg_all_p60_l20` 4.4%, `mean_toi_l10` 2.1%
 
 ### `pp_point_share`
 
 P(a given point is a power-play point), fit on scorers with each row weighted by his points. Sampling each point's strength downstream keeps PPP <= points, which an independent PPP count model would violate.
 
-- objective `cross_entropy`, fit on 132,750 rows (scored)
-- 156 trees, 8.8s, early-stop cross_entropy 0.4336
-- top features by gain: `mean_pp_toi_l5` 18.2%, `mean_pp_toi_l10` 18.0%, `mean_pp_toi_l20` 9.1%, `feat_pp` 4.1%, `mean_pp_toi_std` 3.7%, `team_hits_against_per_game_std` 0.8%
+- objective `cross_entropy`, fit on 134,433 rows (scored)
+- 93 trees, 9.8s, early-stop cross_entropy 0.4352
+- top features by gain: `mean_pp_toi_l5` 25.6%, `mean_pp_toi_l10` 21.1%, `mean_pp_toi_l20` 9.9%, `feat_pp` 4.9%, `mean_pp_toi_std` 3.8%, `ppp_p60_std` 0.7%
 
 ### `sh_point_share`
 
 The short-handed twin of pp_point_share. Short-handed points are rare -- well under 1% of most scoring systems -- and an earlier version of this stack skipped them for that reason. That was a scoring-dependent decision baked into the models, so it is gone: a league that pays for short-handed work now gets a projection instead of a zero. Heavily regularized, because the base rate is tiny and the honest answer is usually 'almost never'.
 
-- objective `cross_entropy`, fit on 132,750 rows (scored)
-- 119 trees, 6.8s, early-stop cross_entropy 0.0887
-- top features by gain: `mean_sh_toi_l10` 23.7%, `mean_sh_toi_l5` 7.4%, `mean_sh_toi_std` 5.3%, `mean_sh_toi_l20` 4.8%, `mean_ev_toi_std` 2.0%, `sh_toi_l5` 2.0%
+- objective `cross_entropy`, fit on 134,433 rows (scored)
+- 95 trees, 8.5s, early-stop cross_entropy 0.0891
+- top features by gain: `mean_sh_toi_l10` 25.8%, `mean_sh_toi_l20` 9.8%, `mean_sh_toi_l5` 8.2%, `mean_sh_toi_std` 5.4%, `mean_p1_ev_seconds_std` 1.9%, `mean_ev_toi_std` 1.6%

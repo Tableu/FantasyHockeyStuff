@@ -118,13 +118,13 @@ def room_drafts(external, last, values, eligibility, config, scoreset, field, dr
 # --- the seasons --------------------------------------------------------------------------------
 
 def _consensus_history(season, totals, players, teams, before_frames):
-    """(consensus games, actual games) for players outside the games-played pool, in the
+    """(consensus games, actual games, season length) for players outside the games-played pool, in the
     seasons before `season` that have consensus projections."""
     history = []
     for s, frame in before_frames:
         acts = totals[(totals["season"] == s) & ~totals["is_goalie"].astype(bool)]
         history.append((frame.loc[~frame["in_pool"], "cons_games"],
-                        acts.set_index("player_id")["gp"]))
+                        acts.set_index("player_id")["gp"], int(frame["n"].iloc[0])))
     return history
 
 

@@ -71,13 +71,16 @@ def consensus_goalies(external: pd.DataFrame, weights: dict,
 
 def fit_fallback(history: list) -> dict:
     """How far the consensus's games overshoot for players outside the games-played pool, and
-    how widely they scatter: `history` is [(consensus games Series, actual games Series)] for
-    earlier seasons. Returns the ratio (actual / consensus, pooled) and a beta-binomial
-    precision fitted to the shares. A player who never played counts as 0 games."""
-    cons = pd.concat([c for c, _ in history])
-    act = pd.concat([a.reindex(c.index).fillna(0) for c, a in history])
+    how widely they scatter: `history` is [(consensus games Series, actual games Series, season
+    length)] for earlier seasons. Returns the ratio (actual / consensus, pooled) and a
+    beta-binomial precision fitted to the shares. A player who never played counts as 0 games.
+
+    Shares are of each season's own length: 82 games through 2025-26, 84 from 2026-27. (Until
+    2026-09-28 this and `sample_fallback` divided by a fixed 82.)"""
+    cons = pd.concat([c for c, _, _ in history])
+    act = pd.concat([a.reindex(c.index).fillna(0) for c, a, _ in history])
+    n = np.concatenate([np.full(len(c), float(length)) for c, _, length in history])
     ratio = float(act.sum() / cons.sum())
-    n = 82.0
     mu = np.clip(cons.to_numpy() / n * ratio, 0.02, 0.97)
     k = np.clip(act.to_numpy(), 0, n)
 
@@ -91,7 +94,8 @@ def fit_fallback(history: list) -> dict:
 
 
 def sample_fallback(cons_games: np.ndarray, n: int, fallback: dict, draws: int, rng) -> np.ndarray:
-    mu = np.clip(cons_games / 82.0 * fallback["ratio"], 0.02, 0.97)
+    """Games out of `n`, the season's length -- the same length the consensus projects over."""
+    mu = np.clip(cons_games / float(n) * fallback["ratio"], 0.02, 0.97)
     phi = fallback["precision"]
     p = rng.beta(mu * phi, (1 - mu) * phi, size=(draws, len(mu)))
     return rng.binomial(n, p)

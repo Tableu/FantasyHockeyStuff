@@ -323,9 +323,18 @@ never learned from the newest season's final weeks (2026-03-07 on for 2026-27). 
 capture 0.700 / 0.699 -- neutral -- with level bias better where drift lives (goals -4.4% ->
 -3.0%, assists -2.5% -> -1.7%, pim -11.8% -> -10.0%); ROS season MAE 26.15 / 26.23, Spearman
 0.855 / 0.855. P(plays)'s isotonic is fitted on the early-stopped booster's (out-of-sample)
-predictions and applied to the refit. Team openers (no season-to-date history) under-project in
-both builds (goals -19%, assists -12..-14%, hits -6..-7%) and swing ~10% between two fits --
-opening-night projections are the weakest rows in the stack.
+predictions and applied to the refit.
+
+**Season openers are in the tables (2026-09-28).** `ModelFeatures/lineups/features.py` used to
+skip every team's first game ("nothing lockout-knowable yet"), so ~12 games a season were missing
+and no model had seen a team with no season-to-date history -- which is every row on opening
+night live. Scored on the true 2025-26 openers (1,728 played rows), the models trained without
+them ran fantasy points **-24.8%** (shots -24%, hits -35%, assists -25%, goals -22%) and P(plays)
+0.985 against 0.911 realized; trained with them: FP bias -0.3%, Spearman 0.299 -> 0.332, deviance
+better in 5 of 6 categories, P(plays) mean 0.910. Every other row unchanged (FP MAE 1.7525 /
+1.7511); top-100 capture 0.699 -> 0.702. Variant A's opener rows carry no lineup (every feat_
+empty, like a call-up); variant B perturbs the opener's own lineup. ROS gains the opening-day
+rows too (test 18,291 -> 19,351 rows; model vs shrunk MAE -13.5%, Spearman 0.864).
 
 `--no-holdout` is the **deployment** build: every available season goes into the fit, nothing
 is held back, and no metrics come out. It sits in `models/2026-27/skaters/B/` — trained on all three

@@ -76,10 +76,13 @@ def build_lineup_features(cursor, season_ids: list, variant: str, rates: dict | 
     for team_id, games in team_games.items():
         for i, target in enumerate(games):
             history = [g for g in games[max(0, i - CANDIDATE_LOOKBACK):i] if g.season_id == target.season_id]
-            if not history:
-                continue  # season opener: nothing lockout-knowable about this team's deployment yet
-            prev = history[-1]
-            assert prev.game_date < target.game_date, "variant-A source must predate the target"
+            # A season opener has no history: variant A then knows no lineup (every feat_ column
+            # empty, like a call-up's), variant B perturbs the opener's own lineup as usual, and
+            # the candidates are whoever dressed plus the injured. These rows used to be skipped,
+            # so no model had ever seen a team with no season-to-date history -- yet opening night
+            # live is exactly that, for every row (fixed 2026-09-28).
+            if history:
+                assert history[-1].game_date < target.game_date, "variant-A source must predate the target"
             rows.extend(target_rows(team_id, history, target, variant, spells, static_positions,
                                     rates=rates, copies=copies, rng=rng))
     if not rows:
