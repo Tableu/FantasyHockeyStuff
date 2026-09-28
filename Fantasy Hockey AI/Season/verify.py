@@ -1310,7 +1310,7 @@ def check_boom_bust(drafts=3, draws=300) -> str:
 # What a live league's strategy may choose for itself; everything else is strategy.json's, the
 # values the backtests measured.
 LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"),
-                ("streaming", "next_week"), ("streaming", "goalies"))
+                ("streaming", "next_week"), ("streaming", "goalies"), ("streaming", "spots"))
 
 
 def check_live_strategy() -> str:

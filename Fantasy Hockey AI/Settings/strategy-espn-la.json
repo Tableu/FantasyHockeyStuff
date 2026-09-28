@@ -1,5 +1,5 @@
 {
-  "description": "The espn-la league's strategy (Settings/leagues/espn-la.json): strategy.json with the live choices: adddrop.tail = 'cost' (a swap must also cover the rest-of-season value it loses; seat-paired on 2024-25 neutral, +0.21 +/- 0.40 pts/wk pooled) and streaming.mode = 'week' (Decisions/weekplan.py; +2.01 +/- 0.62 pts/wk, 2024-25, 16 drafts). streaming.goalies = true (goalie rentals, starting goalies protected; priced on tonight's simulated line; 2024-25, 32 drafts, +0.70 +/- 0.41 pts/wk, win +0.013 +/- 0.006; the user's call 2026-09-27). Every other value equals strategy.json (verify.py 'live strategy').",
+  "description": "The espn-la league's strategy (Settings/leagues/espn-la.json): strategy.json with the live choices: adddrop.tail = 'cost' (a swap must also cover the rest-of-season value it loses; seat-paired on 2024-25 neutral, +0.21 +/- 0.40 pts/wk pooled) and streaming.mode = 'week' (Decisions/weekplan.py; +2.01 +/- 0.62 pts/wk, 2024-25, 16 drafts). streaming.goalies = true (goalie rentals, starting goalies protected; priced on tonight's simulated line; 2024-25, 32 drafts, +0.70 +/- 0.41 pts/wk, win +0.013 +/- 0.006; the user's call 2026-09-27). streaming.spots = 99, i.e. no limit: every rostered player below replacement may be streamed, each rental still clearing its drop cost (2024-25, 32 drafts, +2.08 +/- 0.49 pts/wk, win +0.016 +/- 0.007, both halves positive; the user's call 2026-09-27). Every other value equals strategy.json (verify.py 'live strategy').",
   "adddrop": {
     "horizon_weeks": 3,
     "margin": 1.0,
@@ -10,7 +10,7 @@
     "tail": "cost"
   },
   "streaming": {
-    "spots": 2,
+    "spots": 99,
     "reserve": 2,
     "lam": 2.0,
     "margin": 0.0,

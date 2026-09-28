@@ -135,7 +135,7 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `shortlist` | 10 | free agents priced on the roster per pass |
 | | `drop_shortlist` | 4 | cheapest fieldable drops tried against each |
 | | `tail` | `none` | value after the pricing window: `none` ignores it; `cost` makes a swap also cover the rest-of-season value it loses (outgoing's after the window minus incoming's, added to the bar); `net` counts it both ways |
-| `streaming` (rung 7) | `spots` | 2 | streaming spots; 0 makes rung 7 identical to rung 5 |
+| `streaming` (rung 7) | `spots` | 2 | streaming spots: at most this many rostered players below replacement may be streamed (the furthest below first); 0 makes rung 7 identical to rung 5. **99 (no limit) for `beagles` and `espn-la`** (the user, 2026-09-27): every player below replacement is streamable -- 2024-25, strategy-espn-la, 32 drafts, +2.08 +/- 0.49 pts/wk, win +0.016 +/- 0.007, drafts 17-32 +3.17 +/- 0.53; rentals ~97 -> ~108 a season. With a limit of 2, a goalie spot (goalie rentals) displaced a skater's |
 | | `reserve` | 2 | moves held for upgrades on a week's first day, falling to 0 |
 | | `lam` | 2.0 | points a rental must clear early in the week, falling to 0 |
 | | `margin` | 0.0 | sds of the week's gain a rental must also clear |
