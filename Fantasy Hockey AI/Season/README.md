@@ -363,6 +363,15 @@ so no copula and no goalie-skater link; a normal shape). Measured on the 14-team
 slightly better calibrated (Brier 0.1356 against 0.1383 on the same 12,150 manager-days), no rung
 moved beyond noise, twice the run time. `closed_form` stays the default.
 
+**The lineup's risk price was ~20x too high (fixed 2026-09-28).** Rung 4+ scored a candidate at
+`mean - z * sd`, but a player moves the margin's sd s through his variance: the exchange rate
+d(mean) = z d(s) gives `mean - z * sd^2 / (2 s)` (`FullSystem.lineup_value`; the live runner's
+re-solve uses it too). With per-game sd ~0.9 of the mean, the old rule drove every value to the
+floor once z > ~1.1 -- 26.5% of lineup-days in the 2025-26 ladder log. Seat-paired on 2024-25, 32
+drafts, new rule in rung 17's seats: strategy-beagles **+0.67 +/- 0.16 pts/wk** (halves +0.67 /
++0.67), win +0.005 +/- 0.003; strategy.json **+0.38 +/- 0.06** (halves +0.32 / +0.45, 26 of 32
+drafts up), win -0.001 +/- 0.002. Points, not wins: it matters most when the week is decided.
+
 **The playoff objective.** Forward windows now stop at the fantasy final (`calendar.last_week`):
 rung 7's streaming-spot test had been counting NHL weeks 25-26, after the season ends, which moved
 the 14-team ladder by up to 1.2 pts/wk through the shared pool. In the playoffs a bye week's nights

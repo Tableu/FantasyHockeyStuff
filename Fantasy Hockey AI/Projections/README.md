@@ -315,6 +315,18 @@ Fit on 2023-24 + 2024-25, early-stop on the last 25% of 2024-25 by date, hold 20
 whole. Nothing is shuffled across time. That is the *scored* build, and every number in this
 file comes from it.
 
+**The early-stop slice only picks the tree count; every saved booster is then refit on fit +
+early rows at that count** (`train.refit`; `ros_train.train_factor` does the same with its 25%
+validation tail). Until 2026-09-28 the early-stopped booster shipped as is, so a deployment build
+never learned from the newest season's final weeks (2026-03-07 on for 2026-27). Measured on the
+2025-26 holdout (same splits, base vs refit): per-game points-league MAE 1.856 / 1.860, top-100
+capture 0.700 / 0.699 -- neutral -- with level bias better where drift lives (goals -4.4% ->
+-3.0%, assists -2.5% -> -1.7%, pim -11.8% -> -10.0%); ROS season MAE 26.15 / 26.23, Spearman
+0.855 / 0.855. P(plays)'s isotonic is fitted on the early-stopped booster's (out-of-sample)
+predictions and applied to the refit. Team openers (no season-to-date history) under-project in
+both builds (goals -19%, assists -12..-14%, hits -6..-7%) and swing ~10% between two fits --
+opening-night projections are the weakest rows in the stack.
+
 `--no-holdout` is the **deployment** build: every available season goes into the fit, nothing
 is held back, and no metrics come out. It sits in `models/2026-27/skaters/B/` — trained on all three
 seasons, for projecting 2026-27. The distinction matters, and `docs/model-cards-B.md` states it at

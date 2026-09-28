@@ -184,6 +184,8 @@ def add_shrunk(frame, fitted):
 
 
 def train_factor(train, valid, factor, columns, rounds, early_stopping):
+    """Early-stopped on `valid` (for the log and the tree count), then refit on `train` and
+    `valid` together at that count -- the shipped booster must not leave out the newest rows."""
     spec = baselines.FACTORS[factor]
     target = spec["target"]
 
@@ -203,7 +205,16 @@ def train_factor(train, valid, factor, columns, rounds, early_stopping):
     metric, value = next(iter(scores.items()))
     log.info("%-16s %6d fit rows, %5d valid, best iteration %4d, valid %s %.4f",
              factor, len(y_train), len(y_valid), booster.best_iteration, metric, value)
-    return booster
+    # Until 2026-09-28 the booster above shipped as is, so every ROS model left out the last
+    # quarter of its training dates (the newest season's second half). The early stop never
+    # fires here anyway (see the module docstring), so this is the same rounds on more data.
+    x_all = pd.concat([x_train, x_valid])
+    for column in x_all.columns:
+        if isinstance(x_train[column].dtype, pd.CategoricalDtype):
+            x_all[column] = x_all[column].astype(object).astype("category")
+    return lgb.train(dict(PARAMS), lgb.Dataset(x_all, np.concatenate([y_train, y_valid]),
+                                               weight=np.concatenate([w_train, w_valid])),
+                     num_boost_round=max(booster.best_iteration, 1))
 
 
 def top_features(booster, columns, count=8):

@@ -379,9 +379,14 @@ class FullSystem(Manager):
 
     Setting that to zero gives the exchange rate between mean and spread: **d(mean) = z d(s)**. So a
     manager who is behind (z < 0) should pay mean for spread, one who is ahead should pay spread for
-    mean, and the price is the z-score itself rather than a tuned risk parameter. Scoring each
-    candidate at `mean - z * sd` therefore makes the lineup a *linear* objective again, which means
-    `slots.assign` still solves it exactly instead of needing a search.
+    mean, and the price is the z-score itself rather than a tuned risk parameter.
+
+    A player moves s through his *variance*, not his sd: variances add, so starting him tonight
+    changes s by about sd^2 / (2 s). Scoring each candidate at `mean - z * sd^2 / (2 s)` therefore
+    makes the lineup a *linear* objective again, which means `slots.assign` still solves it exactly
+    instead of needing a search. (Until 2026-09-28 this read `mean - z * sd`, which priced spread
+    ~20x too high: per-game sd is ~0.9 of the mean, so past z ~1.1 every value went negative, hit
+    the floor, and the lineup was close to arbitrary on a quarter of lineup-days.)
 
     Three things it reads that no lower rung may:
 
@@ -417,6 +422,7 @@ class FullSystem(Manager):
         theirs = self._week_projection(view, view.opponent_roster(), moments)
         d = (view.my_week_points + mine[0]) - (view.opponent_week_points + theirs[0])
         s = (mine[1] + theirs[1]) ** 0.5
+        self._last_s = s
         closed = 0.0 if s <= 1e-9 else d / s
         entry = {"day": view.day, "week": view.week,
                  "p_closed": statistics.NormalDist().cdf(closed) if s > 1e-9 else 0.5}
@@ -486,13 +492,20 @@ class FullSystem(Manager):
         candidates = [p for p in view.roster if view.available(p)]
         moments = view.moments(self.scoreset, candidates + view.opponent_roster() + view.roster)
         z = self._z(view, moments)
+        self._last_z = z
         values = {}
         for player_id in candidates:
             mu, sd = moments.get(player_id, (0.0, 0.0))
-            # The exchange rate derived above. When level (z=0) this is exactly expected points.
-            values[player_id] = mu - z * sd
-        self._last_z = z
+            values[player_id] = self.lineup_value(mu, sd)
         return self._lineup_from_values(view, values)
+
+    def lineup_value(self, mu, sd) -> float:
+        """The exchange rate derived above, at the z and s of the last `_z`: mean less z times the
+        player's contribution to the margin's sd. When level (z=0) this is exactly expected points."""
+        z, s = getattr(self, "_last_z", 0.0), getattr(self, "_last_s", 0.0)
+        if s <= 1e-9:
+            return mu
+        return mu - z * sd * sd / (2.0 * s)
 
     def transactions(self, view) -> None:
         view.p_start_column = self.p_start_column

@@ -7,8 +7,9 @@ ones. Two kinds of prediction come out of each offset-supplying model:
     out-of-fold   for the training rows, from K-fold models that never saw them -- this is
                   what downstream models offset against, so they meet the same upstream
                   error at training time as they will at the lock.
-    final         from the model fit on the fitting slice with early stopping on its tail,
-                  used for the holdout rows (already genuinely out of sample).
+    final         early stopping on the fitting slice's tail picks the tree count, then the
+                  model is refit on every training row at that count; used for the holdout
+                  rows (already genuinely out of sample) and saved.
 
 Counting-stat models are *fit* on rows where the player played, but *predict* on every
 candidate: the projection means "what he does if he plays", and `plays` supplies the
@@ -97,6 +98,14 @@ def fit_booster(target, matrix, labels, weights, offset, fit_rows, early_rows, c
     return booster, evals
 
 
+def refit(target, matrix, labels, weights, offset, rows, categorical, rounds):
+    """The shipped booster: every training row, at the tree count early stopping chose."""
+    kwargs = {} if offset is None else {"init_score": offset[rows]}
+    train_set = lgb.Dataset(matrix.iloc[rows], label=labels[rows], weight=weights[rows],
+                            categorical_feature=categorical, free_raw_data=False, **kwargs)
+    return lgb.train(target.lgb_params(), train_set, num_boost_round=max(int(rounds), 1))
+
+
 def predict(booster, target, matrix, offset):
     """Predictions on the natural scale, with the offset added back in link space."""
     raw = booster.predict(matrix, num_iteration=booster.best_iteration, raw_score=True)
@@ -154,32 +163,43 @@ def train_one(target, table, matrix, columns, split, chain, weights):
     fit_rows = fit_rows[usable[fit_rows]]
     early_rows = early_rows[usable[early_rows]]
 
-    # Start the model mean-matched rather than at the offset's implied rate of 1.0 per 60.
+    # Start the model mean-matched rather than at the offset's implied rate of 1.0 per 60. Over
+    # every training row, since the shipped booster is refit on all of them (below).
+    training_rows = np.concatenate([fit_rows, early_rows])
     intercept = 0.0
     if offset is not None:
-        intercept = targets_module.mean_matching_intercept(labels, row_weights, offset, fit_rows)
+        intercept = targets_module.mean_matching_intercept(labels, row_weights, offset,
+                                                           training_rows)
         offset = offset + intercept
         log.info("%s: offset intercept %+.4f (zero-tree mean %.4f)", target.name, intercept,
-                 float(np.mean(np.exp(offset[fit_rows]))))
+                 float(np.mean(np.exp(offset[training_rows]))))
 
     started = time.time()
     log.info("%s: fitting on %d rows (early-stop %d), objective %s, offset %s",
              target.name, len(fit_rows), len(early_rows), target.objective, target.offset or "-")
-    booster, evals = fit_booster(target, matrix, labels, row_weights, offset,
+    stopped, evals = fit_booster(target, matrix, labels, row_weights, offset,
                                  fit_rows, early_rows, categorical)
 
+    # The early-stop slice is the newest quarter of the newest season -- the most relevant data
+    # there is -- so it only chooses the tree count, and the booster that ships is refit on
+    # fit + early rows at that count. Until 2026-09-28 the early-stopped booster shipped as is,
+    # and a deployment build never learned from its last season's final weeks.
+    booster = refit(target, matrix, labels, row_weights, offset, training_rows, categorical,
+                    stopped.best_iteration)
     predictions = predict(booster, target, matrix, offset)
 
     # p_plays multiplies every other projection, so a miscalibrated probability biases the
     # whole stack -- and the raw booster runs 5-9 points hot exactly in the uncertain middle
     # (a predicted 0.35 dresses 0.27 of the time), which is where the marginal players a
     # waiver decision is about live. An isotonic fit on the early-stop slice -- never the
-    # holdout -- flattens that without touching the confident tails.
+    # holdout -- flattens that without touching the confident tails. It is fitted on the
+    # early-stopped booster's predictions there, which are out of sample; the refit booster has
+    # seen those rows, so its own predictions on them would calibrate nothing.
     calibration = None
     if target.name == "plays" and len(early_rows) > 1000:
+        held_out = predict(stopped, target, matrix.iloc[early_rows], None)
         isotonic = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
-        isotonic.fit(predictions[early_rows], labels[early_rows],
-                     sample_weight=row_weights[early_rows])
+        isotonic.fit(held_out, labels[early_rows], sample_weight=row_weights[early_rows])
         knots_x = np.asarray(isotonic.X_thresholds_, dtype="float64")
         knots_y = np.asarray(isotonic.y_thresholds_, dtype="float64")
         before = predictions.copy()
@@ -191,7 +211,6 @@ def train_one(target, table, matrix, columns, split, chain, weights):
     # Offset-supplying models also need out-of-fold predictions over the training rows, so
     # the models that chain off them never see a suspiciously accurate upstream value.
     if target.name in ("toi", "shots"):
-        training_rows = np.concatenate([fit_rows, early_rows])
         oof = out_of_fold(target, matrix, labels, row_weights, offset,
                           training_rows, categorical, out_of_fold.folds)
         replace = np.isfinite(oof)
@@ -207,8 +226,9 @@ def train_one(target, table, matrix, columns, split, chain, weights):
         "early_rows": int(len(early_rows)),
         "holdout_rows": int(len(holdout_rows)),
         "features": len(columns),
-        "best_iteration": int(booster.best_iteration),
-        "early_stop_metric": {name: float(values[booster.best_iteration - 1])
+        "best_iteration": int(stopped.best_iteration),
+        "refit_rows": int(len(training_rows)),
+        "early_stop_metric": {name: float(values[stopped.best_iteration - 1])
                               for name, values in evals.get("early", {}).items()},
         "seconds": round(time.time() - started, 1),
         "note": target.note,
@@ -216,7 +236,7 @@ def train_one(target, table, matrix, columns, split, chain, weights):
     }
     if calibration:
         record["calibration"] = calibration
-    log.info("%s: %d trees, %.0fs, early-stop %s", target.name, booster.best_iteration,
+    log.info("%s: %d trees, %.0fs, early-stop %s", target.name, stopped.best_iteration,
              record["seconds"], record["early_stop_metric"])
     return booster, predictions, record
 

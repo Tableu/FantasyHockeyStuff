@@ -542,10 +542,10 @@ class LiveRunner:
         z = getattr(manager, "_last_z", 0.0)
         if not locked:
             return lineup, z
-        # Re-solve over the open slots with the manager's own values (mean - z * sd).
+        # Re-solve over the open slots with the manager's own values (mean - z * sd^2 / 2s).
         moments = v.moments(self.scoreset, v.roster)
         started = {p for p in v.roster if v.nhl_team.get(p) in started_teams}
-        values = {p: mu - z * sd for p, (mu, sd) in moments.items()
+        values = {p: manager.lineup_value(mu, sd) for p, (mu, sd) in moments.items()
                   if p in v.roster and v.available(p) and p not in started}
         open_slots = [i for i in range(len(self.slot_order)) if i not in locked]
         partial = slots_module.assign([self.slot_order[i] for i in open_slots], values, self.eligibility,
