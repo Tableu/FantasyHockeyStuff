@@ -35,8 +35,10 @@ make the moves on the platform yourself.
                  (the one made) and up to nine others, each built around a different pickup (its
                  row is that move), with what the whole plan adds this week; click a plan to see
                  the rest of it
-    Roster       every player you hold now: status, rate, rest-of-season points, games left this
-                 week and his stats (sortable); injured players coloured by status
+    Roster       every player you hold now: status, rate, rest-of-season points, Periph % (the share
+                 of his projected points from hits, blocks, shots and PIM: high = steady, low = a
+                 volatile scorer), games left this week and his stats (sortable); injured players
+                 coloured by status
     Free agents  the best available now by rate, with rest-of-season points (rate x his team's games
                  left in the fantasy season; sortable); injured players coloured by status
 
@@ -107,6 +109,11 @@ def _stat(x):
     return "" if x is None else f"{x:.2f}" if isinstance(x, float) else str(x)
 
 
+def _pct(x):
+    """A share as a whole percent ('' when unknown: a goalie, or nobody projects him)."""
+    return "" if x is None or (isinstance(x, float) and pd.isna(x)) else f"{x:.0%}"
+
+
 def _num(x, digits=2):
     return "" if x is None or (isinstance(x, float) and pd.isna(x)) else f"{x:.{digits}f}"
 
@@ -151,7 +158,8 @@ class PlanWindow:
         self.moves = self._table("Moves", [("kind", "Move", 110), ("add", "Add", 260), ("add_rate", "pts/g", 70),
                                            ("drop", "Drop", 260), ("drop_rate", "pts/g", 70), ("note", "Note", 200)])
         self.options = self._table("Upgrade", [("rank", "#", 36), ("kind", "Move", 90), ("add", "Add", 230),
-                                               ("add_rate", "pts/g", 60), ("add_games", "Games", 60),
+                                               ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
+                                               ("add_games", "Games", 60),
                                                ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
                                                ("drop_games", "Games", 60), ("gain", "Gain", 70),
                                                ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 150)])
@@ -159,7 +167,8 @@ class PlanWindow:
         self.week_rows = []                # Week tab row -> the plan's first pickup on a plan row
         self.week = self._table("Week", [("plan", "Plan", 70), ("day", "Day", 110), ("kind", "Move", 90),
                                          ("add", "Add", 230),
-                                         ("add_rate", "pts/g", 60), ("add_games", "Games", 60),
+                                         ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
+                                         ("add_games", "Games", 60),
                                          ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
                                          ("drop_games", "Games", 60), ("gain", "Gain", 70),
                                          ("bar", "Bar", 60), ("edge", "Edge", 60),
@@ -167,6 +176,7 @@ class PlanWindow:
                                 on_row_click=self._toggle_week_plan)
         player_columns = [("player", "Player", 240), ("positions", "Pos", 80), ("status", "Status", 70),
                           ("rate", "Rate (pts/g)", 90), ("ros_points", "ROS pts", 70),
+                          ("peripheral", "Periph %", 70),
                           ("per_game", "Tonight's proj.", 100),
                           ("plays_tonight", "Plays tonight", 95), ("games_left", "Games left", 80),
                           ("where", "", 90), ("plan", "Recommended", 110)]
@@ -385,11 +395,12 @@ class PlanWindow:
         blank = lambda x, f="": "" if x is None else format(x, f)
         for o in p.get("options", []):
             tags = ("plan",) if o["in_plan"] else ()
-            rows.append(((blank(o["rank"]), o["kind"], o["add"], _num(o["add_rate"]), blank(o["add_games"]),
+            rows.append(((blank(o["rank"]), o["kind"], o["add"], _num(o["add_rate"]), _pct(o.get("add_periph")),
+                          blank(o["add_games"]),
                           o["drop"] or "(open spot)", _num(o["drop_rate"]), blank(o["drop_games"]),
                           blank(o["gain"], "+.1f"), blank(o["bar"], ".1f"), blank(o["edge"], "+.1f"),
                           o["note"]), tags))
-        self.options.set_rows(rows or [(("", "", "No pickups priced.") + ("",) * 9, ())])
+        self.options.set_rows(rows or [(("", "", "No pickups priced.") + ("",) * 10, ())])
 
         rows = []
         self._fill_week()
@@ -425,7 +436,8 @@ class PlanWindow:
             day = pd.Timestamp(w["day"]).strftime("%a %b %d").replace(" 0", " ")
             if w["from"] != w["day"]:
                 day += f" (from {pd.Timestamp(w['from']).strftime('%a')})"
-            return ((plan_cell, day, w["kind"], w["add"], _num(w["add_rate"]), w["add_games"],
+            return ((plan_cell, day, w["kind"], w["add"], _num(w["add_rate"]), _pct(w.get("add_periph")),
+                     w["add_games"],
                      w["drop"] or "(open spot)", _num(w["drop_rate"]), blank(w["drop_games"]),
                      f"{w['gain']:+.1f}", f"{w['bar']:.1f}", f"{w['edge']:+.1f}", week_cell),
                     ("plan",) if made and w["today"] else ())
@@ -449,7 +461,7 @@ class PlanWindow:
                         self.week_rows.append(None)
         empty = ("No rentals worth a move this week." if p.get("stream_mode") == "week"
                  else "Streaming decides a day at a time (strategy mode 'daily').")
-        self.week.set_rows(rows or [(("", "", "", empty) + ("",) * 9, ("empty",))])
+        self.week.set_rows(rows or [(("", "", "", empty) + ("",) * 10, ("empty",))])
 
     def _toggle_week_plan(self, index):
         """A click on a plan's row opens it (its other moves beneath) or closes it."""
@@ -468,6 +480,7 @@ class PlanWindow:
             tags = (r["status"],) if r["status"] in STATUS_COLOURS else ()
             cells = {"player": r["player"], "positions": r["positions"], "status": r["status"] or "",
                      "rate": _num(r["rate"]), "ros_points": _num(r.get("ros_points"), 1),
+                     "peripheral": _pct(r.get("peripheral")),
                      "per_game": _num(r["per_game"]),
                      "plays_tonight": "" if r["plays_tonight"] is None else f"{r['plays_tonight']:.0%}",
                      "games_left": r["games_left"], "where": place, "plan": _action(r.get("plan")),
@@ -490,7 +503,8 @@ class PlanWindow:
         numbers, A-Z for text."""
         state = self.sorts[name]
         state[1] = not state[1] if key == state[0] else key in (
-            "rate", "ros_points", "per_game", "plays_tonight", "games_left", *self.stat_keys)
+            "rate", "ros_points", "peripheral", "per_game", "plays_tonight", "games_left",
+            *self.stat_keys)
         state[0] = key
         self._fill_sorted(name)
 

@@ -144,3 +144,37 @@ class RosterNights:
         variance = (len(self.nights(incoming)) * self.values[incoming] ** 2
                     + len(self.nights(outgoing)) * self.values.get(outgoing, 0.0) ** 2)
         return PER_GAME_CV * variance ** 0.5
+
+
+SCORING_STATS = ("goals", "assists")
+PERIPHERAL_STATS = ("hits", "blocks", "shots", "pim")
+
+
+def line_spread(frame, weights: dict, theta: dict, prefix: str = "lambda_"):
+    """(sd per team game, peripheral share) for each row of a projected skater line.
+
+    Each stat's per-game variance is mu + theta mu^2 (the negative binomial the sampler fits,
+    `theta` by stat), weighted by the scoring, stats taken as independent; a goal or assist
+    carries its expected PP/SH bonus. `p_plays` makes it per team game: a player who may sit is
+    a mixture of that line and zero. Peripheral share = hits, blocks, shots and PIM's part of the
+    line's points. Measured (Projections/peripherals.py): this sd predicts a skater's realized
+    per-game volatility at Spearman +0.65-0.67, and peripheral-heavy players are steadier at a
+    given points level (partial -0.58 to -0.62)."""
+    import numpy as np
+
+    col = lambda name: (frame[name].fillna(0.0).to_numpy("float64") if name in frame.columns
+                        else np.zeros(len(frame)))
+    bonus = col("pp_point_share") * weights.get("ppp", 0.0) + col("sh_point_share") * weights.get("shp", 0.0)
+    mean, var, periph = np.zeros(len(frame)), np.zeros(len(frame)), np.zeros(len(frame))
+    for stat in SCORING_STATS + PERIPHERAL_STATS:
+        lam = col(prefix + stat)
+        w = weights.get(stat, 0.0) + (bonus if stat in SCORING_STATS else 0.0)
+        mean += w * lam
+        var += w * w * (lam + theta.get(stat, 0.0) * lam * lam)
+        if stat in PERIPHERAL_STATS:
+            periph += w * lam
+    plays = col("p_plays") if "p_plays" in frame.columns else np.ones(len(frame))
+    team_var = plays * (var + mean * mean) - (plays * mean) ** 2
+    share = np.divide(periph, mean, out=np.zeros_like(mean), where=mean > 0)
+    return np.sqrt(np.maximum(team_var, 0.0)), share
+

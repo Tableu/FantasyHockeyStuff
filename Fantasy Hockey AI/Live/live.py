@@ -267,6 +267,24 @@ def latest_rates(day: dt.date, scoreset, expected_line: float) -> dict:
     return rates
 
 
+def latest_spreads(day: dt.date, weights: dict, theta: dict) -> tuple:
+    """({player: sd of his points per team game}, {player: peripheral share}) from the newest
+    tonight file that has him, on or before `day` (valuation.line_spread) -- carried like the rate."""
+    sd, share = {}, {}
+    season_start = dt.date(day.year if day.month >= 7 else day.year - 1, 7, 1).isoformat()
+    for path in sorted(TONIGHT_DIR.glob("tonight_*.parquet")):
+        if not season_start <= path.stem[len("tonight_"):] <= day.isoformat():
+            continue
+        rows = pd.read_parquet(path)
+        skaters = rows[rows["kind"] == "skater"]
+        if len(skaters):
+            spread, periph = valuation_module.line_spread(skaters, weights, theta)
+            ids = skaters["player_id"].astype(int)
+            sd.update(zip(ids, spread.astype(float)))
+            share.update(zip(ids, periph.astype(float)))
+    return sd, share
+
+
 class LiveRunner:
     """Everything that does not change between the passes of one day: league rules, strategy,
     the preseason board, the calendar, the simulator."""
@@ -323,6 +341,16 @@ class LiveRunner:
         # recommendation that flips between passes for no reason but the random stream is noise.
         self.simulator = simlayer.build_simulator(self.sim_season, seed=int(day.strftime("%Y%m%d")))
         self.goalie_fit = simlayer.load_goalie_fit(self.sim_season)
+        dispersion = paths.dispersion_path(self.sim_season)
+        self.theta = ({k: v["theta"] for k, v in json.loads(dispersion.read_text(encoding="utf-8"))
+                       ["categories"].items()} if dispersion.exists() else {})
+        # Peripheral share from the consensus season line, for anyone no tonight file has yet.
+        w = self.scoreset.weights("skaters")
+        stat = lambda k: self.board[k].fillna(0.0) if k in self.board.columns else 0.0
+        scoring = sum(w.get(k, 0.0) * stat(k) for k in ("goals", "assists", "ppp", "shp"))
+        periph = sum(w.get(k, 0.0) * stat(k) for k in valuation_module.PERIPHERAL_STATS)
+        total = scoring + periph
+        self.board_periph = {int(p): float(x) for p, x in (periph / total.where(total > 0)).dropna().items()}
 
     def _latest_sim_season(self) -> str:
         """The newest season with a fitted sampler (dispersion + correlations + goalie fit) no later
@@ -365,6 +393,8 @@ class LiveRunner:
         # share of their team's remaining starts x the league-average line (goalie_ros).
         ros_estimate = {**self.ros_seed, **self.goalie_ros()}
         returns = self.expected_returns(injured, status, nhl_team)
+        _, periph = latest_spreads(self.day, self.scoreset.weights("skaters"), self.theta)
+        self.periph = {**self.board_periph, **periph}
         rate_estimate.update(latest_rates(self.day, self.scoreset, self.goalie_line_mean))
         decision_points = self._draws(skaters, goalies)
 
@@ -427,6 +457,14 @@ class LiveRunner:
         type_of = {p: group_of.get(norm(parts[p]), -1) for p in injured if parts.get(p)}
         return view_module.expected_returns(injured, type_of, absence, nhl_team, self.calendar,
                                             pd.Timestamp(self.day))
+
+    def peripheral(self, player_id):
+        """His projected points' peripheral share (hits, blocks, shots, PIM), None for a goalie
+        or a player nothing projects: his latest tonight line, else the consensus season line."""
+        if "G" in self.eligibility.get(player_id, ()):
+            return None
+        share = getattr(self, "periph", self.board_periph).get(int(player_id))
+        return None if share is None else round(share, 3)
 
     def goalie_ros(self) -> dict:
         """{goalie: rest-of-season points per team game} from today's (or the latest earlier)
@@ -587,6 +625,7 @@ class LiveRunner:
                             "gain": round(gain, 1), "bar": round(bar, 1), "edge": round(gain - bar, 1),
                             "clears": True, "in_plan": True, "note": "in plan",
                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
+                            "add_periph": self.peripheral(p),
                             "add_games": q.get("incoming_games"),
                             "drop_games": q.get("outgoing_games") if d is not None else None})
         # An upgrade is the same pricing as its row below, so it takes that row's rank instead; a
@@ -613,6 +652,7 @@ class LiveRunner:
                             "edge": round(q["gain"] - q["bar"], 1),
                             "clears": clears, "in_plan": False, "note": note,
                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
+                            "add_periph": self.peripheral(p),
                             "add_games": len(q["nights"].nights(p)),
                             "drop_games": len(q["nights"].nights(d)) if d is not None else None})
             if ranked == OPTIONS_SHOWN:
@@ -628,6 +668,7 @@ class LiveRunner:
                              "kind": MOVE_KINDS[m["kind"]], "add": name(p),
                              "drop": name(d) if d is not None else None,
                              "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
+                            "add_periph": self.peripheral(p),
                              "add_games": m["incoming_games"],
                              "drop_games": m["outgoing_games"] if d is not None else None,
                              "gain": round(m["gain"], 1), "bar": round(m["bar"], 1),
@@ -735,6 +776,7 @@ class LiveRunner:
                 "positions": "/".join(sorted(self.eligibility.get(p, ()))),
                 "status": "GTD" if p in gtd else state_status.get(p) if state_status.get(p) != "ACTIVE" else None,
                 "rate": priced(p), "per_game": round(v.projected_rate(p), 2),
+                "peripheral": self.peripheral(p),
                 # The rate times his team's games left in the fantasy season (its playoffs included).
                 "ros_points": round(valuation_module.player_value(
                     v, p, None, self.strategy.adddrop.rate_source), 1),
