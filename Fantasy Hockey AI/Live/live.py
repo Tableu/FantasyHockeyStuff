@@ -658,7 +658,18 @@ class LiveRunner:
             if ranked == OPTIONS_SHOWN:
                 break
         # The week mode's plan (weekplan.py): every move it would make this week, today's made above,
-        # the later ones what it would do if nothing changes -- it plans again on every pass.
+        # the later ones what it would do if nothing changes -- it plans again on every pass. Each
+        # move is a team slot (weekplan.TeamPlans): its team and position, and the players on that
+        # team who fit it, ranked -- any of them buys the same nights.
+        def option_rows(options):
+            return [{"add": name(o["incoming"]), "kind": MOVE_KINDS[o["kind"]],
+                     "positions": "/".join(sorted(self.eligibility.get(o["incoming"], ()))),
+                     "from": o["effective"].date().isoformat(), "add_rate": priced(o["incoming"]),
+                     "add_periph": self.peripheral(o["incoming"]), "add_games": o["games"],
+                     "status": "GTD" if o["incoming"] in gtd else state_status.get(o["incoming"]),
+                     "gain": round(o["gain"], 1), "bar": round(o["bar"], 1),
+                     "edge": round(o["gain"] - o["bar"], 1)} for o in options]
+
         def week_rows(planned):
             rows = []
             for m in planned:
@@ -668,18 +679,31 @@ class LiveRunner:
                              "kind": MOVE_KINDS[m["kind"]], "add": name(p),
                              "drop": name(d) if d is not None else None,
                              "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
-                            "add_periph": self.peripheral(p),
+                             "add_periph": self.peripheral(p),
                              "add_games": m["incoming_games"],
                              "drop_games": m["outgoing_games"] if d is not None else None,
                              "gain": round(m["gain"], 1), "bar": round(m["bar"], 1),
-                             "edge": round(m["gain"] - m["bar"], 1)})
+                             "edge": round(m["gain"] - m["bar"], 1),
+                             "team": teams.get(m["team"]) if m.get("team") is not None else None,
+                             "pos": m.get("group"),
+                             "expected": None if m.get("expected") is None else round(m["expected"], 1),
+                             "options": option_rows(m.get("options", []))})
             return rows
         week_plan = week_rows(manager.plan.week_plan)
-        # The plan made (A) and the alternatives (B, C, ...), each built around a different pickup.
-        week_plans = [{"label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
-                       "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
-                       "moves": week_rows(w["moves"])}
-                      for i, w in enumerate(manager.plan.week_plans)]
+        # The plan made (A) and the alternatives (B, C, ...), each opening on a different team.
+        week_plans = []
+        for i, w in enumerate(manager.plan.week_plans):
+            slot_list = week_rows(w["moves"])
+            week_plans.append({
+                "label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
+                "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
+                "expected": None if w.get("expected") is None else round(w["expected"], 1),
+                "games": w.get("games"), "thinnest": w.get("thinnest"),
+                "without": [teams.get(t, "?") for t in w.get("without", [])],
+                # The plan's schedule: "Tue NYR LW", one per slot.
+                "schedule": [f"{pd.Timestamp(m['day']).strftime('%a')} {m['team'] or '?'} {m['pos'] or ''}".strip()
+                             for m in slot_list],
+                "moves": slot_list})
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]
@@ -805,34 +829,42 @@ def render(plan: dict) -> str:
     lines += ["## Moves", *(actions or ["- None today."]), ""]
     if plan.get("stream_mode") == "week":
         lines += ["## This week's streaming plan", "",
-                  "Every rental the plan would make this week if nothing changes: today's are the moves "
-                  "above; the later ones are planned again on every run, as news and the free-agent pool "
-                  "change. Gain = lineup points this week (a pickup for next week: next week's, "
-                  "made on the last day of a week already won); bar = the drop cost (+ margin x sd).", ""]
+                  "Every rental the plan would make this week if nothing changes, as team slots: a day, an "
+                  "NHL team and a position, which any of the players listed can fill -- they play the "
+                  "same nights, so if the first is gone, take the next. Today's are the moves above; the "
+                  "later ones are planned again on every run, as news and the free-agent pool change. "
+                  "Gain = lineup points this week (a pickup for next week: next week's, made on the last "
+                  "day of a week already won); bar = the drop cost (+ margin x sd); expected = the edge "
+                  "you can expect from the slot when each player may be taken before you get there.", ""]
         if plan["week_plan"]:
-            lines += ["| Day | Move | Add | pts/g | games | Drop | pts/g | games | Gain | Bar | Edge | |",
+            lines += ["| Day | Slot | Add | pts/g | games | Drop | Gain | Bar | Edge | Exp. | Next options | |",
                       "|---|---|---|---|---|---|---|---|---|---|---|---|"]
             for w in plan["week_plan"]:
                 day = pd.Timestamp(w["day"]).strftime("%a %b %d")
                 start = "" if w["from"] == w["day"] else f" (from {pd.Timestamp(w['from']).strftime('%a')})"
-                lines.append(f"| {day}{start} | {w['kind']} | {w['add']} | {w['add_rate']} | {w['add_games']} | "
-                             f"{w['drop'] or '(open spot)'} | {'' if w['drop_rate'] is None else w['drop_rate']} | "
-                             f"{'' if w['drop_games'] is None else w['drop_games']} | {w['gain']:+.1f} | "
-                             f"{w['bar']:.1f} | {w['edge']:+.1f} | {'**today, for next week**' if w.get('for_next_week') else '**today**' if w['today'] else 'planned'} |")
+                others = "; ".join(f"{o['add']} {o['edge']:+.1f}" for o in w.get("options", [])
+                                   if o["add"] != w["add"])
+                others = "; ".join(others.split("; ")[:3])
+                expected = "" if w.get("expected") is None else f"{w['expected']:+.1f}"
+                lines.append(f"| {day}{start} | {w.get('team') or ''} {w.get('pos') or ''} | {w['add']} | "
+                             f"{w['add_rate']} | {w['add_games']} | {w['drop'] or '(open spot)'} | "
+                             f"{w['gain']:+.1f} | {w['bar']:.1f} | {w['edge']:+.1f} | {expected} | {others} | "
+                             f"{'**today, for next week**' if w.get('for_next_week') else '**today**' if w['today'] else 'planned'} |")
         else:
             lines.append("- No rentals worth a move this week.")
         lines.append("")
         if len(plan.get("week_plans", [])) > 1:
             a = plan["week_plans"][0]
-            lines += [f"Plan A, above, starts with {a['first']}: {a['week_gain']:+.1f} lineup points this week. "
-                      f"Other plans, each built around a different pickup with the rest of the week planned around it (in the "
-                      f"plan window, click a plan for its moves):", "",
-                      "| Plan | Day | Built around | Drop | Week | vs A | Moves |", "|---|---|---|---|---|---|---|"]
+            lines += [f"Plan A, above: {a['week_gain']:+.1f} lineup points this week, expected "
+                      f"{a['expected']:+.1f}. The fallbacks when a team is picked over: each plan leaves out "
+                      f"every earlier plan's opening team (in the plan window, click a plan for its slots "
+                      f"and a slot for its players):", "",
+                      "| Plan | Schedule | Without | Moves | Games | Week | Exp. | vs A | Thinnest slot |",
+                      "|---|---|---|---|---|---|---|---|---|"]
             for w in plan["week_plans"][1:]:
-                m = next(m for m in w["moves"] if m["add"] == w["first"])
-                lines.append(f"| {w['label']} | {pd.Timestamp(m['day']).strftime('%a %b %d')} | {m['add']} | "
-                             f"{m['drop'] or '(open spot)'} | {w['week_gain']:+.1f} | "
-                             f"{w['week_gain'] - a['week_gain']:+.1f} | {len(w['moves'])} |")
+                lines.append(f"| {w['label']} | {' -> '.join(w['schedule'])} | {', '.join(w['without'])} | "
+                             f"{len(w['moves'])} | {w['games']} | {w['week_gain']:+.1f} | {w['expected']:+.1f} | "
+                             f"{w['expected'] - a['expected']:+.1f} | {w['thinnest']} option(s) |")
             lines.append("")
     if plan.get("options"):
         weeks = plan.get("horizon_weeks")

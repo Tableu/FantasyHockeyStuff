@@ -29,12 +29,15 @@ make the moves on the platform yourself.
                  rule's own pricing of the top free agents on the roster you hold now, each with his
                  best drop, the lineup points he gains over the pricing window, the bar a move must
                  clear and the edge (gain - bar) they are ranked by (rentals: the Week tab)
-    Week         the week's streaming plan (strategy mode 'week', Decisions/weekplan.py): every rental
-                 it would make this week, by day, with its gain, bar and edge -- today's are the
-                 Moves; the later ones are planned again on every run. One row per plan: plan A
-                 (the one made) and up to nine others, each built around a different pickup (its
-                 row is that move), with what the whole plan adds this week; click a plan to see
-                 the rest of it
+    Week         the week's streaming plans by NHL team (strategy mode 'week', Decisions/weekplan.py
+                 TeamPlans): each rental is a team slot -- day, team, position -- that any of the
+                 players on that team who fit it can fill. One row per plan: its schedule
+                 ("Tue NYR RW -> Thu CGY C ..."), what it adds this week, its expected edge (each
+                 slot's options discounted by the chance each is taken first) and its thinnest slot.
+                 Plan A is the one made (today's slots are the Moves); B, C, ... each leave out every
+                 earlier plan's opening team -- the fallbacks when a team is picked over. Click a
+                 plan for its slots, a slot for its options, ranked by edge; the later slots are
+                 planned again on every run
     Roster       every player you hold now: status, rate, rest-of-season points, Periph % (the share
                  of his projected points from hits, blocks, shots and PIM: high = steady, low = a
                  volatile scorer), games left this week and his stats (sortable); injured players
@@ -163,16 +166,18 @@ class PlanWindow:
                                                ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
                                                ("drop_games", "Games", 60), ("gain", "Gain", 70),
                                                ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 150)])
-        self.week_open = set()             # plans expanded on the Week tab, by first pickup
-        self.week_rows = []                # Week tab row -> the plan's first pickup on a plan row
-        self.week = self._table("Week", [("plan", "Plan", 70), ("day", "Day", 110), ("kind", "Move", 90),
-                                         ("add", "Add", 230),
+        # Plans and slots opened on the Week tab: ("plan", label) and ("slot", label, index). Plan A
+        # starts open.
+        self.week_open = {("plan", "A")}
+        self.week_rows = []                # Week tab row -> its plan's or slot's key (None: an option)
+        self.week = self._table("Week", [("plan", "Plan", 70), ("day", "Day", 110), ("team", "Team", 50),
+                                         ("pos", "Pos", 60), ("kind", "Move", 90), ("add", "Add", 300),
                                          ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
                                          ("add_games", "Games", 60),
                                          ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
                                          ("drop_games", "Games", 60), ("gain", "Gain", 70),
                                          ("bar", "Bar", 60), ("edge", "Edge", 60),
-                                         ("week", "Week", 70)],
+                                         ("expected", "Exp.", 60), ("depth", "Options", 65)],
                                 on_row_click=self._toggle_week_plan)
         player_columns = [("player", "Player", 240), ("positions", "Pos", 80), ("status", "Status", 70),
                           ("rate", "Rate (pts/g)", 90), ("ros_points", "ROS pts", 70),
@@ -424,51 +429,71 @@ class PlanWindow:
         self.problem_var.set("\n".join(p["problems"]))
 
     def _fill_week(self):
-        """The Week tab: one row per plan -- its first pickup and what the whole plan adds this
-        week -- and, under a plan clicked open, the rest of its moves. Plan A is the one made;
-        only its moves today are the Moves, and they are highlighted."""
+        """The Week tab, three levels deep. A plan's row: its schedule (one team slot per move), what
+        it adds this week and its expected edge, the teams it leaves out. Under a plan clicked open,
+        its slots: day, team, position, the best option and its drop. Under a slot clicked open, the
+        players on that team who fit it, ranked by edge -- any of them buys the same nights. Plan A
+        is the one made; only its moves today are the Moves, and they are highlighted."""
         p = self.plan
         plans = p.get("week_plans") or [{"label": "A", "first": None, "week_gain": None,
                                          "moves": p.get("week_plan", [])}]
         rows, self.week_rows = [], []
-
-        def row(w, plan_cell, week_cell, made):
-            day = pd.Timestamp(w["day"]).strftime("%a %b %d").replace(" 0", " ")
-            if w["from"] != w["day"]:
-                day += f" (from {pd.Timestamp(w['from']).strftime('%a')})"
-            return ((plan_cell, day, w["kind"], w["add"], _num(w["add_rate"]), _pct(w.get("add_periph")),
-                     w["add_games"],
-                     w["drop"] or "(open spot)", _num(w["drop_rate"]), blank(w["drop_games"]),
-                     f"{w['gain']:+.1f}", f"{w['bar']:.1f}", f"{w['edge']:+.1f}", week_cell),
-                    ("plan",) if made and w["today"] else ())
-
         blank = lambda x, f="": "" if x is None else format(x, f)
+        weekday = lambda d: pd.Timestamp(d).strftime("%a %b %d").replace(" 0", " ")
+        arrow = lambda key: "\u25be" if key in self.week_open else "\u25b8"
+
         for plan in plans:
             if not plan["moves"]:
                 continue
-            made = plan["label"] == "A"
-            key = plan["first"]
-            first = next((w for w in plan["moves"] if w["add"] == key), plan["moves"][0])
-            opened = key in self.week_open or len(plans) == 1
-            total = "" if plan["week_gain"] is None else f"{plan['week_gain']:+.1f}"
-            arrow = "" if len(plans) == 1 else ("\u25be " if opened else "\u25b8 ")
-            rows.append(row(first, f"{arrow}{plan['label']}", total, made))
+            label, moves = plan["label"], plan["moves"]
+            key = ("plan", label)
+            without = plan.get("without") or []
+            rows.append(((f"{arrow(key)} {label}", weekday(moves[0]["day"]), "", "",
+                          f"{len(moves)} move{'s' if len(moves) != 1 else ''}",
+                          " \u2192 ".join(plan.get("schedule") or [w["add"] for w in moves]), "", "",
+                          blank(plan.get("games")),
+                          f"without {', '.join(without)}" if without else "", "", "",
+                          blank(plan["week_gain"], "+.1f"), "", blank(plan.get("week_edge"), "+.1f"),
+                          blank(plan.get("expected"), "+.1f"), blank(plan.get("thinnest"))), ()))
             self.week_rows.append(key)
-            if opened:
-                for w in plan["moves"]:
-                    if w is not first:
-                        rows.append(row(w, "", "", made))
-                        self.week_rows.append(None)
+            if key not in self.week_open:
+                continue
+            for index, w in enumerate(moves):
+                made = label == "A" and w["today"]
+                slot_key = ("slot", label, index)
+                options = w.get("options") or []
+                day = weekday(w["day"])
+                if w["from"] != w["day"]:
+                    day += f" (from {pd.Timestamp(w['from']).strftime('%a')})"
+                rows.append(((f"   {arrow(slot_key) if options else ''}", day, w.get("team") or "",
+                              w.get("pos") or "", w["kind"], w["add"], _num(w["add_rate"]),
+                              _pct(w.get("add_periph")), w["add_games"],
+                              w["drop"] or "(open spot)", _num(w["drop_rate"]), blank(w["drop_games"]),
+                              f"{w['gain']:+.1f}", f"{w['bar']:.1f}", f"{w['edge']:+.1f}",
+                              blank(w.get("expected"), "+.1f"), len(options) or ""),
+                             ("plan",) if made else ()))
+                self.week_rows.append(slot_key if options else None)
+                if slot_key not in self.week_open:
+                    continue
+                for rank, o in enumerate(options, 1):
+                    start = "" if o["from"] == w["from"] else f" (from {pd.Timestamp(o['from']).strftime('%a')})"
+                    status = f" [{o['status']}]" if o.get("status") not in (None, "ACTIVE") else ""
+                    rows.append((("", "", "", o["positions"], o["kind"], f"      {rank}. {o['add']}{status}{start}",
+                                  _num(o["add_rate"]), _pct(o.get("add_periph")), o["add_games"],
+                                  "", "", "", f"{o['gain']:+.1f}", f"{o['bar']:.1f}", f"{o['edge']:+.1f}",
+                                  "", ""),
+                                 (o["status"],) if o.get("status") in STATUS_COLOURS else ()))
+                    self.week_rows.append(None)
         empty = ("No rentals worth a move this week." if p.get("stream_mode") == "week"
                  else "Streaming decides a day at a time (strategy mode 'daily').")
-        self.week.set_rows(rows or [(("", "", "", empty) + ("",) * 10, ("empty",))])
+        self.week.set_rows(rows or [(("", "", "", "", "", empty) + ("",) * 11, ("empty",))])
 
     def _toggle_week_plan(self, index):
-        """A click on a plan's row opens it (its other moves beneath) or closes it."""
+        """A click on a plan's row opens it (its slots beneath) or closes it; on a slot's row, its
+        options."""
         if not self.plan or index >= len(self.week_rows) or self.week_rows[index] is None:
             return
-        key = self.week_rows[index]
-        self.week_open.symmetric_difference_update({key})
+        self.week_open.symmetric_difference_update({self.week_rows[index]})
         self._fill_week()
 
     def _fill_players(self, table, players, where=False, **sort):

@@ -19,6 +19,8 @@ season-level result rather than as an error:
                     activation's forced drop spending a move
     streaming       rung 7 at zero spots differing from rung 5, or a rental breaking the reserve,
                     its drop-cost floor, the spot rule or the weekly budget, or adding a player out long
+    team plans      the plan window's team-slot week plans changing what is made, or listing an option
+                    off the slot's team or position, under its bar, or on a team the plan leaves out
     injury returns  an injured player with no expected return, one before today or read off his
                     spell's end, or a window counting him before it
     frozen rosters  a transacting team left short of its slots with a fix available (a goalie on IR)
@@ -466,6 +468,73 @@ def check_streaming() -> str:
             f"{counts['next-week']} next-week-pickup / {counts['goalie']} goalie-rental rentals, reserve, "
             f"floor, spot-only drops and the weekly budget all held; {counts['goalie drops']} goalies "
             f"dropped for rentals, none a starter")
+
+
+def check_team_plans(alternatives=3) -> str:
+    """The plan window's team-slot plans (weekplan.TeamPlans), asked for on every day of a season:
+    asking changes nothing made; every slot's options are on its team, eligible at its position,
+    playing, and clear their bar; plan A's moves today are the moves made; no plan spends more
+    than the week's moves; no alternative uses a team it leaves out, and each opens on a team no
+    earlier plan opened on."""
+    from dataclasses import replace
+    weekplan = sys.modules["weekplan"]
+    strategy = _strategy()
+    strategy = replace(strategy, streaming=replace(strategy.streaming, spots=2, mode="week"))
+    counts = {"days": 0, "plans": 0, "slots": 0, "options": 0}
+
+    def run(asked):
+        season, _ = _small_season((2, 7), strategy=strategy, sims=0)
+        for m in season.field:
+            if m.rung == 7:
+                m.plan.week_alternatives = asked
+        rate = {int(k): 1.0 for k in season.player_pool()}
+        report = season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
+        return report["teams"][["seat", "points", "moves_spent", "forced_drops"]]
+
+    def checked(view, params, *args, **kwargs):
+        moves_left, free = view.moves_left, view._state.free_moves
+        done, plans = original(view, params, *args, **kwargs)
+        if not kwargs.get("alternatives") or not plans:
+            return done, plans
+        eligibility = view._state.eligibility
+        counts["days"] += 1
+        made = {(d["incoming"], d["outgoing"]) for d in done}
+        today = {(m["incoming"], m["outgoing"]) for m in plans[0]["moves"] if m["today"]}
+        assert made == today, f"{view.day:%Y-%m-%d}: plan A's moves today {today} are not the moves made {made}"
+        opened = []
+        for plan in plans:
+            counts["plans"] += 1
+            assert free or len(plan["moves"]) <= moves_left, f"a plan spends {len(plan['moves'])} of {moves_left} moves"
+            for i, m in enumerate(plan["moves"]):
+                counts["slots"] += 1
+                team, group = m["team"], m["group"]
+                others = {n["incoming"] for j, n in enumerate(plan["moves"]) if j != i}
+                assert not others & {o["incoming"] for o in m["options"]}, f"a slot lists another slot's pick: {m}"
+                assert team not in plan["without"], f"a plan without team {team} uses it: {m}"
+                assert any(o["incoming"] == m["incoming"] for o in m["options"]), f"a slot's pick is not an option: {m}"
+                for o in m["options"]:
+                    counts["options"] += 1
+                    p = o["incoming"]
+                    assert view.nhl_team.get(p) == team, f"option {p} is not on the slot's team {team}"
+                    assert group in eligibility.get(p, ()), f"option {p} cannot play the slot's {group}"
+                    assert o["gain"] > o["bar"] and o["games"] >= 1, f"an option under its bar or idle: {o}"
+            if plan["opening"] is not None:
+                assert plan["opening"]["team"] not in opened, f"two plans open on {plan['opening']['team']}"
+                opened.append(plan["opening"]["team"])
+        return done, plans
+
+    plain = run(0)
+    original = weekplan.run
+    weekplan.run = checked
+    try:
+        asked = run(alternatives)
+    finally:
+        weekplan.run = original
+    assert counts["days"], "no day asked for team plans"
+    assert plain.equals(asked), "asking for team plans changed what the managers made"
+    return (f"results identical with and without them; {counts['days']} days, {counts['plans']} plans, "
+            f"{counts['slots']} slots, {counts['options']} options: teams, positions, bars, plan A = "
+            f"the moves made, budgets and left-out teams all held")
 
 
 def check_injury_returns() -> str:
@@ -1360,6 +1429,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("dark nights", check_dark_nights), ("opening rates", check_opening_rates),
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
+          ("team plans", check_team_plans),
           ("injury returns", check_injury_returns),
           ("frozen rosters", check_frozen_rosters),
           ("vor board", check_vor_board), ("consensus board", check_consensus_board),

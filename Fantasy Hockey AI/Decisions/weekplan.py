@@ -38,6 +38,11 @@ the first week, `LeagueState.free_moves`); moves on later nights cost the normal
 A move's gain is its value when it went into the plan; a later move can change it (a rental dropped
 again on Thursday earns less than priced on Monday). The executed moves are logged as "rental" /
 "rental claim", graded like streaming.py's.
+
+For the plan window only, `TeamPlans` shows the week as TEAM SLOTS -- (day, NHL team, position),
+each with the players on that team who could fill it, ranked -- valued against the chance each is
+taken first, with alternative plans that leave out whole teams. It changes nothing made
+(verify.py 'team plans').
 """
 
 import logging
@@ -75,37 +80,25 @@ CLEAR_WIN_Z = 1.2816
 
 def run(view, params: streaming.StreamParams, horizon, source, slot_order, accepts, fieldable,
         z=0.0, alternatives=0):
-    """Plan the week's streams and make today's. Returns (done today, plans): plans[0] is the plan
-    made, then up to `alternatives` others that each ADD A DIFFERENT PLAYER FIRST -- on the plan
-    made's first pickup day, the next best pickups in its place (and none of the other plans'
-    first pickups), the rest of the week planned around each. For the plan window only: a
-    backtest asks for none. Each plan is {"first", "moves", "week_gain", "week_edge"}."""
+    """Plan the week's streams and make today's. Returns (done today, plans).
+
+    A backtest asks for no `alternatives`: plans is [the plan made]. The plan window asks for
+    some, and plans are then the week's TEAM-SLOT plans (TeamPlans): plan A, whose moves today are
+    the ones made, then up to `alternatives` others, each opening on a different NHL team. Each
+    plan is {"first", "moves", "week_gain", "week_edge"}, and a team-slot plan carries its slots'
+    options and expected value besides. Nothing a team-slot plan adds changes what is made."""
     if params.spots <= 0 or view.week is None:
         return [], []
     planner = WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, z)
-    plan = planner.plan(record=alternatives > 0)
-    plans = [(plan, planner.first_pickup(plan))]
-    if plan and alternatives > 0:
-        # The best opening moves on any night, each plan BUILT AROUND its own player: his move is
-        # in, the rest of the week is planned around it -- earlier nights included -- and none of
-        # the other plans' players is added, which is what keeps the plans apart. (Nothing before
-        # his move made him the plan's first pickup but left 2-4 moves; without the bans every plan
-        # used all seven and most were plan A. Openings once had to fall on plan A's first pickup
-        # day: two worthwhile pickups there meant two plans.)
-        firsts = {plans[0][1]}
-        for opening in planner.openings:
-            if len(plans) > alternatives:
-                break
-            incoming = opening[1][-1]["incoming"]
-            if incoming in firsts:
-                continue
-            alternative = planner.plan(first=opening, banned=firsts - {incoming})
-            plans.append((alternative, incoming))
-            firsts.add(incoming)
+    plan = planner.plan()
     # Only the first plan is made. Making the best of 3 by week total instead measured nothing
     # (2024-25, strategy-espn-la, 32 drafts: +0.33 +/- 0.45 pts/wk; best of 5, 16: +0.27 +/- 0.73):
     # the plan is made again every day, so a better week on paper rarely survives to be played.
-    out = [planner.summary(p, first) for p, first in plans]   # before today's moves change state
+    # Both before today's moves change the state.
+    if alternatives > 0:
+        out = TeamPlans(planner).plans(plan, alternatives)
+    else:
+        out = [planner.summary(plan, planner.first_pickup(plan))]
     return planner.execute(plan), out
 
 
@@ -149,7 +142,8 @@ class WeekPlanner:
         self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True)
         self.horizon = horizon
 
-        self._nights, self._next, self._memo, self._cost = {}, {}, {}, {}
+        self._nights, self._next, self._memo, self._cost, self._plays = {}, {}, {}, {}, {}
+        self._by_night, self._reserve = {}, {}
         self.week_end = view.calendar.weeks[view.week - 1].end
         # Buying next week's roster: the week's last day, the matchup won (`gate` supplies z).
         self.late = ((self.week_end - self.today).days < LATE_DAYS and params.gate
@@ -174,7 +168,6 @@ class WeekPlanner:
         self.rates = {p: valuation.rate(view, p, source)
                       for p in set(self.roster) | {c[0] for c in self.candidates}}
         self.moves_left = view.moves_left
-        self.openings = []                 # best opening move per player (plan(record=True))
 
     # ---------- inputs ----------
 
@@ -209,6 +202,7 @@ class WeekPlanner:
         free agents by rate x games from then, plus the best claims (today, paying from clearing)."""
         view, k = self.view, self.params.shortlist
         rate = {p: valuation.rate(view, p, self.source) for p in self.addable + self.claimable}
+        self.pool_rate = rate                      # every free agent's, for the team slots
         out = []
         for day in self.move_days:
             ahead = self.next_weight if day == self.today and self.late else 0.0
@@ -249,10 +243,19 @@ class WeekPlanner:
                 held.add(m["incoming"])
         return held
 
+    def plays_on(self, player_id) -> set:
+        """The nights he plays that a plan prices (this week's, next week's when priced), and is
+        not out on."""
+        if player_id not in self._plays:
+            self._plays[player_id] = {n for n in self.nights_of(player_id) + self.next_nights_of(player_id)
+                                      if not self.view.out_on(player_id, n)}
+        return self._plays[player_id]
+
     def night_value(self, night, held) -> float:
-        playing = sorted(p for p in held if (night in self.nights_of(p)
-                                             or night in self.next_nights_of(p))
-                         and not self.view.out_on(p, night))
+        if night not in self._by_night:            # everyone a plan can hold who plays that night
+            self._by_night[night] = {p for p in set(self.roster) | set(self.pool_rate)
+                                     if night in self.plays_on(p)}
+        playing = sorted(held & self._by_night[night])
         key = (night, tuple(playing))
         if key not in self._memo:
             values = {p: (self.tonight[p] if night == self.today and p in self.tonight
@@ -278,10 +281,12 @@ class WeekPlanner:
     def reserve_on(self, day) -> int:
         """streaming.py's reserve on `day`: `reserve` moves held for upgrades at the week's start,
         falling to 0 on its last day."""
-        week = self.view.calendar.weeks[self.view.week - 1]
-        span = (week.end - week.start).days
-        share = min(1.0, max(0.0, (week.end - day).days / span)) if span > 0 else 0.0
-        return int(round(self.params.reserve * share))
+        if day not in self._reserve:
+            week = self.view.calendar.weeks[self.view.week - 1]
+            span = (week.end - week.start).days
+            share = min(1.0, max(0.0, (week.end - day).days / span)) if span > 0 else 0.0
+            self._reserve[day] = int(round(self.params.reserve * share))
+        return self._reserve[day]
 
     def fits(self, spent, day, cost) -> bool:
         """Whether a move costing `cost` on `day` keeps the plan inside each day's budget: by any
@@ -296,59 +301,65 @@ class WeekPlanner:
                    <= self.moves_left - self.reserve_on(later)
                    for later in self.move_days if later >= day)
 
-    def plan(self, first=None, record=False, banned=()) -> list:
-        """Greedy insertion, from an empty plan -- or from `first`, an opening move chosen by the
-        caller (an alternative plan), never adding a `banned` player. With `record`, the first
-        pass keeps each player's best opening move per day in `self.openings`, best first."""
+    def plan(self) -> list:
+        """Greedy insertion, from an empty plan: of every move on any night ahead, put in the one
+        with the largest survival^days x (gain - bar), until none clears its bar."""
         moves, spent = [], {}
         open_spots = self.view.roster_room()
-        if first is not None:
-            _, moves, cost, into_open, day = first
-            spent[day] = cost
-            open_spots -= into_open
-        openings = {} if record and first is None else None
         while True:
             best = None
-            added = {m["incoming"] for m in moves}
-            dropped = {m["outgoing"]: m for m in moves if m["outgoing"] is not None}
-            picked_up = {m["incoming"]: m["effective"] for m in moves}
+            held = self.held(moves)
             for incoming, day, effective in self.candidates:
-                if incoming in added or incoming in dropped or incoming in banned:
+                if incoming in held[0] or incoming in held[1]:
                     continue
-                kind = "claim" if incoming in self.claimable else "add"
-                before = self.roster_at(self.roster, moves, effective)
-                drops = ([None] if open_spots > 0 else []) + sorted(
-                    p for p in before
-                    if p in self.spots or (p in picked_up and picked_up[p] < effective))
-                for outgoing in drops:
-                    later = dropped.get(outgoing)
-                    if later is not None and (later["effective"] <= effective
-                                              or later["day"] == self.today):
-                        continue
-                    cost = self.move_cost(day, kind, outgoing)
-                    if not self.fits(spent, day, cost):
-                        continue
-                    after = (before - {outgoing}) | {incoming}
-                    if outgoing is not None and not self.fieldable(sorted(after), self.eligibility,
-                                                                   sorted(before)):
-                        continue
-                    trial = self._with(moves, incoming, outgoing, day, effective, kind, later)
+                for outgoing, cost, trial in self.trials(moves, held, spent, open_spots,
+                                                         incoming, day, effective):
                     gain, bar = trial[-1]["gain"], trial[-1]["bar"]
                     # A later night's pickup happens only if nobody takes him first.
                     edge = self.params.survival ** (day - self.today).days * (gain - bar)
-                    if gain > bar and (best is None or edge > best[0]):
+                    if best is None or edge > best[0]:
                         best = (edge, trial, cost, outgoing is None, day)
-                    if openings is not None and gain > bar and (
-                            (incoming, day) not in openings or edge > openings[incoming, day][0]):
-                        openings[incoming, day] = (edge, trial, cost, outgoing is None, day)
-            if openings is not None:
-                self.openings = sorted(openings.values(), key=lambda o: -o[0])
-                openings = None
             if best is None:
                 return sorted(moves, key=lambda m: (m["day"], m["effective"]))
             _, moves, cost, into_open, day = best
             spent[day] = spent.get(day, 0) + cost
             open_spots -= into_open
+
+    @staticmethod
+    def held(moves) -> tuple:
+        """What a plan has already used: (players it adds, {player it drops: that move},
+        {player it adds: from when})."""
+        return ({m["incoming"] for m in moves},
+                {m["outgoing"]: m for m in moves if m["outgoing"] is not None},
+                {m["incoming"]: m["effective"] for m in moves})
+
+    def trials(self, moves, held, spent, open_spots, incoming, day, effective, drops=None):
+        """Every way to put `incoming` into the plan on `day` that clears its bar: (drop, cost,
+        the plan with the move in, last). The drops are the spots, the plan's own earlier pickups
+        and an open spot -- or only `drops`, when given."""
+        _, dropped, picked_up = held
+        kind = "claim" if incoming in self.claimable else "add"
+        before = self.roster_at(self.roster, moves, effective)
+        candidates = ([None] if open_spots > 0 else []) + sorted(
+            p for p in before
+            if p in self.spots or (p in picked_up and picked_up[p] < effective))
+        for outgoing in candidates:
+            if drops is not None and outgoing not in drops:
+                continue
+            later = dropped.get(outgoing)
+            if later is not None and (later["effective"] <= effective
+                                      or later["day"] == self.today):
+                continue
+            cost = self.move_cost(day, kind, outgoing)
+            if not self.fits(spent, day, cost):
+                continue
+            after = (before - {outgoing}) | {incoming}
+            if outgoing is not None and not self.fieldable(sorted(after), self.eligibility,
+                                                           sorted(before)):
+                continue
+            trial = self._with(moves, incoming, outgoing, day, effective, kind, later)
+            if trial[-1]["gain"] > trial[-1]["bar"]:
+                yield outgoing, cost, trial
 
     def _with(self, moves, incoming, outgoing, day, effective, kind, later) -> list:
         """The plan with this move in it, the move last. When `later` already drops `outgoing`, it
@@ -443,4 +454,231 @@ class WeekPlanner:
                 "incoming_games": self._games(m["incoming"], m["effective"]),
                 "outgoing_games": self._games(m["outgoing"], m["effective"]),
                 "today": m["day"] == self.today, "failed": m.get("failed", False),
-                "for_next_week": m.get("for_next_week", False)}
+                "for_next_week": m.get("for_next_week", False),
+                # A team slot's (TeamPlans): its team, position, expected edge and ranked options.
+                "team": m.get("team"), "group": m.get("group"), "expected": m.get("expected"),
+                "options": m.get("options", [])}
+
+
+# ---------- the plan window's team-slot plans ----------
+
+# P(a free agent is still free) 0, 1, 2, 3 and 4+ days after the plan picked him (2024-25 backtest,
+# the shipped field; see the module docstring): a team slot's options are valued on it.
+SURVIVAL_BY_DAYS = (1.0, 0.71, 0.59, 0.51, 0.44)
+# The positions a team slot fills. Forwards are split: the league's lineup names C, LW and RW apart.
+GROUPS = ("C", "LW", "RW", "D", "G")
+OPTIONS_PER_SLOT = 6        # the players on a slot's team priced as its options
+# Slots this close in expected value (points) count as tied, and the one whose pick is done playing
+# sooner goes in: it leaves more of the week for another move.
+CHAIN_TIE = 0.1
+
+
+def survival(days) -> float:
+    return SURVIVAL_BY_DAYS[min(max(days, 0), len(SURVIVAL_BY_DAYS) - 1)]
+
+
+def expected(edges, s) -> float:
+    """A slot's expected edge when each of its options is still free with probability `s`, each
+    independently of the others: the best one still there. `edges` best first."""
+    total, missing = 0.0, 1.0
+    for e in edges:
+        total += missing * s * e
+        missing *= 1.0 - s
+    return total
+
+
+class TeamPlans:
+    """The plan window's week plans, by NHL team. A move is a team SLOT -- (day, team, position)
+    -- backed by the free agents on that team who fit it, ranked by edge: any of them buys the
+    same nights, so when the first is taken the next one is the move. A slot is worth its options'
+    expected edge (`expected`): today, its best; a later night, more on a team three deep than on
+    one with a single standout.
+
+    Plans are built by WeekPlanner's greedy insertion, slot by slot, each slot's best option
+    standing in for it on the plan's roster (a later move can drop that stand-in, as rentals
+    chain). Plan A keeps today's moves as made (WeekPlanner.plan) and adds no other move today. B,
+    C, ... are the fallbacks when a whole team is picked over: each opens on the best slot left and
+    leaves out every earlier plan's opening team for the whole week -- B is the week without A's
+    opening team, C without A's and B's, and so on. (Banning an opening team only at its position
+    left the plans the same after their first move.) Display only: nothing here changes what is
+    made."""
+
+    def __init__(self, planner):
+        self.p = p = planner
+        view, today = p.view, p.today
+        pool = p.addable + p.claimable
+        p.rates.update({q: p.pool_rate[q] for q in pool if q not in p.rates})
+        options = {}
+        for q in pool:
+            team = view.nhl_team.get(q)
+            groups = [g for g in GROUPS if g in p.eligibility.get(q, ())]
+            if team is None or not groups:
+                continue
+            if q in p.claimable:
+                days = [(today, max(view.waiver_clears(q), today))]
+            else:
+                days = [(d, d) for d in p.move_days if d == today or d in p.nights_of(q)]
+            for day, effective in days:
+                # WeekPlanner._shortlist's worth: rate x games from the move (a goalie tonight at
+                # tonight's line), next week's too for a late move bought for next week.
+                ahead = p.next_weight * len(p.next_nights_of(q)) if day == today and p.late else 0.0
+                worth = p.pool_rate[q] * (sum(1 for n in p.nights_of(q) if n >= effective) + ahead)
+                if day == today and q in p.tonight and today in p.nights_of(q):
+                    worth += p.tonight[q] - p.pool_rate[q]
+                if worth > 0.0:
+                    for g in groups:
+                        options.setdefault((team, g, day), []).append((worth, q, effective))
+        # Each day's best slots by their options' expected worth, `shortlist` of them.
+        self.options, self.slots = {}, []
+        for day in p.move_days:
+            s = survival((day - today).days)
+            ranked = []
+            for key, found in options.items():
+                if key[2] == day:
+                    found.sort(key=lambda f: (-f[0], f[1]))
+                    found = found[:OPTIONS_PER_SLOT]
+                    self.options[key] = [(q, effective) for _, q, effective in found]
+                    ranked.append((-expected([w for w, _, _ in found], s), key))
+            self.slots += [key for _, key in sorted(ranked)[:p.params.shortlist]]
+
+    # ---------- a slot ----------
+
+    def price(self, slot, moves, held, spent, open_spots, drops=None, stand_in=None):
+        """The slot put into the plan, with the drop that makes it worth most: (expected edge,
+        the plan with the slot's best option in it -- or `stand_in`'s -- cost, into an open spot,
+        day), the move carrying its team, position and ranked options; None if no option clears."""
+        team, group, day = slot
+        found = {}
+        candidates = self.options.get(slot, [])
+        if stand_in is not None and all(q != stand_in[0] for q, _ in candidates):
+            candidates = [stand_in] + candidates
+        for q, effective in candidates:
+            if q in held[0] or q in held[1]:
+                continue
+            for outgoing, cost, trial in self.p.trials(moves, held, spent, open_spots, q, day,
+                                                       effective, drops):
+                found.setdefault(outgoing, []).append((trial[-1]["gain"] - trial[-1]["bar"], cost, trial))
+        best, s = None, survival((day - self.p.today).days)
+        for outgoing, ranked in found.items():
+            ranked.sort(key=lambda f: -f[0])
+            if stand_in is not None and all(f[2][-1]["incoming"] != stand_in[0] for f in ranked):
+                continue
+            value = expected([f[0] for f in ranked], s)
+            if best is None or value > best[0]:
+                best = (value, outgoing, ranked)
+        if best is None:
+            return None
+        value, outgoing, ranked = best
+        _, cost, trial = next(f for f in ranked if stand_in is None or f[2][-1]["incoming"] == stand_in[0])
+        trial[-1].update(team=team, group=group, expected=value,
+                         options=[self.option(f[2][-1]) for f in ranked])
+        return value, trial, cost, outgoing is None, day
+
+    def option(self, m) -> dict:
+        return {"incoming": m["incoming"], "kind": "rental claim" if m["kind"] == "claim" else "rental",
+                "effective": m["effective"], "gain": m["gain"], "bar": m["bar"],
+                "games": self.p._games(m["incoming"], m["effective"])}
+
+    def ends(self, priced):
+        """The last night this week the slot's pick plays."""
+        m = priced[1][-1]
+        return max([n for n in self.p.nights_of(m["incoming"]) if n >= m["effective"]] or [m["effective"]])
+
+    def better(self, a, b) -> bool:
+        if abs(a[0] - b[0]) <= CHAIN_TIE:
+            return (self.ends(a), -a[0]) < (self.ends(b), -b[0])
+        return a[0] > b[0]
+
+    # ---------- a plan ----------
+
+    def build(self, moves, spent, open_spots, banned=frozenset(), today_closed=False) -> list:
+        """Greedy insertion by slot from the plan given: the slot worth most goes in, until none
+        clears. Never a `banned` team; with `today_closed`, no other move today."""
+        moves, spent = list(moves), dict(spent)
+        while True:
+            best, held = None, self.p.held(moves)
+            for slot in self.slots:
+                if slot[0] in banned or (today_closed and slot[2] == self.p.today):
+                    continue
+                priced = self.price(slot, moves, held, spent, open_spots)
+                if priced is not None and (best is None or self.better(priced, best)):
+                    best = priced
+            if best is None:
+                return sorted(moves, key=lambda m: (m["day"], m["effective"]))
+            _, moves, cost, into_open, day = best
+            spent[day] = spent.get(day, 0) + cost
+            open_spots -= into_open
+
+    def made(self, plan):
+        """Today's moves as WeekPlanner made them, each as the team slot of his best position
+        (priced on today's moves before it): (moves, spent, open spots)."""
+        p = self.p
+        moves, spent, open_spots = [], {}, p.view.roster_room()
+        for m in plan:
+            if m["day"] != p.today:
+                continue
+            team = p.view.nhl_team.get(m["incoming"])
+            best = None
+            for g in GROUPS:
+                if g not in p.eligibility.get(m["incoming"], ()):
+                    continue
+                priced = self.price((team, g, p.today), moves, p.held(moves), spent, open_spots,
+                                    drops={m["outgoing"]}, stand_in=(m["incoming"], m["effective"]))
+                if priced is not None and (best is None or priced[0] > best[0]):
+                    best = priced
+            if best is None:                  # priced on less of the plan, it no longer clears
+                move = dict(m, team=team, expected=m["gain"] - m["bar"],
+                            group=next((g for g in GROUPS if g in p.eligibility.get(m["incoming"], ())), None))
+                move["options"] = [self.option(move)]
+                cost = p.move_cost(p.today, m["kind"], m["outgoing"])
+                best = (move["expected"], moves + [move], cost, m["outgoing"] is None, p.today)
+            _, moves, cost, into_open, _ = best
+            spent[p.today] = spent.get(p.today, 0) + cost
+            open_spots -= into_open
+        return moves, spent, open_spots
+
+    def plans(self, plan, alternatives) -> list:
+        """Plan A (today's moves as made, the rest of the week by slot), then up to `alternatives`
+        others, each opened by the best slot left and without any earlier plan's opening team,
+        best first. Each plan says which teams it leaves out (`without`)."""
+        p = self.p
+        room = p.view.roster_room()
+        a = self.build(*self.made(plan), today_closed=True)
+        out = [(a, a[0] if a else None, ())]
+        banned = [a[0]["team"]] if a else []
+        held = p.held([])
+        openings = [priced for priced in (self.price(slot, [], held, {}, room) for slot in self.slots)
+                    if priced is not None]
+        openings.sort(key=lambda o: -o[0])
+        others = []
+        for value, trial, cost, into_open, day in openings:
+            if len(others) >= alternatives:
+                break
+            first = trial[-1]
+            if first["team"] in banned:
+                continue
+            moves = self.build(trial, {day: cost}, room - into_open, banned=frozenset(banned))
+            others.append((moves, first, tuple(banned)))
+            banned.append(first["team"])
+        return ([self.summary(*o) for o in out]
+                + sorted((self.summary(*o) for o in others), key=lambda s: -s["expected"]))
+
+    def summary(self, moves, first, without=()) -> dict:
+        """The plan for the window. A slot's options leave out the plan's other picks -- two VAN LW
+        slots today are two different players, not each other's fallback -- and its expected edge
+        is taken again over the options left."""
+        picks = {m["incoming"] for m in moves}
+        trimmed = []
+        for m in moves:
+            options = [o for o in m["options"] if o["incoming"] == m["incoming"] or o["incoming"] not in picks]
+            value = expected([o["gain"] - o["bar"] for o in options], survival((m["day"] - self.p.today).days))
+            trimmed.append(dict(m, options=options, expected=value))
+        moves = trimmed
+        out = self.p.summary(moves, first["incoming"] if first is not None else None)
+        out.update(expected=sum(m["expected"] for m in moves),
+                   games=sum(m["incoming_games"] for m in out["moves"]),
+                   thinnest=min((len(m["options"]) for m in moves), default=None),
+                   without=list(without),
+                   opening=(None if first is None else
+                            {"day": first["day"], "team": first["team"], "group": first["group"]}))
+        return out
