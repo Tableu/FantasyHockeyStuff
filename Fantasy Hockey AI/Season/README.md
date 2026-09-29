@@ -262,7 +262,46 @@ rung 7 − rung 5 against the defaults', paired by replication):
 Defaults unchanged; reserve and lam go to section 11's search, on 2024-25. One reading is not yet
 explained: lam = 0 made *fewer* rentals than the default under banger scoring (76 against 98).
 
-## Re-measured (2026-09-24) -- supersedes every table below
+## Re-measured (2026-09-28, 32 drafts) -- supersedes every table below
+
+The whole grid again (`docs/ladder-*_*-r13.md`) on commit 19ad436: 64 commits after the
+2026-09-24 grid, including today's rebuilt inputs (season openers in the feature tables, boosters
+refit on every training row, the lineup's variance-priced risk rule) and the consensus VOR board
+(the 2026-09-24 VOR rows used our model's board). **32 drafts per run** (the old grid had 8), paired;
+bold is more than two standard errors from zero. Old (8 drafts) in brackets:
+
+| comparison | 14-team points | 14-team banger | 12-team points | 12-team banger |
+|---|---|---|---|---|
+| attention (2 − 1) | **+26.2** ± 1.7 [+25.9] | **+44.7** ± 3.4 [+50.3] | **+26.1** ± 1.6 [+24.5] | **+47.8** ± 3.1 [+48.4] |
+| naive streaming (3 − 2) | **+16.0** ± 1.6 [+15.7] | **+43.6** ± 3.0 [+44.6] | **+19.8** ± 1.1 [+19.7] | **+38.3** ± 2.1 [+44.3] |
+| the stack, rung 4 (4 − 3) | **+4.2** ± 1.5 [+8.9] | **−5.2** ± 1.6 [−3.1] | **−2.0** ± 0.9 [+2.2] | −0.8 ± 1.3 [−6.6] |
+| add/drop vs hold (5 − 6) | **+33.8** ± 1.7 [+31.3] | **+54.8** ± 2.6 [+48.7] | **+28.6** ± 1.8 [+27.6] | **+50.3** ± 2.8 [+41.9] |
+| add/drop vs rung 4 (5 − 4) | **+20.4** ± 1.4 [+14.0] | **+22.4** ± 1.2 [+14.5] | **+19.0** ± 1.3 [+15.6] | **+21.2** ± 1.5 [+11.6] |
+| streaming on top (7 − 5) | **+10.7** ± 1.3 [+15.3] | **+22.0** ± 1.7 [+24.6] | **+11.2** ± 1.1 [+12.7] | **+23.7** ± 1.7 [+30.8] |
+| orchestrator vs hold (7 − 6) | **+27.5** ± 1.5 [+34.9] | **+62.6** ± 2.6 [+63.2] | **+31.0** ± 1.8 [+32.4] | **+64.2** ± 2.4 [+63.9] |
+| VOR draft, rung 2 held (12 − 2) | **+13.9** ± 1.1 [−1.3] | **+28.7** ± 1.9 [−5.3] | **+9.6** ± 0.8 [+3.1] | **+11.8** ± 1.5 [−5.0] |
+| VOR draft, rung 7 held (17 − 7) | **+8.8** ± 0.9 [+2.2] | **+7.7** ± 1.2 [+4.3] | **+5.9** ± 0.8 [+9.1] | **+2.7** ± 0.8 [+4.2] |
+
+**What held:** attention, naive streaming, the add/drop rule and the orchestrator clear the noise
+everywhere, at sizes near the old grid's. **What moved:** the add/drop rule's edge over rung 4 grew
+(+14 → +20 in the target format) while streaming on top of it shrank (+15.3 → +10.7); the VOR draft
+now helps in every cell, by a lot for a manager who never uses the wire -- the consensus board, not
+our model's, is what changed there. Rung 4 over rung 3 is the fragile row: +4.2 in the target
+format, but **−2.0 ± 0.9 in 12-team points** (a sign flip against +2.2 at 8 drafts, now measured at
+32) and −5.2 under 14-team banger -- the stack's lineup and transactions alone do not reliably beat
+a naive streamer; its value arrives through the add/drop rule and the orchestrator built on it.
+
+Playoff rate (range across runs), 14-team points: rung 1 2%, rung 2 13-25%, rung 3 67%, rung 4
+44-78%, rung 5 59-90%, rung 6 18-19%, rung 7 80%; 12-team: every transacting rung 78-100%.
+
+**Live settings on both seasons (§6 of the review, 2026-09-28).** Each live league's strategy file
+against strategy.json, seat-paired (its file in rung 17's seats), in its own format, 32 drafts:
+beagles (14-team points) **+5.2 ± 0.7** pts/wk on 2024-25 and **+4.4 ± 0.5** on 2025-26, win rate
++0.045 / +0.030; espn-la **+0.8 ± 0.4** (2024-25) and **+2.8 ± 0.4** (2025-26), win +0.006 /
++0.025. Both halves positive in every run: the live bundle, chosen on 2024-25, holds on the season
+it was not chosen on.
+
+## Re-measured (2026-09-24) -- superseded by the table above
 
 The whole grid again (`docs/ladder-*_*-r12.md`), on commit 553c904, after everything since the
 2026-09-23 table: the knowable injury flag and age, the league's real season (21 + 3 weeks in the
