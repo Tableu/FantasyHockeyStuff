@@ -382,6 +382,30 @@ tracks the season's own rates, cutting PIM's bias from −13.0% to −9.9% and b
 to +4.7%, with Spearman up a point or two everywhere. So the single fit is the right default;
 seven monthly refits took about an hour for that.
 
+**Three training-procedure "fixes" from the 2026-09-28 review were built, measured and reverted
+(2026-09-29).** Each looked like a flaw when reading the code; none paid off. Decided on 2024-25
+(variant B, trained on 2023-24, points-league), so 2025-26 was never needed to confirm:
+
+```
+build                                   FP MAE  top-100  plays Brier  shots bias  pim bias
+shipped                                  1.858    0.701     0.0325       +4.6%     +9.0%
+M7 OOF folds = date blocks, not game%4   1.870    0.700     0.0325       +5.5%    +10.8%
+M8 early-stop on every 4th week          1.857    0.700     0.0334       +4.6%     +7.2%
+M7 + M8                                  1.873    0.699     0.0334       +5.8%     +7.3%
+```
+
+- **M7, contiguous-date OOF folds, is worse.** The worry was that `game_id % K` puts a player's
+  neighbouring games in other folds, so the offsets the chain trains on are nearly in-sample. But
+  a blocked fold removes a whole quarter of the *same season* from its model, so its offsets carry
+  more error than the refit booster delivers live, and the downstream models learn to under-trust
+  TOI and shots. Interleaved folds are the closer match to deployment.
+- **M8, an early-stop slice spread over the season, is neutral on accuracy** and chooses many more
+  trees (plays 115 -> 344, pim 117 -> 197): a held-out week shares form with the weeks around it,
+  so the stopping signal is optimistic. P(plays)'s isotonic moves from 1.2 points low to 1.2 high.
+- **M9, the ROS shrinkage fit weighted by window games (as `ros_train` weights its rows), is
+  neutral**: ROS model MAE 26.661 -> 26.679, Spearman 0.8655 -> 0.8651; the constants barely
+  move (PPP 0.66 -> 1.96 h, SHP 27 -> 32, the rest within ~15%). `fit_k` stays unweighted.
+
 ## Variants, and the live-feed bound
 
 Variant B trains on the actual lineup with calibrated noise; variant A uses the previous
