@@ -42,6 +42,8 @@ compare.py    two formats against each other, paired
 boom_bust.py  boom/bust odds vs the pick spent: room drafts, par  -> reports/boom_bust_<season>_<scoring>.*
               (season draws from Simulation/season_spread.py -- docs/boom-bust.md)
 boom_bust_check.py  grades those odds at real ADP, actual seasons       -> docs/boom-bust-check.md
+oneseat.py    the realistic league: our system in ONE seat, paired runs -> reports/oneseat/*.json
+opponents.py  rung 8's calibration: 12088's pickup patterns, and the check against them
 verify.py     the eighteen checks that have to pass before a number means anything
 ```
 
@@ -269,6 +271,76 @@ rung 7 − rung 5 against the defaults', paired by replication):
 
 Defaults unchanged; reserve and lam go to section 11's search, on 2024-25. One reading is not yet
 explained: lam = 0 made *fewer* rentals than the default under banger scoring (76 against 98).
+
+## Realistic league mode: one seat, calibrated opponents (2026-09-29)
+
+The ladder seats our system in three or four of fourteen seats and fills the rest with other rungs
+of our own code; opponents made **9 moves a season** each against our 165. In 12090 we are one team
+and the other thirteen stream hard. `oneseat.py` is the mode for "does this win in a league like
+mine?" and is where final decisions are now confirmed; the ladder stays the tool for rung-vs-rung
+comparisons. (Plan: `.claude/plans/realistic-league.md`.)
+
+**T1, one seat.** Every draft is played twice with the same thirteen opponents: the shipped system
+(rung 17) in the test seat, then the candidate (rung 27) in the same seat. The test seat takes every
+draft position once per 14 drafts, on each replication's lottery. `oneseat.py --verify` checks the
+pair differ in that seat only and that a candidate equal to the shipped system changes nothing in
+any seat (it does not: 28 of 28 seats identical). `managers.build_field` takes the seat layout as
+an object with `labels(config, replication)`; the rotation the ladder uses is unchanged (verify
+34/34).
+
+**T2, realistic opponents -- rung 8, `Decisions/managers.Opponent`.** Each opponent seat is handed
+one of 42 real team-seasons from the sister league 12088 (same format, different managers,
+2023-24..2025-26), drawn by (replication, seat), and **replays its pickup pattern**: per week, the
+weekdays it picked someone up and whether each was a goalie (`opponents.py`, weeks numbered as the
+engine numbers them). Who it takes is its own judgement -- rung 3's box score times a persistent
+per-player error `exp(sd * z)` -- and it drops its lowest-rated player that keeps the roster
+fieldable. It does not pass on a scheduled pickup its numbers call a downgrade: that gate cut
+activity to 3.3 a week against 12088's 4.5. Free agents only (claims were 4-6% of real pickups);
+lineups always set (user decision, 2026-09-28); drafts by 1-3 external sources like any opponent.
+
+`opponents.py --validate` against 12088's own 2024-25, 2 drafts a setting:
+
+```
+                         12088 2024-25   rung 8, sd 0.25   sd 0.5   sd 1.0
+pickups per team-week        4.54            4.84          4.86     4.84
+median                       6               7             7        7
+at the 7-move cap            43.7%           51.6%         52.8%    52.1%
+zero-pickup weeks            21.2%           17.7%         17.2%    17.7%
+team means, min-max          1.4-6.6         0.8-6.6       0.9-6.3  0.7-6.6
+first / second half          5.74 / 3.43     5.86 / 3.89   5.87/3.92 5.88/3.88
+goalie share                 25.7%           24.7%         24.5%    24.7%
+Monday / Sunday              19.0 / 22.4%    17.4 / 16.4%  17.6/16.7 17.5/16.4
+pickup pts/game, next 14d    3.126           3.270         3.244    3.152
+```
+
+The noise sd is the one fitted parameter, set to **1.0** (`opponents.NOISE_SD`): real managers'
+pickups score about what a box-score reader with that much error picks. Known gaps: the cap is hit
+a little too often, Sunday pickups run low (a pickup due on a night with no games slides to the next
+game day or is lost at the week's end), and injury news lag is **measured but not modelled** --
+of 692 injury spells to players rostered in 12088 (2024-25, 2025-26), owners cut the player within
+3 days 12% of the time, within 7 days 16%, never 61% (median lag 4 days among cuts within 30);
+real managers mostly stash, and rung 8 stashes on IR at once. The replayed timing already carries
+when they act.
+
+**First use -- unlimited streaming spots (beagles) against a cap of 2, 2024-25, seat-paired:**
+
+```
+field                               spots=2 minus shipped      halves          per-draft sd   opp. moves
+T1 alone, opponents rungs 2/5/6     -3.25 +/- 1.28 (32 drafts)  -1.60 / -4.91   7.26           9 a season
+T1 + T2, opponents rung 8           -4.19 +/- 0.59 (64 drafts)  -4.14 / -4.24   4.73           124 a season
+```
+
+Unlimited spots holds against a contested wire, and by more; nothing changes in the live settings.
+A realistic field is also quieter: about **23 drafts buy +/-1.0 pt/wk and 90 buy +/-0.5**, against
+53 and 211 in the passive field. Spill: the rest of the league lost 0.16 +/- 0.10 pts/wk each.
+Not yet confirmed on 2025-26 (the two-season rule: confirm once, when a decision rests on it).
+
+```bash
+python opponents.py --summary                       # 12088's targets
+python opponents.py --validate --noise 0.5 1.0      # rung 8 against them
+python oneseat.py --verify --opponents 8
+python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --opponents 8 --replications 64
+```
 
 ## Re-measured (2026-09-28, r14) -- the current baseline; supersedes every table below
 

@@ -715,6 +715,103 @@ class Orchestrated(FullSystemAddDrop):
 LADDER[7] = Orchestrated
 
 
+class Opponent(ScheduleStreamer):
+    """Rung 8: a leaguemate modelled on real managers, for the realistic league
+    (`Season/oneseat.py`, calibrated by `Season/opponents.py`).
+
+    **When and what it picks up is replayed, not decided.** Each seat is handed one real team-season
+    from the sister league 12088 (`attach`): for every week, the days it picked someone up and
+    whether each was a goalie. That carries the real spread of activity -- the near-inactive
+    team, the one at the cap every week, the fade after January, the Monday and Sunday peaks, the
+    quarter of pickups that are goalies -- by construction instead of by fitted parameters.
+
+    **Who it picks up is its own judgement, and a noisy one.** Rung 3's box score (season-to-date
+    points per game shrunk to last season, times games this week), times a persistent per-player
+    error `exp(noise_sd * z)` of its own, so no two leaguemates agree and none reads our models.
+    It drops the player it rates lowest over a forward window and keeps its roster fieldable. It
+    does NOT pass on a scheduled pickup its numbers call a downgrade: the replayed manager had
+    decided to make a move that day, and gating it cut activity to 3.3 pickups a week against
+    12088's 4.5 (2026-09-29). Only the choice of player is its own. It uses free agents, not waivers
+    (claims were 4-6% of 12088's pickups). Lineups are always set, on its box-score rates -- the
+    user's decision (2026-09-28): no diligence parameter.
+    """
+
+    name = "opponent"
+    rung = 8
+
+    def __init__(self, team_index, config, scoreset, strategy):
+        super().__init__(team_index, config, scoreset, strategy)
+        self.profile, self.noise_sd, self.seed = {}, 0.0, 0
+        self._noise, self._done = {}, set()
+        self.pickup_log = []
+
+    def attach(self, profile: dict, noise_sd: float, seed) -> None:
+        """`profile`: {week: [(weekday, is_goalie), ...]} replayed from a real team-season."""
+        self.profile, self.noise_sd, self.seed = profile, float(noise_sd), seed
+        self.name = f"opponent[{profile.get('key', '?')} sd {noise_sd:g}]"
+
+    def _error(self, player_id) -> float:
+        factor = self._noise.get(player_id)
+        if factor is None:
+            import numpy as np
+
+            z = np.random.default_rng([*self.seed, int(player_id)]).standard_normal()
+            factor = self._noise[player_id] = math.exp(self.noise_sd * z)
+        return factor
+
+    def set_lineup(self, view):
+        view.p_start_column = self.p_start_column
+        return self._lineup_from_values(view, view.history.rate)
+
+    def transactions(self, view) -> None:
+        view.p_start_column = self.p_start_column
+        rates = view.history
+        # An empty slot is fixed as it would be by anyone looking at the roster.
+        self.repair_roster(view, lambda p: rates.get(p) or 0.0)
+        weekday = view.day.weekday()
+        for i, (day, goalie) in enumerate(self.profile.get("weeks", {}).get(view.week, ())):
+            if day > weekday or (view.week, i) in self._done or view.moves_left <= 0:
+                continue
+            self._done.add((view.week, i))
+            self._pickup(view, goalie)
+
+    def _pickup(self, view, goalie: bool) -> None:
+        rates, state = view.history, view._state
+        eligibility = state.eligibility
+
+        def rental(p):
+            return rates.value(p) * self._error(p) * view.games_remaining(p)
+
+        def forward(p):
+            return rates.value(p) * self._error(p) * view.games_through(
+                p, weeks_ahead=self.horizon_weeks)
+
+        pool = [p for p in view.free_agents()
+                if not view.on_waivers(p) and p not in view.injured
+                and ("G" in eligibility.get(p, ())) == goalie and view.games_remaining(p) > 0]
+        roster = [p for p in view.roster if p not in view.ir]
+        for incoming in sorted(pool, key=lambda p: (-rental(p), p))[:25]:
+            if view.roster_room() > 0:
+                outgoing = None
+            else:
+                outgoing = next((d for d in sorted(roster, key=lambda d: (forward(d), d))
+                                 if self._fieldable([p for p in roster if p != d] + [incoming],
+                                                    eligibility, before=roster)), None)
+                if outgoing is None or outgoing == incoming:
+                    continue
+            try:
+                state.add(self.team_index, incoming, view.day, drop=outgoing, reason="opponent")
+            except Exception as error:
+                log.debug("opponent %d could not add %s: %s", self.team_index, incoming, error)
+                continue
+            self.pickup_log.append({"day": view.day, "week": view.week, "incoming": incoming,
+                                    "outgoing": outgoing, "goalie": goalie})
+            return
+
+
+LADDER[8] = Opponent
+
+
 VOR_TWIN = 10
 
 # Section 11's tuning seat: rung 17 (the shipped system) run on a candidate's parameters, seated
@@ -735,11 +832,26 @@ def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, rep
 
     Interleaving matters: three consecutive seats all drafting for the same rung would give that
     rung all three of the same snake positions.
+
+    `rungs` may instead be a layout object with `labels(config, replication)`, returning one rung
+    per seat -- the harness's one-seat design (`Season/oneseat.py`) seats this way.
     """
-    # Rung r + VOR_TWIN is rung r drafting by value over replacement: the same in-season manager,
-    # so the gap between the two is the draft board's worth and nothing else.
-    rungs = [r for r in rungs if r in LADDER or r - VOR_TWIN in LADDER or r == CANDIDATE]
-    if CANDIDATE in rungs:
+    if hasattr(rungs, "labels"):
+        labels = list(rungs.labels(config, replication))
+    else:
+        # Rung r + VOR_TWIN is rung r drafting by value over replacement: the same in-season
+        # manager, so the gap between the two is the draft board's worth and nothing else.
+        rungs = [r for r in rungs if r in LADDER or r - VOR_TWIN in LADDER or r == CANDIDATE]
+        clones = clones or (config.teams // len(rungs))
+        # The offset matters whenever the seat count is not a multiple of the rung count. Fourteen
+        # seats over four rungs gives two rungs four clones and two rungs three, every time -- so
+        # the assignment is rotated by replication and the extra seats move around instead of
+        # always landing on the same rungs.
+        labels = [rungs[(seat + replication) % len(rungs)] for seat in range(config.teams)]
+    unknown = [r for r in labels if not (r in LADDER or r - VOR_TWIN in LADDER or r == CANDIDATE)]
+    if unknown or len(labels) != config.teams:
+        raise ValueError(f"seat layout {labels} for {config.teams} seats")
+    if CANDIDATE in labels:
         if candidate is None:
             raise ValueError("a candidate seat needs a candidate strategy")
         same = dataclasses.replace(candidate, name=strategy.name, description=strategy.description,
@@ -747,14 +859,8 @@ def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, rep
         if same != strategy:
             raise ValueError("a candidate may differ from the field's strategy only in "
                              f"{TUNABLE}")
-    clones = clones or (config.teams // len(rungs))
     field = []
-    # The offset matters whenever the seat count is not a multiple of the rung count. Fourteen
-    # seats over four rungs gives two rungs four clones and two rungs three, every time -- so the
-    # assignment is rotated by replication and the extra seats move around instead of always
-    # landing on the same rungs.
-    for seat in range(config.teams):
-        label = rungs[(seat + replication) % len(rungs)]
+    for seat, label in enumerate(labels):
         seated, own = (CANDIDATE_OF, candidate) if label == CANDIDATE else (label, strategy)
         rung = seated - VOR_TWIN if seated not in LADDER else seated
         field.append(LADDER[rung](seat, config, scoreset, own))

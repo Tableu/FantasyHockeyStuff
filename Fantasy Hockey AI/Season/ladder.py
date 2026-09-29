@@ -246,6 +246,14 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
 
     field = managers_module.build_field(config, scoreset, strategy, rungs=rungs,
                                         replication=replication, candidate=candidate)
+    # Rung 8 replays a real manager's pickup pattern (opponents.py); each seat draws its own.
+    opponents = [m for m in field if isinstance(m, managers_module.Opponent)]
+    if opponents:
+        if data.get("opponent_field") is None:
+            raise SystemExit("rung 8 is seated but no opponent profiles were loaded "
+                             "(opponents.OpponentField in data['opponent_field'])")
+        for manager in opponents:
+            data["opponent_field"].attach(manager, replication)
     base = [m.rung % managers_module.VOR_TWIN for m in field]
     if any(r in (5, 7) for r in base) and strategy.adddrop.rate_source == "ros"             and data.get("ros") is None:
         raise SystemExit("rung 5 reads rest-of-season projections and none are built -- run "
