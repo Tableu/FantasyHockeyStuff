@@ -709,8 +709,8 @@ those draws; rung 3, which reads the naive start share, keeps the closed-form
 
 ## What is honest about these numbers, and what is not
 
-**The projections are out of sample.** `inputs.py` reads `predictions_A.parquet`, the holdout
-build's scored season, and refuses `lambdas_2025-26_A.parquet` — which is produced by whatever
+**The projections are out of sample.** `inputs.py` reads `predictions_A_<season>.parquet`, the
+holdout build's scored season, and refuses `lambdas_2025-26_A.parquet` — which is produced by whatever
 boosters `Projections/predict.py` is pointed at, by default the deployment build trained on all three seasons
 and therefore in-sample on the season being replayed. Handing that to rung 4 and a box-score rate
 to rung 3 would compare a manager who has seen the results against one who has not.
@@ -724,16 +724,17 @@ player out for six weeks is out for six weeks and IR is a real lever. Without it
 would be a memoryless nightly coin flip and injury replacement — most of real streaming — would
 not exist.
 
-**Three known approximations, all measured:**
+**Known approximations (checked 2026-09-28):**
 
-- Short-handed points are set to zero, because `predictions_A.parquet` predates that model. They
-  are 0.38% of skater scoring (496 of 129,177 points on 396 of 46,654 played rows) and the
-  understatement is identical for every manager. `inputs.py` has the rebuild that removes it.
-- Twelve of 1,312 games are outside the simulated season, all of them 7–9 October: variant-A
-  features need a previous game, so the candidate universe starts a few days in.
-- Positional eligibility is Yahoo's for 2026-27 applied to 2025-26. It only widens which lineups
-  are legal, and it widens them for everyone at once. **ADP is not treated this way** — a 2026-27
-  draft board encodes 2025-26 results, so the draft uses a 2024-25 points ranking instead.
+- Positional eligibility is the platform's 2026-27 listing applied to the replayed seasons:
+  Fleaflicker's for the 14-team target league (the platform it is played on), ESPN's for espn-la.
+  Eligible positions are close to stable year over year, and a player a listing misses (retired
+  since, mostly) falls back to his NHL position -- 99.4% of 2025-26 players are listed, 87.6% of
+  2024-25's. **ADP is not treated this way** -- a 2026-27 draft board encodes 2025-26 results, so
+  the draft uses a prior-season ranking or the external consensus instead.
+- (Resolved: short-handed points are modelled since the 2026-09-23 rebuild -- they were zero before,
+  0.38% of skater scoring; and all 1,312 games are simulated since season openers entered the
+  feature tables on 2026-09-28 -- twelve of 7-9 October were outside it.)
 
 **Free IR flatters the do-nothing strategy.** Two IR slots, stashing that costs no move, and an
 injury layer taken from the real season mean a manager who never transacts barely suffers for
@@ -741,12 +742,37 @@ injuries — he parks the injured and carries on. In a league with tighter IR, o
 transaction rungs would look better still. The comparison is fair within this
 configuration and should not be read past it.
 
-**One season is one season, and eight rotations only average the draft.** Outcomes here are the real
-2025-26 lines, so rotating seats varies draft position and field interaction but not what the
-players did. A ±3-point standard error is the spread across seats, not a confidence interval on
-"would this strategy win next year". Phase 3's sampled outcomes are what would give that.
+**Two seasons, and the draws only average the draft.** Outcomes are the real stat lines of the
+replayed season (2024-25 or 2025-26), so repeating a league varies draft position, seat and field
+interaction but not what the players did. A ± standard error here is the spread across drafts, not
+a confidence interval on "would this win next season". The working rule for that is below
+("Deciding and confirming"): decide on 2024-25, confirm once on 2025-26.
 
-**Not covered.** Multi-replication with sampled outcomes, trades, and the live lockout snapshot
-job. A win rate here is field-relative — all rungs sit in one league and play each other, so
-removing a rung moves everyone's — and a single season is a single season. `points_per_week` is
-the portable number until phase 3 puts error bars on both.
+**The field is ours, not the league's.** Every opponent is one of our own rungs -- rung 2 never
+moves, rungs 5, 6 and 17 use our projections -- and a tuning league seats our shipped system in 3-4
+of its 14 seats. Copies of one manager contest the same free agents (a rung acting like another
+cost that other 7.5 pts/wk in the rung 4 vs 3 diagnosis), and real opponents differ in activity,
+information and timing. Gaps are comparisons inside this field; a one-seat design with a
+calibrated opponent model is the open fix.
+
+**Not covered.** Trades; outcome uncertainty (sampled seasons); a realistic opponent model. A win
+rate here is field-relative -- all rungs play each other, so removing a rung moves everyone's --
+and `points_per_week` is the more portable number.
+
+## Deciding and confirming: the two-season rule (2026-09-28)
+
+Two seasons can be replayed, and both have been used to make choices -- features, objectives, round
+counts and strategy settings were picked by looking at 2025-26, which left its numbers optimistic.
+From here on:
+
+1. **Decide on 2024-25.** Every comparison that chooses something -- a setting, a feature, a rule,
+   a threshold -- runs on 2024-25 (projections from a build trained on 2023-24).
+2. **Confirm once on 2025-26.** The chosen change is run on 2025-26 one time, with the design fixed
+   in advance. It ships if the sign holds and the gap is not clearly negative; a reversal is a
+   finding to write up, not a cue to re-tune on 2025-26.
+3. **Measurement is not choosing.** A baseline grid, a calibration check or a diagnosis may run on
+   2025-26; a tuning search may not. `tune.py` already refuses 2025-26 without `--final`.
+4. **Record which season decided and which confirmed** beside every result.
+
+As used so far: the live strategy bundles (chosen on 2024-25, confirmed on 2025-26: beagles +5.2 /
++4.4 pts/wk, espn-la +0.8 / +2.8).
