@@ -1,5 +1,5 @@
 {
-  "description": "The Fleaflicker league's strategy (Settings/leagues/beagles.json): strategy.json with the live choices: adddrop.tail = 'cost' (a swap must also cover the rest-of-season value it loses; seat-paired on 2024-25 neutral, +0.21 +/- 0.40 pts/wk pooled) and streaming.mode = 'week' (Decisions/weekplan.py; +2.01 +/- 0.62 pts/wk, 2024-25, 16 drafts); and streaming.gate = true with streaming.next_week = 1.0 -- on the week's last day with the week won (P(win) >= 0.9), a pickup is priced on next week alone. The user's call for a league that streams heavily (2026-09-27): in the 2024-25 backtest it cost -1.45 +/- 0.62 pts/wk (win rate +0.007 +/- 0.013, 8 drafts); the backtest's leaguemates may not stream like this league's. streaming.goalies = true (goalie rentals, starting goalies protected; priced on tonight's simulated line; 2024-25, 32 drafts, +0.70 +/- 0.41 pts/wk, win +0.013 +/- 0.006; the user's call 2026-09-27). streaming.spots = 99, i.e. no limit: every rostered player below replacement may be streamed, each rental still clearing its drop cost (2024-25, 32 drafts, +2.08 +/- 0.49 pts/wk, win +0.016 +/- 0.007, both halves positive; the user's call 2026-09-27). Every other value equals strategy.json (verify.py 'live strategy').",
+  "description": "The Fleaflicker league's strategy (Settings/leagues/beagles.json): strategy.json with the live choices: adddrop.tail = 'cost' (a swap must also cover the rest-of-season value it loses; seat-paired on 2024-25 neutral, +0.21 +/- 0.40 pts/wk pooled) and streaming.mode = 'week' (Decisions/weekplan.py; +2.01 +/- 0.62 pts/wk, 2024-25, 16 drafts); and streaming.gate = true with streaming.next_week = 1.0 -- on the week's last day with the week won (P(win) >= 0.9), a pickup is priced on next week alone. The user's call for a league that streams heavily (2026-09-27): in the 2024-25 backtest it cost -1.45 +/- 0.62 pts/wk (win rate +0.007 +/- 0.013, 8 drafts); the backtest's leaguemates may not stream like this league's. streaming.goalies = true (goalie rentals, starting goalies protected; priced on tonight's simulated line; 2024-25, 32 drafts, +0.70 +/- 0.41 pts/wk, win +0.013 +/- 0.006; the user's call 2026-09-27). streaming.spots = 99, i.e. no limit: every rostered player below replacement may be streamed, each rental still clearing its drop cost (2024-25, 32 drafts, +2.08 +/- 0.49 pts/wk, win +0.016 +/- 0.007, both halves positive; the user's call 2026-09-27). streaming.spot_tolerance = 10: a skater within 10 rest-of-season points of replacement may be streamed too, so forwards just above replacement can be rentals' drops (the user's call 2026-09-28): 32 drafts, 2024-25 +1.38 +/- 0.32 pts/wk (win +0.004 +/- 0.007) but 2025-26 -0.21 +/- 0.44 (win -0.006 +/- 0.007) -- not confirmed. Every other value equals strategy.json (verify.py 'live strategy').",
   "adddrop": {
     "horizon_weeks": 3,
     "margin": 1.0,
@@ -21,7 +21,8 @@
     "mode": "week",
     "survival": 1.0,
     "next_week": 1.0,
-    "goalies": true
+    "goalies": true,
+    "spot_tolerance": 10.0
   },
   "rung3_streamer": {
     "horizon_weeks": 1

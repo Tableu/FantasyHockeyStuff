@@ -21,7 +21,8 @@
     "mode": "week",
     "survival": 1.0,
     "next_week": 0.0,
-    "goalies": true
+    "goalies": true,
+    "spot_tolerance": 0.0
   },
   "rung3_streamer": {
     "horizon_weeks": 1

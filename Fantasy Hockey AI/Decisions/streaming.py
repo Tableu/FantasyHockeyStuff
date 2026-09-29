@@ -62,6 +62,8 @@ class StreamParams:
     survival: float             # week mode: P(a free agent is still free a day later), per day
     next_week: float            # week mode: weight on next week's nights of a pickup (0 = off)
     goalies: bool               # week mode: goalies may be rented (and dropped for a rental)
+    spot_tolerance: float       # rest-of-season points: a skater this close to replacement is a
+                                # spot too (0 = strictly below; goalies always strictly below)
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -73,7 +75,8 @@ class StreamParams:
                 f"{' claim' if self.claim else ''}"
                 f"{f' week s={self.survival:g}' if self.mode == 'week' else ''}"
                 f"{f' nw={self.next_week:g}' if self.mode == 'week' and self.next_week else ''}"
-                f"{' goalies' if self.mode == 'week' and self.goalies else ''}")
+                f"{' goalies' if self.mode == 'week' and self.goalies else ''}"
+                f"{f' tol={self.spot_tolerance:g}' if self.spot_tolerance else ''}")
 
 
 # How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
@@ -148,7 +151,10 @@ def spots(view, params, horizon, source, pool, eligibility, goalies=False) -> li
             continue
         over = (valuation.player_value(view, p, horizon, source)
                 - replacement.at(eligibility.get(p, frozenset())))
-        if over < 0.0:
+        # `spot_tolerance`: a skater within that many points of replacement is a spot as well --
+        # his drop cost still charges what he is worth over the free agent, so a rental must pay
+        # for it. Goalies stay strictly below: their values misread starters (weekplan.STARTER_SHARE).
+        if over < (0.0 if is_goalie(eligibility, p) else params.spot_tolerance):
             scored.append((over, p))
     return [p for _, p in sorted(scored)[:params.spots]]
 

@@ -38,7 +38,8 @@ season-level result rather than as an error:
     opponents       a simulated leaguemate whose board is not his sources' consensus, whose draw
                     differs between paired runs, or who drafts past his goalie cap
     live strategy   a league without its own Settings/strategy-<league>.json, or one differing from
-                    strategy.json in more than the league-level choices (tail, streaming mode/gate/next_week)
+                    strategy.json in more than the league-level choices (LIVE_CHOICES: tail, streaming
+                    mode/gate/next_week/goalies/spots/spot_tolerance)
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
     boom bust       boom/bust odds outside [0, 1], a par curve that rises, season draws or room
                     drafts that differ between two runs with one seed, or the saved-run reader
@@ -1379,7 +1380,8 @@ def check_boom_bust(drafts=3, draws=300) -> str:
 # What a live league's strategy may choose for itself; everything else is strategy.json's, the
 # values the backtests measured.
 LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"),
-                ("streaming", "next_week"), ("streaming", "goalies"), ("streaming", "spots"))
+                ("streaming", "next_week"), ("streaming", "goalies"), ("streaming", "spots"),
+                ("streaming", "spot_tolerance"))
 
 
 def check_live_strategy() -> str:
