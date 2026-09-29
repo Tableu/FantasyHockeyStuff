@@ -533,6 +533,22 @@ class Season:
         return view_module.expected_returns(self.injured, type_of, known["absence"],
                                             self.latest_team, self.calendar, day)
 
+    # Seeds the daily transaction order; see `_daily_order`.
+    DAILY_ORDER_SEED = 20260928
+
+    def _daily_order(self, day) -> list:
+        """The order the managers act in today -- IR, then adds and drops.
+
+        The free-agent pool is first come, first served, so whoever acts first gets the pick of the
+        wire. Until 2026-09-28 that was always seat 0, every day of every season: rotating rungs
+        across seats averaged it out, but only at the cost of noise, and no real league works that
+        way. Shuffled per day, seeded by (replication, day) only, so a paired run (tune.py, the A/B
+        scripts) gives every seat the same place in line on the same day.
+        """
+        rng = np.random.default_rng(
+            [self.DAILY_ORDER_SEED, int(self.replication), pd.Timestamp(day).toordinal()])
+        return [self.field[i] for i in rng.permutation(len(self.field))]
+
     def _view_for(self, team_index, day, week, opponent, history, goalie_projections):
         projections, playing = self._slate_for(day)
         return view_module.SlateView(
@@ -623,7 +639,7 @@ class Season:
                 return self.field[team_index].claim_drop(view, player_id)
 
             self.state.process_waivers(day, redrop=redrop)
-            for manager in self.field:
+            for manager in self._daily_order(day):
                 v = self._view_for(manager.team_index, day, week,
                                    opponents.get(manager.team_index), history,
                                    goalie_projections)

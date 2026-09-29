@@ -61,15 +61,23 @@ python ros_train.py --train 2023-24 2024-25 --test 2025-26 --horizon season --pr
 # once, from Simulation/ -- the goalie sampler's numbers, fitted on the seasons before 2025-26
 python goalie_fit.py --season 2025-26
 
-python ladder.py --season 2025-26 --weights points-league --weights banger-league \
-    --replications 8 --decision-sims 120
-python ladder.py --league league-12team-simple --replications 8 \
-    --weights points-league --weights banger-league
-python ladder.py --rung 2 --rung 4 --rung 5 --rung 6 --replications 8 --tag adddrop     --weights points-league --weights banger-league      # section 9: add/drop against hold
+# The grid: five runs, 32 drafts each, in each live league's own format (since 2026-09-28).
+# Target league (Fleaflicker 12090, 14 teams) on its scoring; then espn-la (10 teams) on its own.
+for spec in "base:1 2 3 4" "adddrop:2 4 5 6" "orch2:2 5 6 7" "vor-r2:2 12" "vor-r7:7 17"; do
+  tag=${spec%%:*}; rungs=""; for r in ${spec#*:}; do rungs="$rungs --rung $r"; done
+  python ladder.py --league league  $rungs --replications 32 --weights points-league --tag $tag-rNN
+  python ladder.py --league espn-la $rungs --replications 32 --weights espn-la       --tag $tag-rNN
+done
+
 python ladder.py ... --horizon-weeks season --margin 0 --rate-source per_game --tag sens-x
 python compare.py --a league-12team-simple --b league   # what a format change does
 python verify.py         # every check, from provenance to the playoff objective
 ```
+
+**Formats measured.** Only the leagues we play: the 14-team target format on `points-league` (12090's
+scoring exactly) and espn-la on its own rules and scoring. The 12-team format and the banger scoring
+were dropped from the grid on 2026-09-28 -- neither stood in for a live league -- and survive only in
+the older reports below. Banger remains available (`--weights banger-league`) as a stress test.
 
 Replications run in parallel processes (`--workers`, default one per replication up to 6; `--workers
 1` runs them one after another in this process). Every replication seeds its own streams, so the
@@ -262,7 +270,42 @@ rung 7 − rung 5 against the defaults', paired by replication):
 Defaults unchanged; reserve and lam go to section 11's search, on 2024-25. One reading is not yet
 explained: lam = 0 made *fewer* rentals than the default under banger scoring (76 against 98).
 
-## Re-measured (2026-09-28, 32 drafts) -- supersedes every table below
+## Re-measured (2026-09-28, r14) -- the current baseline; supersedes every table below
+
+Two test-league fixes, then the grid again (`docs/ladder-{league,espn-la}_*-r14.md`, 32 drafts,
+paired; bold is past two standard errors). **The grid measures the leagues we play and nothing
+else from here on:** the 14-team target format (Fleaflicker 12090) on `points-league`, its scoring
+exactly, and espn-la on its own rules and scoring. The 12-team format and banger scoring stood in
+for no live league and were dropped; `rosters/league-12team-simple.json`, `scoring/banger-league.json`
+and their older reports stay as history.
+
+- **The daily transaction order is shuffled** (`Season.engine._daily_order`, seeded by replication
+  and day, so paired runs keep every seat's place in line). It was seat 0 first every day: in r13 a
+  seat's points against its own rung's mean ran **+5.2 pts/wk at seat 0 and −5.2 at seats 12-13**
+  (−0.64 per place in line) -- the pick of the wire. In r14: −0.2 and −1.4, slope +0.02.
+- **The target league reads Fleaflicker's positions** (`rosters/league.json`), the platform it is
+  played on; it read Yahoo's, which grants multiple positions more often.
+
+| comparison | 14-team (12090, points-league) | espn-la (10 teams, its scoring) |
+|---|---|---|
+| attention (2 − 1) | **+27.0** ± 1.7 | **+16.3** ± 1.0 |
+| naive streaming (3 − 2) | **+16.2** ± 1.4 | **+7.9** ± 1.0 |
+| the stack, rung 4 (4 − 3) | **+4.1** ± 1.4 | **+5.2** ± 0.7 |
+| add/drop vs hold (5 − 6) | **+31.7** ± 1.9 | **+17.9** ± 1.2 |
+| add/drop vs rung 4 (5 − 4) | **+17.8** ± 1.4 | **+6.7** ± 1.0 |
+| streaming on top (7 − 5) | **+11.7** ± 1.0 | **+6.0** ± 0.9 |
+| orchestrator vs hold (7 − 6) | **+28.9** ± 1.8 | **+16.6** ± 1.0 |
+| VOR draft, rung 2 held (12 − 2) | **+13.6** ± 0.8 | **+7.2** ± 0.6 |
+| VOR draft, rung 7 held (17 − 7) | **+7.9** ± 0.9 | **+2.1** ± 0.5 |
+
+Every gap clears the noise in both leagues. espn-la's gaps are smaller in points because its scale
+and depth differ (10 teams, a deeper wire), not because the order changes: the ranking of the rungs
+is the same, and rung 4 beats rung 3 there clearly. Playoff rate: 12090 rung 2 8-24%, rung 7 88%;
+espn-la rung 2 10-14%, rung 7 85%. Against r13 (same 14-team points format) every row is within
+noise. (This r14 grid also ran 14-team banger before banger was dropped: its 4 − 3 moved −5.2 →
+−1.9 with the daily order fixed -- part of rung 4's "fragility" was its seats' place in line.)
+
+## Re-measured (2026-09-28, r13, 32 drafts) -- superseded by r14 above
 
 The whole grid again (`docs/ladder-*_*-r13.md`) on commit 19ad436: 64 commits after the
 2026-09-24 grid, including today's rebuilt inputs (season openers in the feature tables, boosters

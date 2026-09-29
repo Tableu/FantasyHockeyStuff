@@ -160,7 +160,7 @@ def main():
     parser.add_argument("--prior-season", default="2024-25")
     parser.add_argument("--weights", action="append", default=None)
     parser.add_argument("--league", action="append", default=None,
-                        help="League config(s) (default: league and league-12team-simple)")
+                        help="League config(s) (default: league, the target 14-team league)")
     parser.add_argument("--strategy", default=None)
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
@@ -174,7 +174,7 @@ def main():
                 "with actual season points by position; bias and MAE are season points (bias > 0: "
                 f"the board expected more). Minimum sources {strategy.vor_min_sources}; undated "
                 f"sources {strategy.undated_sources}.\n"]
-    for league_name in args.league or ["league", "league-12team-simple"]:
+    for league_name in args.league or ["league"]:
         for name in args.weights or ["points-league", "banger-league"]:
             scoreset = simlayer.load_scoreset(name)
             table, n, scale = evaluate(args.season, args.prior_season, scoreset, strategy,

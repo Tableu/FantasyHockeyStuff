@@ -68,7 +68,7 @@ per-stat numbers only. `Season/` defaults to `points-league`.
   "draft": {"type": "snake", "order": "lottery", "keepers": 0},
   "playoffs": {"teams": 6, "byes": 2, "rounds": 3, "weeks_per_round": 1,
                "seeding": "record", "tiebreak": "points_for"},
-  "eligibility_platform": "yahoo",
+  "eligibility_platform": "fleaflicker",
   "eligibility_season": "2026-27",
   "slot_positions": {"C": ["C"], "LW": ["LW"], "RW": ["RW"], "D": ["D"], "G": ["G"],
                      "F": ["C", "LW", "RW"], "F/D": ["C", "LW", "RW", "D"]},
@@ -99,7 +99,9 @@ per-stat numbers only. `Season/` defaults to `points-league`.
   `weeks_per_round` weeks. The ladder reports `playoff_rate` and `title_rate` per rung; every
   other metric (points per week, moves, slot fill) stays regular-season only.
 - `teams` must be even. A value the harness does not implement is refused at load, never ignored.
-- Position eligibility comes from the platform named in `eligibility_platform`.
+- Position eligibility comes from the platform named in `eligibility_platform`. `league.json` reads
+  Fleaflicker's (the target league's platform) since 2026-09-28; it was Yahoo's, which grants
+  multiple positions more often (15% of listed players against Fleaflicker's 9%).
 - `league.json` is the default when `--league` is omitted.
 
 `Season/` names its ladder reports and docs after the roster file (`ladder_2025-26_<file>.json`),

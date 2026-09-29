@@ -39,7 +39,7 @@
     "seeding": "record",
     "tiebreak": "points_for"
   },
-  "eligibility_platform": "yahoo",
+  "eligibility_platform": "fleaflicker",
   "eligibility_season": "2026-27",
   "slot_positions": {
     "C": [
