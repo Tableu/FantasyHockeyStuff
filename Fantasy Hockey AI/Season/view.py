@@ -61,6 +61,7 @@ class SlateView:
                  unavailable, playing_tonight, nhl_team, history, state, team_index,
                  opponent_index, my_week_points, opponent_week_points,
                  decision_points=None, rate_estimate=None, ros_estimate=None, injured=None,
+                 healthy_estimate=None,
                  goalie_draw_column=None, future_draws=None, phase="regular", alive=True,
                  on_bye=False, week_weight_mode="flat", returns=None):
         self.day = pd.Timestamp(day)
@@ -107,6 +108,8 @@ class SlateView:
         # engine so a transaction can value a player whose team is dark tonight. Never a
         # future projection -- see engine.latest_rate.
         self.rate_estimate = rate_estimate or {}
+        # The same, never written on a night he was injured at the lock (engine.healthy_rate).
+        self.healthy_estimate = healthy_estimate or {}
         # {player_id: rest-of-season points per team game}, from the latest rest-of-season row at
         # or before today, out of a build that held this season out. Empty unless the run has it.
         self.ros_estimate = ros_estimate or {}
@@ -333,6 +336,12 @@ class SlateView:
         is how a star whose club had not opened yet became the cheapest drop on a roster.
         """
         value = self.rate_estimate.get(int(player_id))
+        return default if value is None else float(value)
+
+    def healthy_rate(self, player_id, default=None):
+        """His latest projected points per game from a night he was not injured at the lock --
+        what he is worth playing, for a player who is healthy now (one coming off IR)."""
+        value = self.healthy_estimate.get(int(player_id))
         return default if value is None else float(value)
 
     def ros_rate(self, player_id, default=None):

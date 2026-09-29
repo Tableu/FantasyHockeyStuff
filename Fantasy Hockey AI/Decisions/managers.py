@@ -27,6 +27,8 @@ import logging
 import math
 import statistics
 
+import pandas as pd
+
 import adddrop
 import orchestrator
 import slots as slots_module
@@ -462,17 +464,18 @@ class FullSystem(Manager):
     def _week_projection(self, view, roster, moments):
         """(mean, variance) of what a roster still scores this week.
 
-        Rough on purpose: each player is valued at his per-game moments times the games his team has
-        left, capped at the active slots available over those nights. It only has to be good enough
-        to place the matchup on the right side of even, because all `_z` uses is the ratio.
+        Night by night: on each night left in the week, the players whose team plays and who are
+        not expected out fill the roster's slots by expected points (`slots.assign`, the same exact
+        solve the lineup uses), and only the started ones count -- a bench body adds nothing to
+        the mean or the spread. Tonight's candidates are the ones `view.available` passes. Until
+        2026-09-28 every rostered player's games were summed, bench included, which inflated both
+        sides' mean and variance and pulled |z| toward zero. It only has to place the matchup on
+        the right side of even with the right spread, because all `_z` uses is the ratio.
         """
-        mean = var = 0.0
+        values = {}
         for player_id in roster:
-            games = view.games_remaining(player_id)
-            if games <= 0:
-                continue
             if player_id in moments:
-                mu, sd = moments[player_id]
+                values[player_id] = moments[player_id]
             else:
                 # He plays later this week but not tonight, so there is no draw for him. Fall back
                 # to his carried projected rate -- NOT to rung 3's box-score estimator, which would
@@ -482,9 +485,31 @@ class FullSystem(Manager):
                 # grounded stand-in. Zero was the obvious placeholder and it is badly wrong -- it
                 # says a player who is idle tonight makes the week certain.
                 mu = view.projected_rate(player_id)
-                sd = mu * self.FALLBACK_CV
-            mean += mu * games
-            var += (sd ** 2) * games
+                values[player_id] = (mu, mu * self.FALLBACK_CV)
+
+        nights = {}
+        today = pd.Timestamp(view.day)
+        for player_id in roster:
+            for night in view.nights_through(player_id, weeks_ahead=0):
+                if pd.Timestamp(night) == today:
+                    if not view.available(player_id):
+                        continue
+                elif view.out_on(player_id, night):
+                    continue
+                nights.setdefault(night, []).append(player_id)
+
+        eligibility = view._state.eligibility
+        mean = var = 0.0
+        for night, players in nights.items():
+            weight = view.night_weight(night)
+            if weight <= 0:
+                continue
+            lineup = slots_module.assign(self.slot_order, {p: values[p][0] for p in players},
+                                         eligibility, self.accepts)
+            for player_id in lineup.assigned.values():
+                mu, sd = values[player_id]
+                mean += weight * mu
+                var += weight * sd * sd
         return mean, var
 
     def set_lineup(self, view):
@@ -577,6 +602,14 @@ class FullSystem(Manager):
         eligibility = view._state.eligibility
         full = list(view.roster) + [returning]
         rates = {p: valuation.rate(view, p, source) for p in full}
+        # He is coming off IR because he is healthy, so price him on a healthy night. The carried
+        # per-game rate was last written while he was out (P(plays) ~0), which made him the cheapest
+        # drop: rung 4 cut the returning player 80% of the time (2026-09-28). The rest-of-season
+        # rate does not collapse that way, so it stands when there is one.
+        if source != "ros" or view.ros_rate(returning) is None:
+            healthy = view.healthy_rate(returning)
+            if healthy is not None:
+                rates[returning] = max(rates[returning], healthy)
         nights = valuation.RosterNights(view, full, rates, horizon, self.slot_order,
                                         eligibility, self.accepts)
         def cost(d):

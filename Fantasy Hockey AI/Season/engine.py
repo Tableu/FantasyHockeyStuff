@@ -261,6 +261,12 @@ class Season:
         # that game, which include results that have not happened today. Reading it would be
         # leakage of precisely the kind section 2 exists to prevent.
         self.latest_rate = {}
+        # The same rate, but never written on a night the player is injured at the lock: what a
+        # healthy night of his is worth. `latest_rate` folds the absence in (P(plays) ~0 while he
+        # is out), which is what most readers want; a player coming OFF injured reserve is healthy
+        # by definition, and pricing him on the injured number made rung 4 cut the returning player
+        # 80% of the time (2026-09-28). Read through `view.healthy_rate`.
+        self.healthy_rate = {}
 
         # Each player's NHL team as of his latest appearance, carried forward like the rate. The
         # view used to take the team map from tonight's slate alone, so a rostered player whose
@@ -317,8 +323,11 @@ class Season:
                 if frame is not None and len(frame):
                     values = self.scoreset.score_columns(frame, prefix="lambda_")
                     plays = frame["p_plays"].to_numpy("float64")
+                    hurt = self.unavailable_by_day.get(day, set())
                     for player_id, value in zip(frame["player_id"].astype(int), values * plays):
                         self.latest_rate.setdefault(int(player_id), float(value))
+                        if int(player_id) not in hurt:
+                            self.healthy_rate.setdefault(int(player_id), float(value))
                 for player_id, value in self.ros_by_day.get(pd.Timestamp(day), {}).items():
                     self.latest_ros.setdefault(int(player_id), float(value))
 
@@ -542,7 +551,7 @@ class Season:
             goalie_draw_column=self.GOALIE_DRAW_COLUMN if self.goalie_fit is not None else None,
             future_draws=(lambda _d=day, _w=week: self.future_draws(_d, _w)),
             **self._season_shape(team_index, week, opponent),
-            rate_estimate=self.latest_rate,
+            rate_estimate=self.latest_rate, healthy_estimate=self.healthy_rate,
             ros_estimate=self.latest_ros, returns=self.returns)
 
     # ---------- the loop ----------
@@ -557,6 +566,7 @@ class Season:
         # unknown, which the add/drop rule refuses to price as zero.
         for player_id, value in (prior_forward or {}).items():
             self.latest_rate.setdefault(int(player_id), float(value))
+            self.healthy_rate.setdefault(int(player_id), float(value))
 
         self.state = state_module.LeagueState(self.config, self.player_pool(), self.eligibility)
         board = pd.Series(prior_board).sort_values(ascending=False)
@@ -767,8 +777,11 @@ class Season:
         if frame is not None and len(frame):
             values = self.scoreset.score_columns(frame, prefix="lambda_")
             plays = frame["p_plays"].to_numpy("float64")
+            hurt = self.unavailable_by_day.get(day, set())
             for player_id, value in zip(frame["player_id"].astype(int), values * plays):
                 self.latest_rate[int(player_id)] = float(value)
+                if int(player_id) not in hurt:
+                    self.healthy_rate[int(player_id)] = float(value)
         if len(goalie_projections):
             for row in goalie_projections.itertuples():
                 # Stored at the naive share; a manager rescales by whichever P(start) it may read.

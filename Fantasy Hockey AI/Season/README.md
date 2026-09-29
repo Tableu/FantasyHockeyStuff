@@ -291,6 +291,32 @@ format, but **−2.0 ± 0.9 in 12-team points** (a sign flip against +2.2 at 8 d
 32) and −5.2 under 14-team banger -- the stack's lineup and transactions alone do not reliably beat
 a naive streamer; its value arrives through the add/drop rule and the orchestrator built on it.
 
+**Why rung 4 does not reliably beat rung 3 (diagnosed 2026-09-28, 2024-25, 32 drafts).** Hybrids
+in rung 4's seats, seat-paired against plain rung 4 (14-team banger, where 4 − 3 is −21.4 ± 1.3):
+rung 3's whole transaction rule +10.7 ± 1.2, rung 3's box-score rate in rung 4's rule +7.7 ± 0.9,
+rung 3's lineup −0.5 ± 0.1 (rung 4's lineup is the better one), rung 3's lineup and transactions
++9.8 ± 1.2; in the points formats the box-score rate is worse (14-team −4.2 ± 0.8). Three findings:
+
+1. **The model's rate is not the weak part.** Measured outside the harness, λ × P(plays) ranks a
+   player's next seven team games far better than rung 3's rate × dress share (Spearman 0.681 vs
+   0.561 banger, 0.692 vs 0.600 points), and rung 4's pickups realize more than rung 3's (5.52 vs
+   5.42 banger points per team game). It overrates the free agents it picks by ~14% (the maximum of
+   noisy estimates), without that costing it the choice.
+2. **Much of the gap is the shared wire, not a worse decision.** With rung 4 acting exactly as
+   rung 3 (lineup, transactions, forced drops, P(start) column; 8 drafts), rung 4 rose +10.2 and
+   rung 3 fell −7.5 in the same leagues: two managers streaming the same way split the streamers
+   rung 3 otherwise had uncontested. A 4 − 3 gap measured in one league is partly an interaction.
+3. **One real defect, fixed: rung 4 cut the player coming back from IR 80% of the time** (rung 3
+   39%). The carried per-game rate is last written on a night he was injured (P(plays) ~0), so
+   the returning player was the cheapest drop. The engine now also carries `healthy_rate` (never
+   written on a night the player is injured at the lock; `view.healthy_rate`), and
+   `FullSystem.activation_drop` prices the returning player on it when there is no rest-of-season
+   rate. Rung 4: **+0.99 ± 0.41** pts/wk banger, +0.33 ± 0.38 points. The shipped system prices
+   forced drops on the rest-of-season rate (returning players read 5.69, against 0.37 per game)
+   and is **identical** seat for seat. Making the carried rate itself "healthy" was tried first
+   and cost rung 4 −12 at 2 drafts: its transaction rule has no absence term, so the collapsed rate
+   was doing the absence pricing -- the healthy rate has to be read only where he is healthy now.
+
 Playoff rate (range across runs), 14-team points: rung 1 2%, rung 2 13-25%, rung 3 67%, rung 4
 44-78%, rung 5 59-90%, rung 6 18-19%, rung 7 80%; 12-team: every transacting rung 78-100%.
 
@@ -410,6 +436,15 @@ floor once z > ~1.1 -- 26.5% of lineup-days in the 2025-26 ladder log. Seat-pair
 drafts, new rule in rung 17's seats: strategy-beagles **+0.67 +/- 0.16 pts/wk** (halves +0.67 /
 +0.67), win +0.005 +/- 0.003; strategy.json **+0.38 +/- 0.06** (halves +0.32 / +0.45, 26 of 32
 drafts up), win -0.001 +/- 0.002. Points, not wins: it matters most when the week is decided.
+
+**The closed-form week projection counts only each night's lineup (2026-09-28).** It summed every
+rostered player's games, bench included; now each remaining night's startable players (tonight:
+`view.available`; later: not expected out) fill the slots by expected points and only the started
+ones add mean and variance, playoff nights weighted as before. Seat-paired on 2024-25, 32 drafts:
+strategy.json **+0.005 +/- 0.008** pts/wk (79% of seats identical), strategy-beagles **-0.01 +/-
+0.04** -- neutral, because since the variance-priced risk rule the lineup barely moves with z.
+P(win) calibration, 8-draft whole-league ladders (rungs 2/5/6/7): Brier 0.1509 -> 0.1490, log loss
+0.4555 -> 0.4479. Kept as a correctness fix; it feeds the playoff weights and the gate too.
 
 **The playoff objective.** Forward windows now stop at the fantasy final (`calendar.last_week`):
 rung 7's streaming-spot test had been counting NHL weeks 25-26, after the season ends, which moved
