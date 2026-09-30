@@ -83,17 +83,19 @@ def _plain(value):
 
 def params_of(strategy) -> dict:
     return {"adddrop": {k: _plain(v) for k, v in dataclasses.asdict(strategy.adddrop).items()},
-            "streaming": {k: _plain(v) for k, v in dataclasses.asdict(strategy.streaming).items()}}
+            "streaming": {k: _plain(v) for k, v in dataclasses.asdict(strategy.streaming).items()},
+            "roster": {"repair_wait_days": strategy.repair_wait_days}}
 
 
 def label(strategy) -> str:
-    return f"{strategy.adddrop.describe()} | {strategy.streaming.describe()}"
+    return (f"{strategy.adddrop.describe()} | {strategy.streaming.describe()}"
+            f" | wait={strategy.repair_wait_days}")
 
 
-def with_(base, adddrop=None, streaming=None):
+def with_(base, adddrop=None, streaming=None, roster=None):
     return dataclasses.replace(
         base, adddrop=dataclasses.replace(base.adddrop, **(adddrop or {})),
-        streaming=dataclasses.replace(base.streaming, **(streaming or {})))
+        streaming=dataclasses.replace(base.streaming, **(streaming or {})), **(roster or {}))
 
 
 def stage_a(ref):

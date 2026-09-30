@@ -169,7 +169,7 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | `draft` | `vor_values` | `consensus` | what the VOR draft board values players on: `consensus`, the external sources' preseason projections alone (the only values a real draft has), or `own_model`, our opening-week rest-of-season rows (a backtest reference; they need the season's own games) |
 | | `min_sources` | 2 | sources a player needs for the consensus; below it he keeps last season's total, or his thin consensus if he has none |
 | | `undated_sources` | `include` | a source with no publish date (Dom's 2025-26 sheet; every 2026-27 file today) is used, or dropped with `exclude`; logged either way |
-| `roster` | `repair_wait_days` | 7 | a roster that cannot fill every slot spends a move to repair it (every rung that transacts), unless an IR player expected back within this many days would fill the slot himself. Return dates are the injury model's, or `Settings/returns-<league>.json` for a live league. Judgment call, 2026-09-30, unmeasured |
+| `roster` | `repair_wait_days` | 7 | a roster that cannot fill every slot spends a move to repair it (every rung that transacts), unless an IR player expected back within this many days would fill the slot himself. Return dates are the injury model's, or `Settings/returns-<league>.json` for a live league. Judgment call, 2026-09-30. Screened in the realistic league (2024-25, 32 drafts): 0 (repair at once) minus 7 = -0.08 +/- 0.22 pts/wk, win -0.016 +/- 0.007 -- neutral on points, a hint in the wait's favour on wins; kept. Tunable as a candidate: `oneseat.py --set roster.repair_wait_days=N` |
 
 ### Where the values come from
 

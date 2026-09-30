@@ -23,7 +23,8 @@ make the moves on the platform yourself.
     Tonight      tonight's lineup from the roster you hold now: expected points, chance he plays /
                  starts, puck time (local), injury / GTD flag and a lock once his game has started;
                  then his projected stat line
-                 for tonight (per game, in the league's scored stats)
+                 for tonight (per game, in the league's scored stats); then the bench and the IR
+                 players, each with his report
     Moves        IR moves, adds and drops, claims -- with the rate each was priced on
     Upgrade      permanent pickups: the plan's upgrades and claims, highlighted, above the add/drop
                  rule's own pricing of the top free agents on the roster you hold now, each with his
@@ -238,14 +239,6 @@ class PlanWindow:
 
     def _build_sidebar(self, parent):
         side = ttk.Frame(parent, padding=(8, 0, 0, 0))
-
-        def listing(title, height):
-            ttk.Label(side, text=title, font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(8, 2))
-            box = tk.Listbox(side, height=height, activestyle="none", font=("Segoe UI", 9))
-            box.pack(fill="x")
-            return box
-        self.goalie_box = listing("My goalies tonight", 3)
-        self.watch_box = listing("Watch list", 5)
         self.problem_var = tk.StringVar()
         ttk.Label(side, textvariable=self.problem_var, style="Warn.TLabel", wraplength=320).pack(anchor="w", pady=(6, 0))
         self.fresh_var = tk.StringVar()
@@ -375,8 +368,17 @@ class PlanWindow:
                           "" if s["p_plays"] is None else f"{s['p_plays']:.0%}", local_time(s["puck_utc"]),
                           s["flag"] or "", "\U0001f512" if s.get("locked") else "",
                           *self._stats(s.get("stats"))), tags))
+        # Bench and IR players carry their report too (OUT, DTD, GTD...), from the roster you hold now.
+        status = {r["player"]: r.get("status") for r in p.get("roster", [])}
         for name, stats in zip(p["bench_now"], p.get("bench_now_stats") or [None] * len(p["bench_now"])):
-            rows.append((("BN", name, "", "", "", "", "", "", *self._stats(stats)), ()))
+            flag = status.get(name)
+            rows.append((("BN", name, "", "", "", "", flag or "", "", *self._stats(stats)),
+                         (flag,) if flag in STATUS_COLOURS else ()))
+        for r in p.get("roster", []):
+            if r.get("on_ir"):
+                flag = r.get("status")
+                rows.append((("IR", r["player"], "", "", "", "", flag or "", "", *self._stats(None)),
+                             (flag,) if flag in STATUS_COLOURS else ()))
         self.tonight.set_rows(rows)
         # Tonight is always the per-game projection; the other tables say what their stats are.
         basis = p.get("stats_basis", "")
@@ -419,12 +421,6 @@ class PlanWindow:
                                   *self._stats(r.get("stats"))), ())
                                 for r in sorted(p["opponent_roster"], key=lambda r: -r["rate"])])
 
-        self.goalie_box.delete(0, "end")
-        for g in p["goalies"]:
-            self.goalie_box.insert("end", f"{g['player']}: {g['p_start']:.0%}" + (f"  ({g['note']})" if g["note"] else ""))
-        self.watch_box.delete(0, "end")
-        for w in p["watch"]:
-            self.watch_box.insert("end", f"{w['player']}: {w['status']}" + (f" -- {w['note']}" if w["note"] else ""))
         self.problem_var.set("\n".join(p["problems"]))
 
     def _fill_week(self):

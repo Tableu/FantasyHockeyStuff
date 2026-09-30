@@ -122,7 +122,7 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
         return tails[p]
 
     pairs = []
-    for incoming in candidates:
+    for rank, incoming in enumerate(candidates):
         tried = 0
         for outgoing in drops:
             if tried >= params.drop_shortlist:
@@ -147,7 +147,10 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
                     gain -= lost
             pairs.append({"incoming": incoming, "outgoing": outgoing, "gain": gain, "bar": bar,
                           "claim": clears is not None, "rates": rates, "nights": nights,
-                          "tail_lost": lost})
+                          "tail_lost": lost,
+                          # Whether the rule itself prices him: a wider `shortlist` (the plan
+                          # window's options) prices free agents the rule never considers.
+                          "shortlisted": rank < params.shortlist})
     # Stable, so equal margins keep the pricing order: the first priced wins, as it always has.
     pairs.sort(key=lambda q: q["gain"] - q["bar"], reverse=True)
     return pairs

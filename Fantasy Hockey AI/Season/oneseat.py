@@ -159,14 +159,14 @@ def summary(result) -> str:
 
 
 def with_settings(base, settings):
-    """`block.key=value` overrides of the add/drop and streaming blocks."""
-    changes = {"adddrop": {}, "streaming": {}}
+    """`block.key=value` overrides of the add/drop and streaming blocks, and roster.repair_wait_days."""
+    changes = {"adddrop": {}, "streaming": {}, "roster": {}}
     for item in settings:
         key, _, raw = item.partition("=")
         block, _, name = key.partition(".")
         if block not in changes or not name or not raw:
-            raise SystemExit(f"--set {item!r}: use adddrop.KEY=VALUE or streaming.KEY=VALUE")
-        current = getattr(getattr(base, block), name)
+            raise SystemExit(f"--set {item!r}: use adddrop.KEY, streaming.KEY or roster.KEY =VALUE")
+        current = getattr(base, name) if block == "roster" else getattr(getattr(base, block), name)
         value = json.loads(raw) if raw not in ("inf", "none") else (
             math.inf if raw == "inf" else None)
         if isinstance(current, float) and isinstance(value, int):
@@ -186,7 +186,8 @@ def parse_args():
                    help="A strategy file for the candidate (differing only in add/drop and "
                         "streaming)")
     p.add_argument("--set", action="append", default=[], metavar="BLOCK.KEY=VALUE",
-                   help="Candidate override on top of --candidate or --strategy (repeatable)")
+                   help="Candidate override on top of --candidate or --strategy (repeatable); "
+                        "roster.repair_wait_days too")
     p.add_argument("--opponents", default=",".join(map(str, DEFAULT_OPPONENTS)),
                    help="Opponent rungs, comma-separated")
     p.add_argument("--opponent-sd", type=float, default=None,

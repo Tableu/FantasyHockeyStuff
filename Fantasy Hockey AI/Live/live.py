@@ -339,7 +339,8 @@ class LiveRunner:
         self.sim_season = sim_season or self._latest_sim_season()
         # Seeded by the date, so two passes over the same reports give the same plan: a
         # recommendation that flips between passes for no reason but the random stream is noise.
-        self.simulator = simlayer.build_simulator(self.sim_season, seed=int(day.strftime("%Y%m%d")))
+        self.seed = int(day.strftime("%Y%m%d"))
+        self.simulator = simlayer.build_simulator(self.sim_season, seed=self.seed)
         self.goalie_fit = simlayer.load_goalie_fit(self.sim_season)
         dispersion = paths.dispersion_path(self.sim_season)
         self.theta = ({k: v["theta"] for k, v in json.loads(dispersion.read_text(encoding="utf-8"))
@@ -552,6 +553,10 @@ class LiveRunner:
         engine's decision draws are made (engine.decision_draws / _goalie_draws)."""
         if not len(skaters):
             return {}
+        # Every pass starts the day's stream afresh. The runner lives all day in the plan window,
+        # and a stream carried on from the last pass gave a refresh over unchanged reports a
+        # different lineup than a fresh process -- the flip the date seed exists to prevent.
+        self.simulator.rng = np.random.default_rng(self.seed)
         frame = skaters.reset_index(drop=True)
         draws = self.simulator.draw(frame, DECISION_SIMS)
         points = self.scoreset.score_draws(draws)
@@ -704,7 +709,9 @@ class LiveRunner:
                 made[(p, d)]["rank"] = ranked
                 continue
             note = ("rental in plan" if p in rented else "in plan, other drop" if p in added
-                    else "clears bar" if clears else "below bar")
+                    else ("clears bar" if q["shortlisted"]
+                          else f"clears bar, outside the rule's top {self.strategy.adddrop.shortlist}")
+                    if clears else "below bar")
             choices.append({"rank": ranked, "kind": "Claim" if q["claim"] else "Add", "add": name(p),
                             "drop": name(d) if d is not None else None,
                             "gain": round(q["gain"], 1), "bar": round(q["bar"], 1),
@@ -826,6 +833,7 @@ class LiveRunner:
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "options": choices, "week_plan": week_plan, "week_plans": week_plans,
             "stream_mode": self.strategy.streaming.mode, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
+            "shortlist": self.strategy.adddrop.shortlist,
             "lineup": slots, "bench": bench, "watch": watch,
             "goalies": [{"player": name(int(r.player_id)), "p_start": round(float(r.p_start), 3),
                          "note": _note(r.note)} for r in goalie_notes.itertuples()],
@@ -937,7 +945,9 @@ def render(plan: dict) -> str:
                   f"The plan's upgrades and claims first, then the best pickups on your roster as it "
                   f"stands, each with its best drop (rentals are in the week's streaming plan). Gain = lineup points over {window}; a move is made only when the gain clears "
                   f"the bar (its own sd x the margin, plus the claim premium for a claim). Ranked by "
-                  f"edge = gain - bar, as the rule ranks them.", "",
+                  f"edge = gain - bar, as the rule ranks them. The rule prices only its top "
+                  f"{plan.get('shortlist', 10)} free agents by their own value over the window; a pickup "
+                  f"outside them is not made even when it clears.", "",
                   "| # | Move | Add | pts/g | games | Drop | pts/g | games | Gain | Bar | Edge | |",
                   "|---|---|---|---|---|---|---|---|---|---|---|---|"]
         blank = lambda x, f="": "" if x is None else format(x, f)

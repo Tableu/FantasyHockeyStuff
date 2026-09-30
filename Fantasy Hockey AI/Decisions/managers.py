@@ -833,7 +833,8 @@ VOR_TWIN = 10
 # Section 11's tuning seat: rung 17 (the shipped system) run on a candidate's parameters, seated
 # beside the incumbent rung 17 so the pair differ in those parameters and nothing else.
 CANDIDATE, CANDIDATE_OF = 27, 17
-TUNABLE = ("adddrop", "streaming")
+# What a candidate may change: the two transaction blocks, and the repair wait (roster).
+TUNABLE = ("adddrop", "streaming", "repair_wait_days")
 
 
 def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, replication=0,
@@ -842,7 +843,7 @@ def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, rep
 
     `strategy` (a `strategy.Strategy`) carries every rung's parameters; vary one with
     `dataclasses.replace` rather than by seating a differently built manager. `candidate`, a
-    strategy differing only in its add/drop and streaming blocks, is what the CANDIDATE seats
+    strategy differing only in TUNABLE (its add/drop and streaming blocks, the repair wait), is what the CANDIDATE seats
     run -- anything else (the goalie prior, the draft, the playoff behaviour) must match the
     field's, or the pair would differ in more than the parameters being tuned.
 
