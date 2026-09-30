@@ -12,25 +12,42 @@ from nhl_pipeline.http_client import get_json
 
 BASE = "https://www.fleaflicker.com/api"
 _PAGE_SIZE = 30
+# Fewer players than this is not the whole league's listing. Once a season's first scoring period
+# opens, the default listing sorts by the current period and stops at 200 (league 12090,
+# 2026-09-29: resultTotal 200) -- everyone not scoring, the injured included, drops out of it.
+# The whole pool is ~1,300.
+FULL_LISTING = 1000
 
 
-def get_players(league_id: int) -> list:
-    """Pages via result_offset until the listing is exhausted -- the endpoint doesn't reliably
-    return a short final page to signal the end (a naive "stop when the page is smaller than the
-    page size" loop kept paging past the real total and got rate-limited). A league that reports
-    `resultTotal` stops there; one that does not (league 12090 returns only `resultOffsetNext`)
-    stops when `resultOffsetNext` is gone. Reading `resultTotal` alone, a league without it
-    returned just the first page of 30."""
+class PartialListing(RuntimeError):
+    """The listing reported fewer than FULL_LISTING players: a capped or partial read."""
+
+
+def get_players(league_id: int, sort_season: int | None = None) -> list:
+    """Every player in `league_id`'s listing. Pages via result_offset until the listing is
+    exhausted -- the endpoint doesn't reliably return a short final page to signal the end (a naive
+    "stop when the page is smaller than the page size" loop kept paging past the real total and got
+    rate-limited). A league that reports `resultTotal` stops there; one that does not (league 12090
+    before its season, returning only `resultOffsetNext`) stops when `resultOffsetNext` is gone.
+
+    `sort_season`: sort by that season's totals (Fleaflicker's season = its starting year). A
+    completed season lists every player (1,300 on 2026-09-29) with each one's CURRENT injury flag;
+    in-season the default listing is capped at 200. Raises PartialListing when the listing reports
+    fewer than FULL_LISTING players, so a capped read can never pass for the whole league."""
     players: list = []
     offset = 0
     total = None
+    params = {"sport": "NHL", "league_id": league_id}
+    if sort_season is not None:
+        params["sort_season"] = sort_season
     while total is None or offset < total:
-        data = get_json(
-            f"{BASE}/FetchPlayerListing",
-            params={"sport": "NHL", "league_id": league_id, "result_offset": offset},
-        )
+        data = get_json(f"{BASE}/FetchPlayerListing", params={**params, "result_offset": offset})
         if total is None and "resultTotal" in data:
             total = data["resultTotal"]
+            if total < FULL_LISTING:
+                raise PartialListing(
+                    f"league {league_id}'s listing reports {total} players (sort {data.get('sort')}); "
+                    f"a full one has ~1,300 -- pass sort_season=<a completed season>")
         page = data.get("players", [])
         if not page:
             break
@@ -39,6 +56,9 @@ def get_players(league_id: int) -> list:
         if total is None and following is None:
             break
         offset = following if following is not None else offset + _PAGE_SIZE
+    if len(players) < FULL_LISTING:
+        raise PartialListing(f"league {league_id}'s listing returned {len(players)} players; "
+                             f"a full one has ~1,300")
     return players
 
 

@@ -76,7 +76,12 @@ def sync_fleaflicker(cursor, season_id: int, league_id: int) -> dict:
         cursor.execute(f"DELETE FROM {UNRESOLVED_TABLE} WHERE SourceID = ? AND RawName = ?", platform_id, raw)
     player_index = name_resolver.load_player_index(cursor)
     alias_map = name_resolver.load_alias_map(cursor, ALIAS_TABLE, platform_id)
-    raw_players = fleaflicker.get_players(league_id)
+    # The season before this one: in-season the default listing stops at 200 players
+    # (api/fleaflicker.get_players).
+    cursor.execute("SELECT SeasonID_NHL FROM Reference.Seasons WHERE SeasonID = ?", season_id)
+    row = cursor.fetchone()
+    sort_season = int(str(row[0])[:4]) - 1 if row and row[0] else None
+    raw_players = fleaflicker.get_players(league_id, sort_season=sort_season)
 
     db.delete_where(cursor, "Fantasy.PlayerPositions", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
     ensure_ids_table(cursor)

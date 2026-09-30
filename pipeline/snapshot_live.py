@@ -76,8 +76,13 @@ def run_source(conn, kind: str, source_key: str, work, dry_run: bool, max_age=No
 def snapshot_injuries(conn, season_id, teams, player_index, dry_run, max_age=None):
     def fleaflicker_work(cursor, run_id, source):
         # Designations are the platform's, not the league's: read through the registry's active
-        # Fleaflicker league (today 12090).
-        rows = fleaflicker.injuries(fleaflicker.get_players(fantasy_leagues.fleaflicker_league_id()))
+        # Fleaflicker league (today 12090). Sorted by the season before SEASON: once the first
+        # scoring period opens, the default listing stops at the 200 players scoring now, and on
+        # 2026-09-29 22:00 a snapshot saw 1 injured player instead of ~79 and wrote the other 78
+        # as cleared (write_status: off the report = ACTIVE) -- the live plan then activated two
+        # IR players who were OUT. get_players now refuses a listing that short.
+        rows = fleaflicker.injuries(fleaflicker.get_players(
+            fantasy_leagues.fleaflicker_league_id(), sort_season=int(SEASON[:4]) - 1))
         resolver = live.fleaflicker_resolver(cursor, season_id, player_index)
         status = live.fleaflicker_status_rows(rows, teams, resolver)
         _warn_unresolved("Fleaflicker", status)
