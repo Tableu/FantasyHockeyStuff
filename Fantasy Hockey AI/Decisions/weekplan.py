@@ -141,6 +141,9 @@ class WeekPlanner:
         self.horizon = horizon
 
         self._nights, self._next, self._memo, self._cost, self._plays = {}, {}, {}, {}, {}
+        # (the plan being extended, {night: its lineup value}): every trial in one round of
+        # `plan` compares against the same plan, so its side of `delta` is priced once a night.
+        self._base = None
         self._by_night, self._reserve = {}, {}
         self.week_end = view.calendar.weeks[view.week - 1].end
         # Buying next week's roster: the week's last day, the matchup won (`gate` supplies z).
@@ -311,6 +314,7 @@ class WeekPlanner:
         while True:
             best = None
             held = self.held(moves)
+            self._base = (moves, {})
             for incoming, day, effective in self.candidates:
                 if incoming in held[0] or incoming in held[1]:
                     continue
@@ -396,11 +400,16 @@ class WeekPlanner:
         nights = sorted({n for p in players
                          for n in self.nights_of(p) + (self.next_nights_of(p) if late else [])
                          if n >= effective})
+        cache = self._base[1] if self._base is not None and old is self._base[0] else None
         total = 0.0
         for night in nights:
+            before = cache.get(night) if cache is not None else None
+            if before is None:
+                before = self.night_value(night, self.roster_at(self.roster, old, night))
+                if cache is not None:
+                    cache[night] = before
             total += self.weight(night, late) * (
-                self.night_value(night, self.roster_at(self.roster, new, night))
-                - self.night_value(night, self.roster_at(self.roster, old, night)))
+                self.night_value(night, self.roster_at(self.roster, new, night)) - before)
         return total
 
     def execute(self, plan) -> list:

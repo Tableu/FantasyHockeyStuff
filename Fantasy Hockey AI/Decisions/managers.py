@@ -151,8 +151,22 @@ class Manager:
                                    self.accepts)
 
     def _fillable(self, roster, eligibility) -> int:
-        """How many active slots this roster could fill on a night when everyone plays."""
-        return slots_module.matching_size(roster, self.slot_order, eligibility, self.accepts)
+        """How many active slots this roster could fill on a night when everyone plays.
+
+        Cached on the set of players, for the eligibility table it was computed with: the week
+        plan asks this of ~3.6M rosters a season, and matching_size's own cache key (a Counter
+        of eligibility sets) cost ~20 us a call to build -- a sixth of a season's run time."""
+        if (eligibility is not getattr(self, "_fill_eligibility", None)
+                or len(self._fill_cache) > 50_000):          # bounded: a season asks ~10^6
+            self._fill_eligibility, self._fill_cache = eligibility, {}
+        key = frozenset(roster)
+        if len(key) != len(roster):        # a player listed twice counts twice in the matching
+            return slots_module.matching_size(roster, self.slot_order, eligibility, self.accepts)
+        size = self._fill_cache.get(key)
+        if size is None:
+            size = self._fill_cache[key] = slots_module.matching_size(
+                roster, self.slot_order, eligibility, self.accepts)
+        return size
 
     def _fieldable(self, roster, eligibility, before=None) -> bool:
         """The check a transaction has to pass: it may not leave the roster less able to fill

@@ -65,6 +65,13 @@ class RosterNights:
 
     `values` is the rate each player is worth when he plays. Tonight a player flagged injured is
     left out; on later nights he is not, because a manager knows he is out today, not for how long.
+
+    A goalie is worth his average share of starts on every night, back-to-backs included. Tested
+    and not shipped (2026-09-30): each night at his chance of starting it, by start share and
+    night type (a starter starts 69% of normal nights, 34% of a back-to-back's second, 2024-25;
+    Brier 0.1492 -> 0.1440 on 2025-26), in the upgrade rule and the week plan, cost the shipped
+    system 1.48 +/- 0.81 pts/wk in the realistic league (2024-25, 64 drafts, halves -1.84 /
+    -1.11), win -0.028 +/- 0.014.
     """
 
     def __init__(self, view, roster, values, weeks_ahead, slot_order, eligibility, accepts):
