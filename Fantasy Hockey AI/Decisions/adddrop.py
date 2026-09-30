@@ -49,6 +49,7 @@ class AddDropParams:
     shortlist: int                    # free agents priced on the roster per pass
     drop_shortlist: int               # cheapest fieldable drops tried against each
     tail: str                         # value after the window: "none", "cost" or "net" (below)
+    goalie_absence: bool              # an injured goalie's window value counts games from his return
 
     def __post_init__(self):
         if self.tail not in TAILS:
@@ -56,7 +57,8 @@ class AddDropParams:
 
     def describe(self) -> str:
         return (f"H={self.horizon_weeks} m={self.margin:g} rate={self.rate_source} "
-                f"claim={self.claim_premium:g}" + ("" if self.tail == "none" else f" tail={self.tail}"))
+                f"claim={self.claim_premium:g}" + ("" if self.tail == "none" else f" tail={self.tail}")
+                + (" gabs" if self.goalie_absence else ""))
 
 
 # What the rest of the season after the H-week window counts for. A swap is permanent, but the

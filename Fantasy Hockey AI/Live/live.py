@@ -418,7 +418,7 @@ class LiveRunner:
                 closed_tonight.add(int(p))
 
         def view(state=state):
-            return view_module.SlateView(
+            v = view_module.SlateView(
                 day=day, week=week, config=self.config, calendar=self.calendar,
                 projections=skaters[[c for c in skaters.columns if not c.startswith(("target_", "label_"))]],
                 goalie_projections=goalie_projections, unavailable=unavailable, injured=injured,
@@ -431,6 +431,8 @@ class LiveRunner:
                 week_weight_mode=self.strategy.playoff_week_weight,
                 rate_estimate=rate_estimate, ros_estimate=ros_estimate, returns=returns,
                 closed_tonight=closed_tonight)
+            v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
+            return v
 
         before = copy.deepcopy(state.teams[snapshot.me].__dict__)
         # The league as it stands, kept apart: the window shows the roster and tonight's lineup

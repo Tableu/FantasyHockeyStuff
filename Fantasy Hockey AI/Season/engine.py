@@ -551,7 +551,7 @@ class Season:
 
     def _view_for(self, team_index, day, week, opponent, history, goalie_projections):
         projections, playing = self._slate_for(day)
-        return view_module.SlateView(
+        view = view_module.SlateView(
             day=day, week=week, config=self.config, calendar=self.calendar,
             projections=projections,
             goalie_projections=goalie_projections,
@@ -569,6 +569,9 @@ class Season:
             **self._season_shape(team_index, week, opponent),
             rate_estimate=self.latest_rate, healthy_estimate=self.healthy_rate,
             ros_estimate=self.latest_ros, returns=self.returns)
+        # A per-seat pricing choice, so the candidate seat can differ (valuation.player_value).
+        view.goalie_absence = self.field[team_index].strategy.adddrop.goalie_absence
+        return view
 
     # ---------- the loop ----------
 

@@ -7,7 +7,8 @@
     "claim_premium": 0.0,
     "shortlist": 10,
     "drop_shortlist": 4,
-    "tail": "cost"
+    "tail": "cost",
+    "goalie_absence": false
   },
   "streaming": {
     "spots": 2,

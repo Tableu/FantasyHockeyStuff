@@ -55,8 +55,19 @@ def known(view, player_id, source="per_game") -> bool:
 
 
 def player_value(view, player_id, weeks_ahead, source="per_game") -> float:
-    """His rate times his team's games from today through the window's end."""
+    """His rate times his team's games from today through the window's end.
+
+    With `adddrop.goalie_absence` (the view's `goalie_absence`), an injured goalie's games count
+    only from his expected return. A skater's rest-of-season rate already reads his injury flag;
+    a goalie's start share (Projections/goalie_workload.py) does not, so without this an injured
+    starter kept his full value in the free-agent shortlist, drop costs and streaming spots
+    (the nightly pricing already skips his nights before the return, `view.out_on`)."""
     games = view.games_through(player_id, weeks_ahead=weeks_ahead)
+    if (games > 0 and getattr(view, "goalie_absence", False)
+            and player_id in getattr(view, "returns", {})
+            and "G" in view._state.eligibility.get(player_id, ())):
+        games = sum(1 for n in view.nights_through(player_id, weeks_ahead)
+                    if not view.out_on(player_id, n))
     return rate(view, player_id, source) * games if games > 0 else 0.0
 
 
