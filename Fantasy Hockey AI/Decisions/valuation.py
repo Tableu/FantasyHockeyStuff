@@ -29,6 +29,14 @@ def rate(view, player_id, source="per_game") -> float:
 
     `source="ros"` reads the rest-of-season projection and falls back to the per-game carried
     rate for anyone it does not cover (goalies, and skaters with no rest-of-season row yet).
+
+    The rest-of-season rate is per TEAM game, so it carries the games a player is expected to
+    miss -- even when a healthy player's this-week games are priced (Kane, 76 of 84 projected:
+    3.17 a team game, 3.52 a game played). Tested and not shipped (2026-09-30): dividing the
+    availability back out for this week's games (week plan and daily streaming, floored at 0.5)
+    cost the shipped system 1.65 +/- 1.00 pts/wk in the realistic league (2024-25, 64 drafts,
+    halves -1.54 / -1.76), win -0.020; it made more moves and fewer rentals. Availability mixes
+    injuries with healthy scratches, so dividing it out inflates fringe players too.
     """
     if source == "ros":
         value = view.ros_rate(player_id)

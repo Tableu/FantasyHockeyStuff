@@ -517,7 +517,8 @@ def check_team_plans(alternatives=3) -> str:
                     counts["options"] += 1
                     p = o["incoming"]
                     assert view.nhl_team.get(p) == team, f"option {p} is not on the slot's team {team}"
-                    assert group in eligibility.get(p, ()), f"option {p} cannot play the slot's {group}"
+                    assert weekplan.group_of(eligibility.get(p, ())) == group, \
+                        f"option {p} cannot fill the slot's {group}"
                     assert o["gain"] > o["bar"] and o["games"] >= 1, f"an option under its bar or idle: {o}"
             if plan["opening"] is not None:
                 assert plan["opening"]["team"] not in opened, f"two plans open on {plan['opening']['team']}"

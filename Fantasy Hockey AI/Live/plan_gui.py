@@ -170,7 +170,8 @@ class PlanWindow:
         # starts open.
         self.week_open = {("plan", "A")}
         self.week_rows = []                # Week tab row -> its plan's or slot's key (None: an option)
-        self.week = self._table("Week", [("plan", "Plan", 70), ("day", "Day", 110), ("team", "Team", 50),
+        self.week = self._table("Week", [("plan", "Plan", 70), ("day", "Day", 110),
+                                         ("until", "Dropped", 70), ("team", "Team", 50),
                                          ("pos", "Pos", 60), ("kind", "Move", 90), ("add", "Add", 300),
                                          ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
                                          ("add_games", "Games", 60),
@@ -449,7 +450,7 @@ class PlanWindow:
             label, moves = plan["label"], plan["moves"]
             key = ("plan", label)
             without = plan.get("without") or []
-            rows.append(((f"{arrow(key)} {label}", weekday(moves[0]["day"]), "", "",
+            rows.append(((f"{arrow(key)} {label}", weekday(moves[0]["day"]), "", "", "",
                           f"{len(moves)} move{'s' if len(moves) != 1 else ''}",
                           " \u2192 ".join(plan.get("schedule") or [w["add"] for w in moves]), "", "",
                           blank(plan.get("games")),
@@ -466,10 +467,9 @@ class PlanWindow:
                 day = weekday(w["day"])
                 if w["from"] != w["day"]:
                     day += f" (from {pd.Timestamp(w['from']).strftime('%a')})"
-                if w.get("until"):
-                    # His Games stop here: the plan drops him that day for its next rental.
-                    day += f" (dropped {pd.Timestamp(w['until']).strftime('%a')})"
-                rows.append(((f"   {arrow(slot_key) if options else ''}", day, w.get("team") or "",
+                # The day the plan drops him for its next rental: his Games stop there.
+                until = pd.Timestamp(w["until"]).strftime("%a") if w.get("until") else ""
+                rows.append(((f"   {arrow(slot_key) if options else ''}", day, until, w.get("team") or "",
                               w.get("pos") or "", w["kind"], w["add"], _num(w["add_rate"]),
                               _pct(w.get("add_periph")), w["add_games"],
                               w["drop"] or "(open spot)", _num(w["drop_rate"]), blank(w["drop_games"]),
@@ -482,7 +482,7 @@ class PlanWindow:
                 for rank, o in enumerate(options, 1):
                     start = "" if o["from"] == w["from"] else f" (from {pd.Timestamp(o['from']).strftime('%a')})"
                     status = f" [{o['status']}]" if o.get("status") not in (None, "ACTIVE") else ""
-                    rows.append((("", "", "", o["positions"], o["kind"], f"      {rank}. {o['add']}{status}{start}",
+                    rows.append((("", "", "", "", o["positions"], o["kind"], f"      {rank}. {o['add']}{status}{start}",
                                   _num(o["add_rate"]), _pct(o.get("add_periph")), o["add_games"],
                                   "", "", "", f"{o['gain']:+.1f}", f"{o['bar']:.1f}", f"{o['edge']:+.1f}",
                                   "", ""),
@@ -490,7 +490,7 @@ class PlanWindow:
                     self.week_rows.append(None)
         empty = ("No rentals worth a move this week." if p.get("stream_mode") == "week"
                  else "Streaming decides a day at a time (strategy mode 'daily').")
-        self.week.set_rows(rows or [(("", "", "", "", "", empty) + ("",) * 11, ("empty",))])
+        self.week.set_rows(rows or [(("", "", "", "", "", "", empty) + ("",) * 11, ("empty",))])
 
     def _toggle_week_plan(self, index):
         """A click on a plan's row opens it (its slots beneath) or closes it; on a slot's row, its

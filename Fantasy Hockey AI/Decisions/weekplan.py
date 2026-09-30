@@ -506,9 +506,19 @@ class WeekPlanner:
 # P(a free agent is still free) 0, 1, 2, 3 and 4+ days after the plan picked him (2024-25 backtest,
 # the shipped field; see the module docstring): a team slot's options are valued on it.
 SURVIVAL_BY_DAYS = (1.0, 0.71, 0.59, 0.51, 0.44)
-# The positions a team slot fills. Forwards are split: the league's lineup names C, LW and RW apart.
-GROUPS = ("C", "LW", "RW", "D", "G")
-OPTIONS_PER_SLOT = 6        # the players on a slot's team priced as its options
+# What a team slot is filled by: any skater, or a goalie. Until 2026-09-30 a slot was one position
+# (C, LW, RW, D), so "Wed PHI D" listed PHI defencemen only, even when a PHI forward could have
+# taken the same opening -- the league's F and F/D slots take several positions, and each option is
+# priced by solving the lineup with him in, so a position that does not fit simply gains less. A
+# plan may still hold two skaters of one team on one day: a slot's key can be used again, each time
+# for a player the plan does not already hold.
+GROUPS = ("SKATER", "G")
+OPTIONS_PER_SLOT = 8        # the players on a slot's team priced as its options
+
+
+def group_of(eligibility) -> str:
+    """The slot group a player with these positions fills."""
+    return "G" if "G" in eligibility else "SKATER"
 # Slots this close in expected value (points) count as tied, and the one whose pick is done playing
 # sooner goes in: it leaves more of the week for another move.
 CHAIN_TIE = 0.1
@@ -552,9 +562,10 @@ class TeamPlans:
         options = {}
         for q in pool:
             team = view.nhl_team.get(q)
-            groups = [g for g in GROUPS if g in p.eligibility.get(q, ())]
-            if team is None or not groups:
+            positions = p.eligibility.get(q, ())
+            if team is None or not positions:
                 continue
+            groups = [group_of(positions)]
             if q in p.claimable:
                 days = [(today, max(view.waiver_clears(q), today))]
             else:
@@ -651,25 +662,19 @@ class TeamPlans:
             open_spots -= into_open
 
     def made(self, plan):
-        """Today's moves as WeekPlanner made them, each as the team slot of his best position
-        (priced on today's moves before it): (moves, spent, open spots)."""
+        """Today's moves as WeekPlanner made them, each as the team slot of his group (priced on
+        today's moves before it): (moves, spent, open spots)."""
         p = self.p
         moves, spent, open_spots = [], {}, p.view.roster_room()
         for m in plan:
             if m["day"] != p.today:
                 continue
             team = p.view.nhl_team.get(m["incoming"])
-            best = None
-            for g in GROUPS:
-                if g not in p.eligibility.get(m["incoming"], ()):
-                    continue
-                priced = self.price((team, g, p.today), moves, p.held(moves), spent, open_spots,
-                                    drops={m["outgoing"]}, stand_in=(m["incoming"], m["effective"]))
-                if priced is not None and (best is None or priced[0] > best[0]):
-                    best = priced
+            group = group_of(p.eligibility.get(m["incoming"], ()))
+            best = self.price((team, group, p.today), moves, p.held(moves), spent, open_spots,
+                              drops={m["outgoing"]}, stand_in=(m["incoming"], m["effective"]))
             if best is None:                  # priced on less of the plan, it no longer clears
-                move = dict(m, team=team, expected=m["gain"] - m["bar"],
-                            group=next((g for g in GROUPS if g in p.eligibility.get(m["incoming"], ())), None))
+                move = dict(m, team=team, expected=m["gain"] - m["bar"], group=group)
                 move["options"] = [self.option(move)]
                 cost = p.move_cost(p.today, m["kind"], m["outgoing"])
                 best = (move["expected"], moves + [move], cost, m["outgoing"] is None, p.today)

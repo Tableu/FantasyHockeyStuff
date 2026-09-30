@@ -720,7 +720,8 @@ class LiveRunner:
                              "gain": round(m["gain"], 1), "bar": round(m["bar"], 1),
                              "edge": round(m["gain"] - m["bar"], 1),
                              "team": teams.get(m["team"]) if m.get("team") is not None else None,
-                             "pos": m.get("group"),
+                             # The pick's own positions: a slot takes any skater (or a goalie).
+                             "pos": "/".join(sorted(self.eligibility.get(p, ()))) or m.get("group"),
                              "expected": None if m.get("expected") is None else round(m["expected"], 1),
                              "options": option_rows(m.get("options", []))})
             return rows
@@ -735,8 +736,9 @@ class LiveRunner:
                 "expected": None if w.get("expected") is None else round(w["expected"], 1),
                 "games": w.get("games"), "thinnest": w.get("thinnest"),
                 "without": [teams.get(t, "?") for t in w.get("without", [])],
-                # The plan's schedule: "Tue NYR LW", one per slot.
-                "schedule": [f"{pd.Timestamp(m['day']).strftime('%a')} {m['team'] or '?'} {m['pos'] or ''}".strip()
+                # The plan's schedule: "Tue NYR", one per slot (a slot takes any skater, so no
+                # position; the slot rows show the pick's).
+                "schedule": [f"{pd.Timestamp(m['day']).strftime('%a')} {m['team'] or '?'}"
                              for m in slot_list],
                 "moves": slot_list})
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
