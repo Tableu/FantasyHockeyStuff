@@ -7,11 +7,19 @@
                                            optional sort on a header click and action on a row click
 """
 
+import tkinter.font as tkfont
+
 from tksheet import Sheet
 
 TABLE_FONT = ("Segoe UI", 9, "normal")
 HEADER_FONT = ("Segoe UI", 9, "bold")
 TEXT_KEYS = {"player", "add", "drop", "note", "slot", "after"}     # left-aligned; the rest centred
+# Columns whose text wraps onto more lines, the row growing to fit, rather than running past the
+# cell's edge: an add or a drop can be a long name with a status and a start day, or a week plan's
+# whole schedule. Re-wrapped when a column is resized.
+WRAP_KEYS = {"add", "drop"}
+ROW_HEIGHT = 22
+CELL_PADDING = 12               # pixels of a column's width the text may not use
 
 
 def bind_header_clicks(sheet, on_column) -> None:
@@ -67,8 +75,10 @@ class Table:
         self.styles = styles
         # A blank heading stays blank: tksheet otherwise shows the column's letter ("H").
         self.sheet = Sheet(parent, show_row_index=False, show_top_left=False, font=TABLE_FONT,
-                           header_font=HEADER_FONT, default_row_height=22, table_bg="white",
+                           header_font=HEADER_FONT, default_row_height=ROW_HEIGHT, table_bg="white",
                            show_default_header_for_empty=False)
+        self.font = tkfont.Font(root=parent, font=TABLE_FONT)
+        self.wrapped = [i for i, k in enumerate(self.keys) if k in WRAP_KEYS]
         self.sheet.enable_bindings("single_select", "row_select", "column_width_resize",
                                    "arrowkeys", "copy")
         self.sheet.set_sheet_data([], reset_col_positions=True, redraw=False)
@@ -81,6 +91,8 @@ class Table:
             bind_header_clicks(self.sheet, self._header_clicked)
         if on_row_click is not None:
             bind_row_clicks(self.sheet, lambda i: on_row_click(i) if i < len(self.rows) else None)
+        if self.wrapped:
+            self.sheet.extra_bindings("column_width_resize", lambda event: self._rewrap())
         self.sheet.pack(fill="both", expand=True)
         self.rows = []
 
@@ -88,11 +100,61 @@ class Table:
         if index < len(self.keys):
             self.on_sort(self.keys[index])
 
+    def _wrap(self, text, width) -> list:
+        """`text` broken at spaces into lines no wider than `width` pixels. A continuation line keeps
+        the first line's indent (the Week tab's ranked options); a word wider than the cell stays
+        whole on its own line."""
+        text = str(text)
+        if not text or self.font.measure(text) <= width:
+            return [text]
+        indent = text[:len(text) - len(text.lstrip(" "))]
+        lines, line = [], ""
+        for word in text.split():
+            candidate = indent + word if not line else f"{line} {word}"
+            if not line or self.font.measure(candidate) <= width:
+                line = candidate
+            else:
+                lines.append(line)
+                line = indent + word
+        lines.append(line)
+        return lines
+
+    def _display(self):
+        """The rows as shown: wrapped columns broken onto lines at their current widths, and each
+        row's height, enough for its tallest cell."""
+        if not self.wrapped or not self.rows:
+            return self.rows, None
+        widths = self.sheet.get_column_widths()
+        line = self.font.metrics("linespace")
+        shown, heights = [], []
+        for values in self.rows:
+            values, tallest = list(values), 1
+            for i in self.wrapped:
+                if i < len(values) and i < len(widths):
+                    lines = self._wrap(values[i], max(widths[i] - CELL_PADDING, 20))
+                    values[i] = "\n".join(lines)
+                    tallest = max(tallest, len(lines))
+            shown.append(values)
+            heights.append(ROW_HEIGHT if tallest == 1 else tallest * line + 8)
+        return shown, heights
+
+    def _rewrap(self) -> None:
+        """A column was resized: wrap the text again at the new widths."""
+        shown, heights = self._display()
+        self.sheet.set_sheet_data(shown, reset_col_positions=False, redraw=False)
+        if heights is not None:
+            self.sheet.set_row_heights(heights)
+        self.sheet.refresh()
+
     def set_rows(self, rows, sort_key=None, descending=False) -> None:
+        # `self.rows` keeps the text unwrapped: it is what a row click or a copy is about.
         self.rows = [[("" if v is None else v) for v in values] for values, _ in rows]
         sheet = self.sheet
         sheet.dehighlight_all(redraw=False)
-        sheet.set_sheet_data(self.rows, reset_col_positions=False, redraw=False)
+        shown, heights = self._display()
+        sheet.set_sheet_data(shown, reset_col_positions=False, redraw=False)
+        if heights is not None:
+            sheet.set_row_heights(heights)
         looks = {}
         for i, (_, tags) in enumerate(rows):
             styles = [self.styles[t] for t in tags if t in self.styles]
