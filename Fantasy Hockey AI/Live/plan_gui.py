@@ -21,8 +21,8 @@ today's last saved plan is shown at once while the first refresh runs. Recommend
 make the moves on the platform yourself.
 
     Tonight      tonight's lineup from the roster you hold now: expected points, chance he plays /
-                 starts, puck time (local), injury / GTD flag, a lock once his game has started, and
-                 who the plan would put in that slot after its moves; then his projected stat line
+                 starts, puck time (local), injury / GTD flag and a lock once his game has started;
+                 then his projected stat line
                  for tonight (per game, in the league's scored stats)
     Moves        IR moves, adds and drops, claims -- with the rate each was priced on
     Upgrade      permanent pickups: the plan's upgrades and claims, highlighted, above the add/drop
@@ -156,8 +156,7 @@ class PlanWindow:
         self.tonight = self._table("Tonight", [("slot", "Slot", 60), ("player", "Player", 240),
                                                ("mean", "Exp. pts", 80), ("sd", "SD", 60),
                                                ("p", "P(plays/starts)", 110), ("puck", "Puck", 90),
-                                               ("flag", "Flag", 70), ("lock", "", 40),
-                                               ("after", "After moves", 240)] + stat_columns)
+                                               ("flag", "Flag", 70), ("lock", "", 40)] + stat_columns)
         self.moves = self._table("Moves", [("kind", "Move", 110), ("add", "Add", 260), ("add_rate", "pts/g", 70),
                                            ("drop", "Drop", 260), ("drop_rate", "pts/g", 70), ("note", "Note", 200)])
         self.options = self._table("Upgrade", [("rank", "#", 36), ("kind", "Move", 90), ("add", "Add", 230),
@@ -366,20 +365,18 @@ class PlanWindow:
 
         rows = []
         for s in p["lineup_now"]:
-            after = s.get("after_moves") or ""
             if s["player"] is None:
                 if not p.get("games_today", True):
                     continue                      # no games: the roster, not 17 empty slots
-                rows.append(((s["slot"], "(empty)", "", "", "", "", "", "", after, *self._stats(None)),
-                             ("plan",) if after else ()))
+                rows.append(((s["slot"], "(empty)", "", "", "", "", "", "", *self._stats(None)), ()))
                 continue
             tags = tuple(t for t in (s.get("flag"),) if t in STATUS_COLOURS)
             rows.append(((s["slot"], s["player"], _num(s["mean"]), _num(s["sd"]),
                           "" if s["p_plays"] is None else f"{s['p_plays']:.0%}", local_time(s["puck_utc"]),
-                          s["flag"] or "", "\U0001f512" if s.get("locked") else "", after,
-                          *self._stats(s.get("stats"))), tags + (("plan",) if after else ())))
+                          s["flag"] or "", "\U0001f512" if s.get("locked") else "",
+                          *self._stats(s.get("stats"))), tags))
         for name, stats in zip(p["bench_now"], p.get("bench_now_stats") or [None] * len(p["bench_now"])):
-            rows.append((("BN", name, "", "", "", "", "", "", "", *self._stats(stats)), ()))
+            rows.append((("BN", name, "", "", "", "", "", "", *self._stats(stats)), ()))
         self.tonight.set_rows(rows)
         # Tonight is always the per-game projection; the other tables say what their stats are.
         basis = p.get("stats_basis", "")
