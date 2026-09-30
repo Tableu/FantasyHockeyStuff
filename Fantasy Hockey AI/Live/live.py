@@ -477,26 +477,46 @@ class LiveRunner:
     def return_overrides(self, injured) -> dict:
         """{injured player: return date} you know better than the model does, from
         Settings/returns-<league>.json ({"Neal Pionk": "2026-10-02"}; keys starting "_" are notes).
-        Matched by name among today's injured players only; a date already past is ignored."""
+        Matched by name among today's injured players only.
+
+        The file cleans itself on today's plan: an entry whose player is off the injury report,
+        or whose date has passed while he is still out (the model's estimate then stands), is
+        removed. A name that matches no player is kept and warned about -- likely a typo. Nothing
+        is removed on a rehearsal of another day, or when no one at all is reported injured (a
+        report that failed to load, not a league with no injuries)."""
         path = paths.SETTINGS_DIR / f"returns-{self.league.name}.json"
         if not path.exists():
             return {}
-        entries = {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
-                   if not k.startswith("_")}
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        entries = {k: v for k, v in raw.items() if not k.startswith("_")}
         names = pd.read_parquet(paths.players()).set_index("player_id")["name"]
+        known = set(names)
         by_name = {}
         for p in injured:
             if p in names.index:
                 by_name.setdefault(names[p], []).append(int(p))
-        out, day = {}, pd.Timestamp(self.day)
+        out, stale, day = {}, [], pd.Timestamp(self.day)
         for name, back in entries.items():
             back, ids = pd.Timestamp(back), by_name.get(name, [])
-            if back < day:
-                log.warning("%s: %s's return %s has passed -- ignored", path.name, name, back.date())
+            if not ids:
+                if name in known:
+                    stale.append(name)
+                    log.info("%s: %s is off the injury report", path.name, name)
+                else:
+                    log.warning("%s: no player named %r -- check the spelling", path.name, name)
+            elif back < day:
+                stale.append(name)
+                log.warning("%s: %s's return %s has passed and he is still out -- the model's "
+                            "estimate stands", path.name, name, back.date())
             elif len(ids) == 1:
                 out[ids[0]] = back
-            elif len(ids) > 1:
+            else:
                 log.warning("%s: %d injured players named %s -- ignored", path.name, len(ids), name)
+        if stale and injured and self.day == dt.date.today():
+            for name in stale:
+                raw.pop(name)
+            path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+            log.info("%s: removed %s", path.name, ", ".join(stale))
         return out
 
     def peripheral(self, player_id):
