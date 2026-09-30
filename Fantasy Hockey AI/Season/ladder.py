@@ -246,7 +246,8 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
 
     field = managers_module.build_field(config, scoreset, strategy, rungs=rungs,
                                         replication=replication, candidate=candidate)
-    # Rung 8 replays a real manager's pickup pattern (opponents.py); each seat draws its own.
+    # Rung 8 is a leaguemate on a real 12088 manager's weekly activity (opponents.py); each seat
+    # draws its own profile, error and strategy blocks.
     opponents = [m for m in field if isinstance(m, managers_module.Opponent)]
     if opponents:
         if data.get("opponent_field") is None:
@@ -255,11 +256,11 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
         for manager in opponents:
             data["opponent_field"].attach(manager, replication)
     base = [m.rung % managers_module.VOR_TWIN for m in field]
-    if any(r in (5, 7) for r in base) and strategy.adddrop.rate_source == "ros"             and data.get("ros") is None:
+    if any(r in (5, 7, 8) for r in base) and strategy.adddrop.rate_source == "ros"             and data.get("ros") is None:
         raise SystemExit("rung 5 reads rest-of-season projections and none are built -- run "
                          "Projections/ros_train.py --horizon season --predictions-out")
     # Draws are only paid for if a rung on the board actually uses them.
-    sims = decision_sims if any(r in (4, 5, 6, 7) for r in base) else 0
+    sims = decision_sims if any(r in (4, 5, 6, 7, 8) for r in base) else 0
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                  replication=replication, log_every_week=verbose_weeks,
                                  decision_sims=sims)

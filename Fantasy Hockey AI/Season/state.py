@@ -49,13 +49,20 @@ class Team:
         self.roster = []        # ordered by acquisition, for stable tie-breaks
         self.ir = []
         self.moves_used = 0
+        # A manager's own lower cap for the current week, or None for the league's. Only the
+        # realistic league's opponents set one (Decisions/managers.Opponent: a real manager's
+        # activity that week); the league's cap still bounds it.
+        self.budget = None
         self.waiver_priority = team
         self.weekly_points = defaultdict(float)
         self.matchup_wins = 0.0
 
     @property
     def moves_left(self) -> int:
-        return self.config.moves_per_week - self.moves_used
+        cap = self.config.moves_per_week
+        if self.budget is not None:
+            cap = min(cap, self.budget)
+        return max(cap - self.moves_used, 0)
 
     def holds(self, player_id) -> bool:
         return player_id in self.roster or player_id in self.ir

@@ -43,7 +43,7 @@ boom_bust.py  boom/bust odds vs the pick spent: room drafts, par  -> reports/boo
               (season draws from Simulation/season_spread.py -- docs/boom-bust.md)
 boom_bust_check.py  grades those odds at real ADP, actual seasons       -> docs/boom-bust-check.md
 oneseat.py    the realistic league: our system in ONE seat, paired runs -> reports/oneseat/*.json
-opponents.py  rung 8's calibration: 12088's pickup patterns, and the check against them
+opponents.py  rung 8's calibration: 12088's weekly activity and strength, and the check against them
 verify.py     the eighteen checks that have to pass before a number means anything
 ```
 
@@ -289,57 +289,85 @@ an object with `labels(config, replication)`; the rotation the ladder uses is un
 34/34).
 
 **T2, realistic opponents -- rung 8, `Decisions/managers.Opponent`.** Each opponent seat is handed
-one of 42 real team-seasons from the sister league 12088 (same format, different managers,
-2023-24..2025-26), drawn by (replication, seat), and **replays its pickup pattern**: per week, the
-weekdays it picked someone up and whether each was a goalie (`opponents.py`, weeks numbered as the
-engine numbers them). Who it takes is its own judgement -- rung 3's box score times a persistent
-per-player error `exp(sd * z)` -- and it drops its lowest-rated player that keeps the roster
-fieldable. It does not pass on a scheduled pickup its numbers call a downgrade: that gate cut
-activity to 3.3 a week against 12088's 4.5. Free agents only (claims were 4-6% of real pickups);
-lineups always set (user decision, 2026-09-28); drafts by 1-3 external sources like any opponent.
+one of 42 real team-seasons from the sister league 12088 (same format and scoring, different
+managers, 2023-24..2025-26), drawn by (replication, seat), and may spend each week **only as many
+moves as that manager made pickups that week** (`opponents.py`; weeks numbered as the engine numbers
+them). Within that budget it runs our orchestrator (rung 7) on `strategy.json` plus espn-la's
+streaming choices (tail cost, week mode, goalie rentals, unlimited spots -- frozen in
+`opponents.OPPONENT_OVERRIDES`, not read from the live file). It can read its projections through a
+persistent per-player error `exp(sd * z)`; the fitted sd is 0. Lineups always set (user decision,
+2026-09-28); drafts by 1-3 external sources like any opponent.
 
-`opponents.py --validate` against 12088's own 2024-25, 2 drafts a setting:
+**The target is strength, and it is measured per NHL game day.** 12088's managers scored 206.8 /
+209.9 / 208.7 points a matchup (2023-24..2025-26, Fleaflicker standings; the scoring is 12090's
+exactly), but its matchups are not the simulator's weeks (2024-25: 21 regular matchups to Mar 16,
+a 10-day first and a 14-day 4 Nations one, against 24 simulator weeks to Mar 30), so 2024-25 is
+**30.2 points per team per NHL game day**. Real single weeks confirm it (215.6, 197.8, 216.3 in
+Oct 14-20, Dec 9-15, Jan 20-26). The harness scores exactly as Fleaflicker does: 28 top skaters'
+2024-25 season totals match to 0.02%, goalies 1.2% low.
 
-```
-                         12088 2024-25   rung 8, sd 0.25   sd 0.5   sd 1.0
-pickups per team-week        4.54            4.84          4.86     4.84
-median                       6               7             7        7
-at the 7-move cap            43.7%           51.6%         52.8%    52.1%
-zero-pickup weeks            21.2%           17.7%         17.2%    17.7%
-team means, min-max          1.4-6.6         0.8-6.6       0.9-6.3  0.7-6.6
-first / second half          5.74 / 3.43     5.86 / 3.89   5.87/3.92 5.88/3.88
-goalie share                 25.7%           24.7%         24.5%    24.7%
-Monday / Sunday              19.0 / 22.4%    17.4 / 16.4%  17.6/16.7 17.5/16.4
-pickup pts/game, next 14d    3.126           3.270         3.244    3.152
-```
-
-The noise sd is the one fitted parameter, set to **1.0** (`opponents.NOISE_SD`): real managers'
-pickups score about what a box-score reader with that much error picks. Known gaps: the cap is hit
-a little too often, Sunday pickups run low (a pickup due on a night with no games slides to the next
-game day or is lost at the week's end), and injury news lag is **measured but not modelled** --
-of 692 injury spells to players rostered in 12088 (2024-25, 2025-26), owners cut the player within
-3 days 12% of the time, within 7 days 16%, never 61% (median lag 4 days among cuts within 30);
-real managers mostly stash, and rung 8 stashes on IR at once. The replayed timing already carries
-when they act.
-
-**First use -- unlimited streaming spots (beagles) against a cap of 2, 2024-25, seat-paired:**
+`opponents.py --validate` against 12088's own 2024-25, 2 drafts:
 
 ```
-field                               spots=2 minus shipped      halves          per-draft sd   opp. moves
-T1 alone, opponents rungs 2/5/6     -3.25 +/- 1.28 (32 drafts)  -1.60 / -4.91   7.26           9 a season
-T1 + T2, opponents rung 8           -4.19 +/- 0.59 (64 drafts)  -4.14 / -4.24   4.73           124 a season
+                               12088 2024-25   rung 8 (shipped)
+pickups per team-week              4.54            4.65
+at the 7-move cap                  43.7%           45.9%
+zero-pickup weeks                  21.2%           18.5%
+first / second half                5.74 / 3.43     5.69 / 3.68
+goalie share                       25.7%           14.7%
+Monday / Sunday                    19.0 / 22.4%    23.3 / 14.8%
+pickup / cut pts per game, 14d     3.13 / 3.12     3.07 / 3.05
+team points per NHL game day       30.19           29.84
+team points sd across teams        15.8            10.8
+our seat, points per week          --              207.4 (opponents 198.9)
 ```
 
-Unlimited spots holds against a contested wire, and by more; nothing changes in the live settings.
-A realistic field is also quieter: about **23 drafts buy +/-1.0 pt/wk and 90 buy +/-0.5**, against
-53 and 211 in the passive field. Spill: the rest of the league lost 0.16 +/- 0.10 pts/wk each.
-Not yet confirmed on 2025-26 (the two-season rule: confirm once, when a decision rests on it).
+Known gaps: goalie share runs low, real managers differ more from each other than these do, and
+injury news lag is **measured but not modelled** (of 692 injury spells to players rostered in 12088,
+owners cut within 7 days 16% of the time, never 61%; they mostly stash, as rung 8 does).
+
+**What did not work, and why this design.** The first rung 8 replayed real managers' pickup DAYS
+and picked the player on a noisy box score. It matched activity and pickup quality but scored
+**23.3 points per game day at the fitted noise (sd 1.0)** -- the noise made it cut better players
+than it added (3.32 cut vs 3.15 added) -- and our seat won 98% of its weeks at 260 a week. Without
+noise it reached 27.2; on our projections 28.1; with a this-week gate, full-source drafts, the
+confirmed starting goalie or all pickups on Monday, 27.3-28.3. Real managers play at our
+orchestrator's level (rung 7: 30.0 per game day in the mixed ladder) and a replayed day cannot plan
+around the schedule. On `strategy.json`'s own streaming blocks the orchestrator opponents reached
+29.3 but under-spent the budget (3.7 pickups, 20% at the cap, 1.7% goalies). Error only weakens
+them (sd 0.5: 27.2), hence sd 0.
+
+**The beagles settings in the realistic league** (2024-25, 64 drafts each, seat-paired; each row
+turns one beagles setting back to `strategy.json`'s; negative = the setting earns its keep):
+
+```
+turned off                       points a week        win rate          halves
+week mode -> daily (+its bundle)  -7.92 +/- 1.03       -0.111 +/- 0.015  -9.44 / -6.40
+goalie rentals                    -3.93 +/- 0.94       -0.040 +/- 0.015  -2.81 / -5.06
+spot tolerance 5 -> 0             -2.21 +/- 0.73       -0.028 +/- 0.013  -1.01 / -3.42
+next-week pickups                 -2.03 +/- 0.61       -0.027 +/- 0.010  -0.72 / -3.34
+gate (also ends next-week)        -1.20 +/- 0.66       -0.020 +/- 0.012  -0.39 / -2.01
+tail cost                         -1.10 +/- 0.59       -0.012 +/- 0.010  -0.95 / -1.24
+unlimited spots -> 2              +1.32 +/- 1.16       -0.008 +/- 0.018  +2.51 / +0.13
+```
+
+Every beagles setting but one holds, four of them past three standard errors; nothing changes in
+the live file. The exception is unlimited streaming spots, whose edge **reversed from the weak
+field** (-4.19 +/- 0.59 there) to a wash here: against real-strength opponents it was the wire, not
+the spots, that paid. It stays at 99 -- the mixed ladder measured +2.08 +/- 0.49 for it and here it
+is within noise -- but it is the setting to re-measure first. The gate's own effect, net of the
+next-week pickups it enables, looks like zero or slightly negative (-1.20 vs -2.03). Spot tolerance
+was measured at 5 (the value in the file) against 0; 10 was not tried. Not yet confirmed on 2025-26
+(two-season rule: confirm once, when a change rests on it -- none does).
+
+Per-draft noise here is 4.7-9.3 points a week (the week-mode and spots comparisons are the noisy
+ones): 22-86 drafts for +/-1.0, 64 was the budget.
 
 ```bash
-python opponents.py --summary                       # 12088's targets
-python opponents.py --validate --noise 0.5 1.0      # rung 8 against them
-python oneseat.py --verify --opponents 8
-python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --opponents 8 --replications 64
+python opponents.py --summary                                 # 12088's activity targets
+python opponents.py --validate --sd 0 0.5                     # rung 8 against 12088 2024-25
+python oneseat.py --verify --strategy strategy-beagles
+python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --replications 64
 ```
 
 ## Re-measured (2026-09-28, r14) -- the current baseline; supersedes every table below

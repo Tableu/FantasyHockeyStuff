@@ -21,8 +21,8 @@ same draft boards; what they do in-season may differ only through the shared wir
 **The test seat rotates through draft positions**: each block of `teams` drafts gives it every
 draft position once, in a seeded order, on that replication's draft lottery.
 
-**Opponents** default to rung 8 (T2): real managers' pickup patterns from the sister league 12088,
-replayed with a noisy box-score judgement (`opponents.py`, `Decisions/managers.Opponent`). Any
+**Opponents** default to rung 8 (T2): our orchestrator on a real 12088 manager's weekly move
+budget, calibrated to that league's strength (`opponents.py`, `Decisions/managers.Opponent`). Any
 rungs may be given instead (`--opponents 2,5,6` is tune.py's field without rung 17), interleaved
 over the thirteen seats and rotated by replication.
 
@@ -39,6 +39,7 @@ import sys
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 
 import draftroom
 import paths
@@ -188,8 +189,8 @@ def parse_args():
                    help="Candidate override on top of --candidate or --strategy (repeatable)")
     p.add_argument("--opponents", default=",".join(map(str, DEFAULT_OPPONENTS)),
                    help="Opponent rungs, comma-separated")
-    p.add_argument("--opponent-noise", type=float, default=None,
-                   help="Rung 8's valuation noise (default opponents.NOISE_SD)")
+    p.add_argument("--opponent-sd", type=float, default=None,
+                   help="Rung 8's error on the projections it reads (default opponents.SD)")
     p.add_argument("--replications", type=int, default=32)
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--verify", action="store_true",
@@ -218,9 +219,8 @@ def main():
     if 8 in opponents:
         import opponents as opponents_module
 
-        ctx.data["opponent_field"] = opponents_module.OpponentField(
-            opponents_module.profiles(ctx.config),
-            opponents_module.NOISE_SD if args.opponent_noise is None else args.opponent_noise)
+        ctx.data["opponent_field"] = opponents_module.field(
+            ctx.config, opponents_module.SD if args.opponent_sd is None else args.opponent_sd)
     replications = 2 if args.verify else args.replications
     positions = check_layouts(ctx.config, base_layout, cand_layout, max(replications,
                                                                          ctx.config.teams))
@@ -242,7 +242,16 @@ def main():
         raise SystemExit("the candidate equals the shipped system; use --verify for that check")
     log.info("shipped: %s", tune.label(shipped))
     log.info("candidate: %s", tune.label(candidate))
-    base = seat_table(ctx, base_layout, None, replications)
+    # The shipped run is the same for every candidate: cached by the shipped parameters, the
+    # opponents and their noise, the season, the format and the code (tune.Context.key).
+    cache = paths.ensure(paths.REPORTS_DIR / "oneseat") / (
+        f"base_{ctx.key(shipped, replications)}_{'-'.join(map(str, opponents))}"
+        f"_{(ctx.data['opponent_field'].describe() if ctx.data.get('opponent_field') else 'na')}.parquet")
+    if cache.exists():
+        base = pd.read_parquet(cache)
+    else:
+        base = seat_table(ctx, base_layout, None, replications)
+        base.to_parquet(cache)
     alt = seat_table(ctx, cand_layout, candidate, replications)
     result = compare(base, alt, replications)
     result.update({"season": args.season, "league": args.league, "weights": args.weights,

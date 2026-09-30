@@ -715,25 +715,25 @@ class Orchestrated(FullSystemAddDrop):
 LADDER[7] = Orchestrated
 
 
-class Opponent(ScheduleStreamer):
+class Opponent(Orchestrated):
     """Rung 8: a leaguemate modelled on real managers, for the realistic league
     (`Season/oneseat.py`, calibrated by `Season/opponents.py`).
 
-    **When and what it picks up is replayed, not decided.** Each seat is handed one real team-season
-    from the sister league 12088 (`attach`): for every week, the days it picked someone up and
-    whether each was a goalie. That carries the real spread of activity -- the near-inactive
-    team, the one at the cap every week, the fade after January, the Monday and Sunday peaks, the
-    quarter of pickups that are goalies -- by construction instead of by fitted parameters.
+    **A real manager's activity, our machinery, its own opinions.** Each seat is handed one real
+    team-season from the sister league 12088 (`attach`) and may spend, each week, only as many
+    moves as that manager made pickups that week -- which carries the real spread of activity
+    (the near-inactive team, the one at the cap every week, the fade after January). Within that
+    budget it decides as rung 7 does (the orchestrator, on `strategy.json`'s add/drop and
+    streaming blocks), but on its own view of the players: every projection it reads is scaled by
+    a persistent per-player error `exp(sd * z)`, z fixed per (seat, player) for the season, so no
+    two leaguemates -- and none of them and us -- chase exactly the same players. Lineups are set
+    on the true projections: always set, the user's decision (2026-09-28).
 
-    **Who it picks up is its own judgement, and a noisy one.** Rung 3's box score (season-to-date
-    points per game shrunk to last season, times games this week), times a persistent per-player
-    error `exp(noise_sd * z)` of its own, so no two leaguemates agree and none reads our models.
-    It drops the player it rates lowest over a forward window and keeps its roster fieldable. It
-    does NOT pass on a scheduled pickup its numbers call a downgrade: the replayed manager had
-    decided to make a move that day, and gating it cut activity to 3.3 pickups a week against
-    12088's 4.5 (2026-09-29). Only the choice of player is its own. It uses free agents, not waivers
-    (claims were 4-6% of 12088's pickups). Lineups are always set, on its box-score rates -- the
-    user's decision (2026-09-28): no diligence parameter.
+    Why the orchestrator (user's choice, 2026-09-29): 12088's managers score 30.2 points per NHL
+    game day, what rung 7 scores; an opponent that replayed real managers' pickup DAYS and chose
+    the player itself -- on the box score or our projections, with or without a gate, drafting
+    from all sources, with the confirmed starting goalie -- topped out at 28.2, and noise only
+    lowered it. Real managers plan around the schedule; the replayed days could not.
     """
 
     name = "opponent"
@@ -741,72 +741,65 @@ class Opponent(ScheduleStreamer):
 
     def __init__(self, team_index, config, scoreset, strategy):
         super().__init__(team_index, config, scoreset, strategy)
-        self.profile, self.noise_sd, self.seed = {}, 0.0, 0
-        self._noise, self._done = {}, set()
-        self.pickup_log = []
+        self.profile, self.sd, self.seed = {}, 0.0, (0,)
+        self._opinion = {}
 
-    def attach(self, profile: dict, noise_sd: float, seed) -> None:
-        """`profile`: {week: [(weekday, is_goalie), ...]} replayed from a real team-season."""
-        self.profile, self.noise_sd, self.seed = profile, float(noise_sd), seed
-        self.name = f"opponent[{profile.get('key', '?')} sd {noise_sd:g}]"
+    def attach(self, profile: dict, sd: float, seed, strategy) -> None:
+        """`profile`: {"key": ..., "weeks": {week: ((weekday, is_goalie), ...)}}, from a real
+        team-season; `strategy`: this seat's own (the field's, with its add/drop and streaming
+        blocks replaced -- the only blocks a seat may hold differently)."""
+        self.profile, self.sd, self.seed = profile, float(sd), tuple(seed)
+        self.strategy = strategy
+        self.plan = orchestrator.DailyPlan(self, self.stream_params)
+        self.name = f"opponent[{profile.get('key', '?')} sd {sd:g}]"
 
-    def _error(self, player_id) -> float:
-        factor = self._noise.get(player_id)
-        if factor is None:
+    def budget(self, week) -> int:
+        """Moves this seat may spend in `week`: the real manager's pickups that week."""
+        return len(self.profile.get("weeks", {}).get(week, ()))
+
+    def _factor(self, player_id) -> float:
+        z = self._opinion.get(player_id)
+        if z is None:
             import numpy as np
 
-            z = np.random.default_rng([*self.seed, int(player_id)]).standard_normal()
-            factor = self._noise[player_id] = math.exp(self.noise_sd * z)
-        return factor
+            z = self._opinion[player_id] = float(
+                np.random.default_rng([*self.seed, int(player_id)]).standard_normal())
+        return math.exp(self.sd * z)
 
-    def set_lineup(self, view):
-        view.p_start_column = self.p_start_column
-        return self._lineup_from_values(view, view.history.rate)
+    def _noisy(self, view):
+        """The view as this manager sees it: every projection scaled by its own error. A shallow
+        copy, so the moves it makes still land on the real league state."""
+        import copy
+
+        if self.sd == 0.0:
+            return view
+        f = self._factor
+        seen = copy.copy(view)
+        seen.rate_estimate = {p: r * f(p) for p, r in view.rate_estimate.items()}
+        seen.healthy_estimate = {p: r * f(p) for p, r in view.healthy_estimate.items()}
+        seen.ros_estimate = {p: r * f(p) for p, r in view.ros_estimate.items()}
+        seen.decision_points = {p: a * f(p) for p, a in view.decision_points.items()}
+        if len(view.projections):
+            frame = view.projections.copy()
+            scale = frame["player_id"].map(lambda p: f(int(p))).to_numpy("float64")
+            for column in [c for c in frame.columns if c.startswith("lambda_")]:
+                frame[column] = frame[column].to_numpy("float64") * scale
+            seen.projections = frame
+        if len(view.goalie_projections) and "expected_line" in view.goalie_projections:
+            frame = view.goalie_projections.copy()
+            frame["expected_line"] = (frame["expected_line"].to_numpy("float64")
+                                      * frame["player_id"].map(lambda p: f(int(p)))
+                                      .to_numpy("float64"))
+            seen.goalie_projections = frame
+        draws = view._future_draws
+        if draws is not None:
+            seen._future_draws = lambda: {night: {p: a * f(p) for p, a in points.items()}
+                                          for night, points in draws().items()}
+        return seen
 
     def transactions(self, view) -> None:
-        view.p_start_column = self.p_start_column
-        rates = view.history
-        # An empty slot is fixed as it would be by anyone looking at the roster.
-        self.repair_roster(view, lambda p: rates.get(p) or 0.0)
-        weekday = view.day.weekday()
-        for i, (day, goalie) in enumerate(self.profile.get("weeks", {}).get(view.week, ())):
-            if day > weekday or (view.week, i) in self._done or view.moves_left <= 0:
-                continue
-            self._done.add((view.week, i))
-            self._pickup(view, goalie)
-
-    def _pickup(self, view, goalie: bool) -> None:
-        rates, state = view.history, view._state
-        eligibility = state.eligibility
-
-        def rental(p):
-            return rates.value(p) * self._error(p) * view.games_remaining(p)
-
-        def forward(p):
-            return rates.value(p) * self._error(p) * view.games_through(
-                p, weeks_ahead=self.horizon_weeks)
-
-        pool = [p for p in view.free_agents()
-                if not view.on_waivers(p) and p not in view.injured
-                and ("G" in eligibility.get(p, ())) == goalie and view.games_remaining(p) > 0]
-        roster = [p for p in view.roster if p not in view.ir]
-        for incoming in sorted(pool, key=lambda p: (-rental(p), p))[:25]:
-            if view.roster_room() > 0:
-                outgoing = None
-            else:
-                outgoing = next((d for d in sorted(roster, key=lambda d: (forward(d), d))
-                                 if self._fieldable([p for p in roster if p != d] + [incoming],
-                                                    eligibility, before=roster)), None)
-                if outgoing is None or outgoing == incoming:
-                    continue
-            try:
-                state.add(self.team_index, incoming, view.day, drop=outgoing, reason="opponent")
-            except Exception as error:
-                log.debug("opponent %d could not add %s: %s", self.team_index, incoming, error)
-                continue
-            self.pickup_log.append({"day": view.day, "week": view.week, "incoming": incoming,
-                                    "outgoing": outgoing, "goalie": goalie})
-            return
+        view._state.teams[self.team_index].budget = self.budget(view.week)
+        super().transactions(self._noisy(view))
 
 
 LADDER[8] = Opponent

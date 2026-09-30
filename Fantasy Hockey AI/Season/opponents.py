@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Realistic opponents (T2): real managers' pickup patterns, replayed by rung 8.
+"""Realistic opponents (T2): real managers' weekly activity, our machinery, their own opinions.
 
     python opponents.py --summary                 # 12088's measured behaviour, the targets
     python opponents.py --validate --replications 8   # simulated opponents against those targets
@@ -8,20 +8,28 @@ The sister league 12088 (Fleaflicker, same 14-team format and rules as 12090, di
 publishes every transaction. `ModelFeatures/build_fleaflicker_transactions.py` crawls it into
 `fleaflicker_transactions_12088.parquet`. Here each real team-season becomes a **profile**: for
 every week of its season, the weekdays it picked someone up (an add or a waiver claim) and
-whether each was a goalie. An opponent seat (`Decisions/managers.Opponent`) is handed one profile,
-drawn by (replication, seat), and replays its timing; which player it takes is its own noisy
-box-score judgement.
+whether each was a goalie. An opponent seat (`Decisions/managers.Opponent`, rung 8) is handed one
+profile, drawn by (replication, seat), and may spend each week only as many moves as that manager
+made pickups; within that budget it runs our orchestrator (rung 7) on `strategy.json`'s add/drop
+and streaming blocks, reading every projection through its own persistent per-player error.
 
 Weeks line up as the simulator numbers them: `schedule.from_candidates` on that season's games,
 so a thin opening week (2024-25's Prague games) folds into the next exactly as the engine folds
 it. Pickups before week 1 are dropped -- pre-season moves are free and the simulation starts at
 the opener.
 
-**Calibration.** Activity, its spread across managers, the second-half fade, at-cap and idle
-weeks, goalie share and day-of-week timing come with the replay. One parameter is fitted: the
-valuation noise `noise_sd`, so that simulated pickups score about what 12088's did (points per
-game the added player scored over the next 14 days). News lag -- how late real managers react to
-injuries -- is not modelled yet; opponents see injuries the moment the engine does.
+**Calibration.** The weekly budget carries activity, its spread across managers and the fade
+after January (the orchestrator decides the days, so day-of-week and goalie share are its own).
+One parameter is fitted: the error `sd`, so the opponents score what 12088's managers did per NHL
+game day (Fleaflicker's standings; its matchups are not the simulator's weeks, so points per game
+day is the comparable unit). Pickup and cut quality -- points per game the added or dropped
+player scored over the next 14 days -- are reported beside it as a check. News lag is measured
+(Season/README) but not modelled; opponents see injuries the moment the engine does.
+
+History (2026-09-29): a first rung 8 replayed real managers' pickup DAYS and chose the player on
+a noisy box score. It matched activity and pickup quality but topped out at 28.2 points per game
+day against the real 30.2 -- with our projections, a gate, full-source drafts or the confirmed
+starting goalie -- and its noise made it cut better players than it added.
 """
 
 import argparse
@@ -42,9 +50,29 @@ LEAGUE_ID = 12088
 SEASONS = ("2023-24", "2024-25", "2025-26")
 PICKUPS = ("added", "claimed")
 SEED = 881208
-# Fitted 2026-09-29 on 2024-25 (2 drafts a setting): simulated pickups scored 3.27 / 3.24 / 3.15
-# points per game over the next 14 days at 0.25 / 0.5 / 1.0, against 3.13 for 12088's real ones.
-NOISE_SD = 1.0
+# 12088's regular-season points for per team-week, from Fleaflicker's FetchLeagueStandings
+# (2026-09-29): mean and sd over the fourteen teams. Its scoring is 12090's exactly
+# (FetchLeagueRules), so it is the strength a realistic opponent has to match.
+REAL_POINTS_PER_WEEK = {"2023-24": (206.8, 18.9), "2024-25": (209.9, 15.8),
+                        "2025-26": (208.7, 13.5)}
+# Per NHL game day, the comparable number: Fleaflicker's matchups are not the simulator's weeks
+# (2024-25: 21 regular matchups over Oct 4 - Mar 16, a 10-day first and a 14-day 4 Nations one,
+# against the simulator's 24 weeks to Mar 30). 209.9 x 21 matchups / 146 game days.
+REAL_POINTS_PER_GAME_DAY = {"2024-25": 30.19}
+# The error on the projections each opponent reads, fitted to REAL_POINTS_PER_GAME_DAY on
+# 2024-25 (2 drafts a setting, 2026-09-29). Any error only weakens them -- sd 0.5 scored 27.2
+# points per game day against 29.3 at 0 on strategy.json's blocks -- so the fit is 0: a real
+# 12088 manager plays about as well as our projections read straight.
+SD = 0.0
+# The add/drop and streaming blocks every opponent runs: strategy.json's, plus these. On
+# strategy.json's alone (2 streaming spots, no goalie rentals) the opponents spent 3.7 of a
+# 4.5-pickup real budget, hit the cap in 20% of weeks against 44%, took 1.7% goalies against 26%
+# and scored 29.3; with these -- espn-la's live choices, frozen here so editing that league's file
+# cannot move the opponents -- 4.65 pickups, 46% at the cap, 15% goalies, 29.8 against the real
+# 30.2. Real managers stream hard.
+OPPONENT_STRATEGY = "strategy"
+OPPONENT_OVERRIDES = {"adddrop": {"tail": "cost"},
+                      "streaming": {"mode": "week", "goalies": True, "spots": 99}}
 
 
 @dataclass(frozen=True)
@@ -52,12 +80,37 @@ class OpponentField:
     """What `ladder.run_one` needs to set every rung-8 seat up: the profiles and the noise."""
 
     profiles: tuple        # of dicts: key, weeks {week: ((weekday, is_goalie), ...)}
-    noise_sd: float
+    sd: float
+    adddrop: object        # the opponents' own blocks (OPPONENT_STRATEGY)
+    streaming: object
+
+    def describe(self) -> str:
+        return f"sd{self.sd:g}"
 
     def attach(self, manager, replication) -> None:
-        rng = np.random.default_rng([SEED, int(replication), int(manager.team_index)])
-        profile = self.profiles[int(rng.integers(len(self.profiles)))]
-        manager.attach(profile, self.noise_sd, (SEED, int(replication), int(manager.team_index)))
+        import dataclasses
+
+        seed = (SEED, int(replication), int(manager.team_index))
+        profile = self.profiles[int(np.random.default_rng(list(seed)).integers(len(self.profiles)))]
+        own = dataclasses.replace(manager.strategy, adddrop=self.adddrop, streaming=self.streaming)
+        manager.attach(profile, self.sd, seed, own)
+
+
+def field(config, sd=SD, strategy_name=OPPONENT_STRATEGY) -> OpponentField:
+    """The opponents for `config`'s league, as `ladder.run_one` expects them in
+    data["opponent_field"]."""
+    from decisionlayer import load_strategy
+
+    import opponents as module      # not __main__'s copy: worker processes unpickle it by name
+
+    import dataclasses
+
+    own = load_strategy(strategy_name)
+    if strategy_name == OPPONENT_STRATEGY:
+        own = dataclasses.replace(
+            own, adddrop=dataclasses.replace(own.adddrop, **OPPONENT_OVERRIDES["adddrop"]),
+            streaming=dataclasses.replace(own.streaming, **OPPONENT_OVERRIDES["streaming"]))
+    return module.OpponentField(profiles(config), float(sd), own.adddrop, own.streaming)
 
 
 def transactions(league_id=LEAGUE_ID) -> pd.DataFrame:
@@ -183,16 +236,15 @@ def played_points(season, scoreset) -> pd.DataFrame:
     return both
 
 
-def simulate(ctx, strategy, noise_sd, replications, workers=None):
+def simulate(ctx, strategy, sd, replications, workers=None, opponent_strategy=OPPONENT_STRATEGY):
     """The realistic field -- our shipped system in one seat, rung 8 in the other thirteen --
     returning the opponents' pickups, one row each."""
     from types import SimpleNamespace
 
     import ladder
     import oneseat
-    import opponents as module      # not __main__'s copy: worker processes unpickle it by name
 
-    ctx.data["opponent_field"] = module.OpponentField(profiles(ctx.config), noise_sd)
+    ctx.data["opponent_field"] = field(ctx.config, sd, opponent_strategy)
     layout = oneseat.OneSeat(oneseat.SHIPPED, (8,))
     args = SimpleNamespace(replications=replications, workers=workers, verbose_weeks=False,
                            decision_sims=200)
@@ -215,13 +267,43 @@ def simulate(ctx, strategy, noise_sd, replications, workers=None):
     return frame, units, runs
 
 
+def test_seat(ctx, runs) -> pd.Series:
+    """Our seat's regular-season points per week, one per draft."""
+    import oneseat
+
+    layout = oneseat.OneSeat(oneseat.SHIPPED, (8,))
+    out = []
+    for r, run in enumerate(runs):
+        teams = run["teams"]
+        teams = teams[teams["seat"] == layout.test_seat(ctx.config, r)]
+        out.append(teams["points"] / teams["weeks"])
+    return pd.concat(out, ignore_index=True)
+
+
+def team_strength(ctx, runs) -> pd.Series:
+    """Each opponent seat's regular-season points per week (the test seat left out)."""
+    import oneseat
+
+    layout = oneseat.OneSeat(oneseat.SHIPPED, (8,))
+    out = []
+    for r, run in enumerate(runs):
+        teams = run["teams"]
+        teams = teams[teams["seat"] != layout.test_seat(ctx.config, r)]
+        out.append(teams["points"] / teams["weeks"])
+    return pd.concat(out, ignore_index=True)
+
+
 def validate(args):
     import tune
     from decisionlayer import load_strategy
 
+    import field as field_module
+
     strategy = load_strategy(args.strategy)
+    field_config = field_module.with_overrides(field_module.load(), None, args.opponent_sources)
     ctx = tune.Context(args.season, tune.previous(args.season), args.league, args.weights,
-                       strategy, args.workers)
+                       strategy, args.workers, field_config=field_config)
+    log.info("field: %s", field_config.describe())
     config = ctx.config
     weeks = config.regular_season_weeks_in(ctx.calendar) + config.playoff_weeks
     points = {args.season: played_points(args.season, ctx.scoreset)}
@@ -233,17 +315,34 @@ def validate(args):
     index = pd.MultiIndex.from_product([units, range(1, weeks + 1)], names=["unit", "week"])
     target = describe(weekly_counts(real, index), real, config.moves_per_week, weeks // 2)
     target["pickup_pts_per_game"] = round(pickup_quality(real, points), 3)
+    cuts = transactions().query("season == @args.season and action == 'cut'").copy()
+    cuts = cuts[cuts["league_day"] >= min(ctx.calendar.days)].rename(columns={"league_day": "day"})
+    target["cut_pts_per_game"] = round(pickup_quality(cuts, points), 3)
+    target["team_pts_per_week"], target["team_pts_sd"] = REAL_POINTS_PER_WEEK[args.season]
+    regular = config.regular_season_weeks_in(ctx.calendar)
+    sim_days = sum(len(ctx.calendar.days_in(w)) for w in range(1, regular + 1))
+    target["team_pts_per_game_day"] = REAL_POINTS_PER_GAME_DAY.get(args.season)
+    target["test_seat_pts_per_week"] = None
     table = [{"source": f"12088 {args.season}", **target}]
 
-    for sd in args.noise:
-        sim, sim_units, _ = simulate(ctx, strategy, sd, args.replications, args.workers)
+    for sd in args.sd:
+        sim, sim_units, runs = simulate(ctx, strategy, sd, args.replications, args.workers,
+                                        args.opponent_strategy)
         sim = sim[sim["week"].between(1, weeks)]
         index = pd.MultiIndex.from_product([sim_units, range(1, weeks + 1)],
                                            names=["unit", "week"])
         got = describe(weekly_counts(sim, index), sim, config.moves_per_week, weeks // 2)
         got["pickup_pts_per_game"] = round(pickup_quality(sim, points), 3)
-        table.append({"source": f"rung 8, noise_sd {sd:g}", **got})
-        log.info("noise %g: %s", sd, got)
+        dropped = sim.dropna(subset=["dropped"]).drop(columns="player_id").rename(
+            columns={"dropped": "player_id"})
+        got["cut_pts_per_game"] = round(pickup_quality(dropped, points), 3)
+        strength = team_strength(ctx, runs)
+        got["team_pts_per_week"] = round(float(strength.mean()), 1)
+        got["team_pts_sd"] = round(float(strength.std()), 1)
+        got["team_pts_per_game_day"] = round(float(strength.mean()) * regular / sim_days, 2)
+        got["test_seat_pts_per_week"] = round(float(test_seat(ctx, runs).mean()), 1)
+        table.append({"source": f"rung 8, sd {sd:g}", **got})
+        log.info("sd %g: %s", sd, got)
     frame = pd.DataFrame(table).set_index("source").T
     print(frame.to_string())
     return frame
@@ -257,7 +356,12 @@ def parse_args():
     p.add_argument("--season", default="2024-25")
     p.add_argument("--weights", default="points-league")
     p.add_argument("--strategy", default="strategy-beagles")
-    p.add_argument("--noise", type=float, nargs="+", default=[NOISE_SD])
+    p.add_argument("--opponent-sources", default=None,
+                   help="Sources each opponent drafts from, e.g. 10 or 1-3 (field.json default)")
+    p.add_argument("--opponent-strategy", default=OPPONENT_STRATEGY,
+                   help="Strategy file whose add/drop and streaming blocks the opponents run")
+    p.add_argument("--sd", type=float, nargs="+", default=[SD],
+                   help="The error on the projections each opponent reads (one run each)")
     p.add_argument("--replications", type=int, default=4)
     p.add_argument("--workers", type=int, default=None)
     return p.parse_args()
