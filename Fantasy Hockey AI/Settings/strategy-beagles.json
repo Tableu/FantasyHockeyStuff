@@ -22,7 +22,7 @@
     "survival": 1.0,
     "next_week": 1.0,
     "goalies": true,
-    "spot_tolerance": 10.0
+    "spot_tolerance": 5.0
   },
   "rung3_streamer": {
     "horizon_weeks": 1

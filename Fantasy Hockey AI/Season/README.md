@@ -356,9 +356,32 @@ the live file. The exception is unlimited streaming spots, whose edge **reversed
 field** (-4.19 +/- 0.59 there) to a wash here: against real-strength opponents it was the wire, not
 the spots, that paid. It stays at 99 -- the mixed ladder measured +2.08 +/- 0.49 for it and here it
 is within noise -- but it is the setting to re-measure first. The gate's own effect, net of the
-next-week pickups it enables, looks like zero or slightly negative (-1.20 vs -2.03). Spot tolerance
-was measured at 5 (the value in the file) against 0; 10 was not tried. Not yet confirmed on 2025-26
-(two-season rule: confirm once, when a change rests on it -- none does).
+next-week pickups it enables, looks like zero or slightly negative (-1.20 vs -2.03). Not yet
+confirmed on 2025-26 (two-season rule: confirm once, when a change rests on it -- none does).
+
+**Three streaming dials swept in the same league** (2024-25, 64 drafts each, seat-paired against
+beagles as shipped; candidate minus shipped):
+
+```
+setting                          points a week        win rate          halves
+survival 1.0 -> 0.8               -3.07 +/- 0.93       -0.049 +/- 0.015  -3.40 / -2.74
+survival 1.0 -> 0.6               -5.77 +/- 1.02       -0.079 +/- 0.017  -6.92 / -4.62
+spots 99 -> 2                     +1.32 +/- 1.16       -0.008 +/- 0.018  +2.51 / +0.13
+spots 99 -> 4                     -0.59 +/- 1.03       -0.010 +/- 0.017  -1.76 / +0.57
+spots 99 -> 6                     -0.17 +/- 0.97       -0.008 +/- 0.014  -0.09 / -0.25
+spot_tolerance 5 -> 0             -2.21 +/- 0.73       -0.028 +/- 0.013  -1.01 / -3.42
+spot_tolerance 5 -> 2.5           -2.40 +/- 0.61       -0.021 +/- 0.010  -2.33 / -2.46
+spot_tolerance 5 -> 10            -1.60 +/- 0.64       -0.010 +/- 0.013  -0.68 / -2.52
+```
+
+Nothing beats beagles as shipped. **Survival stays 1.0**, and the loss is monotone as it falls: the
+expected result against thirteen opponents who take free agents was the opposite, but the week
+plan is re-solved every morning, so a planned pickup that is gone is simply replaced, and
+discounting planned pickups only makes today's plan timid. **Streaming spots do not matter** in a
+contested league (2, 4, 6 and 99 all within about one standard error); 99 stays. **Spot tolerance
+5 is the best value tried** -- 0, 2.5 and 10 each lose 1.6-2.4 points a week past two standard
+errors; that 2.5 does no better than 0 is odd, so 4 and 6 are worth a run if it is revisited. Moves
+a season barely move (155-165 against 160): these dials change which moves, not how many.
 
 Per-draft noise here is 4.7-9.3 points a week (the week-mode and spots comparisons are the noisy
 ones): 22-86 drafts for +/-1.0, 64 was the budget.
