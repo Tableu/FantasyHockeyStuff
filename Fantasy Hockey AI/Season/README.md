@@ -386,11 +386,23 @@ a season barely move (155-165 against 160): these dials change which moves, not 
 Per-draft noise here is 4.7-9.3 points a week (the week-mode and spots comparisons are the noisy
 ones): 22-86 drafts for +/-1.0, 64 was the budget.
 
+**Screen at 32 drafts, decide at 64** (2026-09-30). A candidate runs 32 drafts first; only one that
+looks promising goes on to 64, and it is adopted (or not) on the 64, both halves reported. A clearly
+negative screen can stop at 32. Never decide on 16: drafts 1-16 and 17-32 have diverged by several
+of their own standard errors. Run time, 8 workers on the 6-core machine: about 23 minutes per 64
+seasons, so a 64-draft A/B is about 45 minutes when the shipped half must run (its cache is keyed on
+the code, so any code change re-runs it) and about 23 cached; a 32-draft screen about half that. A
+season is ~114 s on one core, 94% of it the managers' transactions; caching roster fill checks and
+the plan's own side of each trial took it from 142 s, results bit-identical. A per-night cache of
+trial gains across the planner's rounds and a vectorised lineup solve were tried and gave nothing
+(each new move touches most of the week's nights; a solve is ~9 us, mostly numpy's small-array cost).
+
 ```bash
 python opponents.py --summary                                 # 12088's activity targets
 python opponents.py --validate --sd 0 0.5                     # rung 8 against 12088 2024-25
 python oneseat.py --verify --strategy strategy-beagles
-python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --replications 64
+python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --replications 32   # screen
+python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --replications 64   # decide
 ```
 
 ## Re-measured (2026-09-28, r14) -- the current baseline; supersedes every table below
