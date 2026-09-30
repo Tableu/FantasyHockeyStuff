@@ -392,7 +392,8 @@ class PlanWindow:
             note = f"reported {m['add_status']}" if m.get("add_status") not in (None, "ACTIVE") else ""
             rows.append(((m["kind"].capitalize(), m["add"], _num(m["add_rate"]), m["drop"] or "",
                           _num(m["drop_rate"]), note), ()))
-        rows += [(("Waiver claim", c["claim"], "", c["drop"] or "", "", ""), ()) for c in p["claims"]]
+        rows += [(("Waiver claim", c["claim"], "", c["drop"] or "", "", c.get("note") or ""), ())
+                 for c in p["claims"]]
         rows += [(("Drop", "", "", name, "", ""), ()) for name in p["other_drops"]]
         self.moves.set_rows(rows or [(("", "No moves today.", "", "", "", ""), ("empty",))])
 
@@ -465,6 +466,9 @@ class PlanWindow:
                 day = weekday(w["day"])
                 if w["from"] != w["day"]:
                     day += f" (from {pd.Timestamp(w['from']).strftime('%a')})"
+                if w.get("until"):
+                    # His Games stop here: the plan drops him that day for its next rental.
+                    day += f" (dropped {pd.Timestamp(w['until']).strftime('%a')})"
                 rows.append(((f"   {arrow(slot_key) if options else ''}", day, w.get("team") or "",
                               w.get("pos") or "", w["kind"], w["add"], _num(w["add_rate"]),
                               _pct(w.get("add_periph")), w["add_games"],

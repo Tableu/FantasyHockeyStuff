@@ -63,7 +63,7 @@ class SlateView:
                  decision_points=None, rate_estimate=None, ros_estimate=None, injured=None,
                  healthy_estimate=None,
                  goalie_draw_column=None, future_draws=None, phase="regular", alive=True,
-                 on_bye=False, week_weight_mode="flat", returns=None):
+                 on_bye=False, week_weight_mode="flat", returns=None, closed_tonight=None):
         self.day = pd.Timestamp(day)
         self.week = week
         self.config = config
@@ -117,6 +117,10 @@ class SlateView:
         # remaining absence (ModelFeatures/build_injury_absence.py), in his team's games. Windows
         # count his games from then; a player not in it is out tonight only, as before.
         self.returns = returns or {}
+        # Players who, acquired now, cannot play tonight for this team: his game has already
+        # started (the platform locks each player at his puck drop), or his claim processes after
+        # it. Only the live plan fills it; a backtest decides everything before the first game.
+        self.closed_tonight = set(closed_tonight or ())
         self._state = state
 
     # ---------- the manager's own holdings ----------

@@ -402,6 +402,19 @@ class LiveRunner:
         week = self.calendar.week_from(day)
         phase = "playoffs" if week and week > self.regular_weeks else "regular"
 
+        # Who cannot play tonight for us if picked up now: the platform locks each player at his
+        # game's start, so a free agent whose team is already playing counts from his next game;
+        # so does one whose claim clears today at a known time after his puck drop.
+        puck = pd.to_datetime(rows["start_time_utc"])
+        puck_by_team = puck.groupby(rows["team_id"].astype(int)).min().to_dict() if len(rows) else {}
+        started = {t for t, at in puck_by_team.items() if pd.notna(at) and at <= pd.Timestamp(now)}
+        closed_tonight = {p for p, t in nhl_team.items() if t in started}
+        for p, clears in snapshot.waivers.items():
+            clears, at = pd.Timestamp(clears), puck_by_team.get(nhl_team.get(p))
+            if (at is not None and pd.notna(at) and clears.normalize() == day
+                    and clears != clears.normalize() and clears > at):
+                closed_tonight.add(int(p))
+
         def view(state=state):
             return view_module.SlateView(
                 day=day, week=week, config=self.config, calendar=self.calendar,
@@ -414,7 +427,8 @@ class LiveRunner:
                 decision_points=decision_points, goalie_draw_column="p_start_model", future_draws=None,
                 phase=phase, alive=True, on_bye=False,
                 week_weight_mode=self.strategy.playoff_week_weight,
-                rate_estimate=rate_estimate, ros_estimate=ros_estimate, returns=returns)
+                rate_estimate=rate_estimate, ros_estimate=ros_estimate, returns=returns,
+                closed_tonight=closed_tonight)
 
         before = copy.deepcopy(state.teams[snapshot.me].__dict__)
         # The league as it stands, kept apart: the window shows the roster and tonight's lineup
@@ -611,8 +625,27 @@ class LiveRunner:
                           "add_rate": priced(t["player_id"]),
                           "drop_rate": priced(t["dropped"]) if t["dropped"] is not None else None,
                           "add_status": state_status.get(t["player_id"])})
-        claims = [{"claim": name(p), "drop": name(state.claim_drops.get((snapshot.me, p))) if state.claim_drops.get((snapshot.me, p)) else None}
-                  for p, teams_ in state.pending_claims.items() if snapshot.me in teams_]
+        # A rental claim's drop can be a player the week plan picks up only before the claim clears
+        # (a chain: rent Sanheim Wed, claim Podkolzin clearing Thu in Sanheim's spot). The platform
+        # wants a drop you hold now, so name who holds that spot today -- the claim can be entered
+        # with him and its drop changed once the planned pickup is made.
+        # weekplan.execute records who holds that spot today (`outgoing_today`).
+        logged = {q["incoming"]: q for q in manager.move_log if q.get("kind") == "rental claim"}
+
+        def claim_row(p):
+            drop = state.claim_drops.get((snapshot.me, p))
+            row = {"claim": name(p), "drop": name(drop) if drop is not None else None, "note": None}
+            q = logged.get(p)
+            if drop is None or drop in me.roster or q is None:
+                return row
+            holder, when = q.get("outgoing_today"), q.get("outgoing_picked_up")
+            row["drop"] = name(holder) if holder is not None and holder in me.roster else "(open spot)"
+            row["note"] = (f"planned drop {name(drop)}, a pickup for "
+                           f"{pd.Timestamp(when).strftime('%a') if when is not None else 'later'}: "
+                           f"enter with {row['drop']}, change the drop once he is picked up")
+            return row
+
+        claims = [claim_row(p) for p, teams_ in state.pending_claims.items() if snapshot.me in teams_]
         # The Upgrade tab: the add/drop rule's own moves first (upgrades and claims -- rentals are
         # on the Week tab), then the pickups it priced on the roster as it stands, for comparison.
         choices = []
@@ -675,6 +708,8 @@ class LiveRunner:
             for m in planned:
                 p, d = m["incoming"], m["outgoing"]
                 rows.append({"day": m["day"].date().isoformat(), "from": m["effective"].date().isoformat(),
+                             # The night the plan drops him for its next rental (his games stop there).
+                             "until": m["released"].date().isoformat() if m.get("released") is not None else None,
                              "today": m["today"], "for_next_week": m["for_next_week"],
                              "kind": MOVE_KINDS[m["kind"]], "add": name(p),
                              "drop": name(d) if d is not None else None,
@@ -824,7 +859,8 @@ def render(plan: dict) -> str:
         drop = f", drop {m['drop']} ({m['drop_rate']} pts/g)" if m["drop"] else ""
         hurt = f" -- reported {m['add_status']}" if m.get("add_status") not in (None, "ACTIVE") else ""
         actions.append(f"- **{m['kind'].capitalize()}:** add {m['add']} ({m['add_rate']} pts/g){hurt}{drop}")
-    actions += [f"- **Waiver claim:** {c['claim']}" + (f", dropping {c['drop']}" if c["drop"] else "") for c in plan["claims"]]
+    actions += [f"- **Waiver claim:** {c['claim']}" + (f", dropping {c['drop']}" if c["drop"] else "")
+                + (f" ({c['note']})" if c.get("note") else "") for c in plan["claims"]]
     actions += [f"- **Drop:** {p}" for p in plan["other_drops"]]
     lines += ["## Moves", *(actions or ["- None today."]), ""]
     if plan.get("stream_mode") == "week":

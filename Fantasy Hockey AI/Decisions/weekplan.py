@@ -172,12 +172,16 @@ class WeekPlanner:
     # ---------- inputs ----------
 
     def nights_of(self, player_id) -> list:
-        """His team's nights from today to the end of this week."""
+        """His team's nights from today to the end of this week -- without tonight for a player
+        not on this roster who could not play tonight if acquired now (`view.closed_tonight`: his
+        game has started, or his claim processes after it). A player already held keeps tonight."""
         if player_id is None:
             return []
         if player_id not in self._nights:
+            closed = (player_id in getattr(self.view, "closed_tonight", ())
+                      and player_id not in self.roster)
             self._nights[player_id] = [n for n in self.view.nights_through(player_id, 0)
-                                       if n >= self.today]
+                                       if n >= self.today and not (closed and n == self.today)]
         return self._nights[player_id]
 
     def next_nights_of(self, player_id) -> list:
@@ -346,6 +350,12 @@ class WeekPlanner:
         for outgoing in candidates:
             if drops is not None and outgoing not in drops:
                 continue
+            # A claim's drop may be a player the plan only picks up before the claim clears (a
+            # rental chain). The platform wants a drop you hold when the claim is entered, so the
+            # live plan names who holds that spot today (Live/live.py); a pending claim's drop can
+            # be changed before it processes. Requiring a drop held today, and never taking back a
+            # player dropped the same day, cost the shipped system 1.74 +/- 0.65 pts/wk in the
+            # realistic league (2024-25, 64 drafts, 2026-09-29) -- neither is enforced.
             later = dropped.get(outgoing)
             if later is not None and (later["effective"] <= effective
                                       or later["day"] == self.today):
@@ -398,10 +408,18 @@ class WeekPlanner:
     def execute(self, plan) -> list:
         """Make today's moves; the rest of the plan waits for tomorrow's replan."""
         done = []
+        picked = {o["incoming"]: o for o in plan}
         for m in plan:
             if m["day"] != self.today:
                 continue
             incoming, outgoing = m["incoming"], m["outgoing"]
+            # A claim's drop may be a later rental of this plan (a chain). Who holds that spot
+            # today, after today's moves -- the drop a platform needs when the claim is entered.
+            holder, chain = outgoing, []
+            while (holder is not None and holder not in self.roster and holder in picked
+                   and picked[holder]["day"] != self.today and holder not in chain):
+                chain.append(holder)
+                holder = picked[holder]["outgoing"]
             try:
                 if m["kind"] == "claim":
                     self.state.submit_claim(self.view.team_index, incoming, drop=outgoing,
@@ -421,8 +439,11 @@ class WeekPlanner:
                          "spot": outgoing in self.spots,
                          "reserve": streaming.reserve_today(self.view, self.params),
                          "moves_left": self.view.moves_left,
-                         "incoming_games": self._games(incoming, m["effective"]),
-                         "outgoing_games": self._games(outgoing, m["effective"])})
+                         "incoming_games": self._games(incoming, m["effective"],
+                                                       self.released_on(m, plan)),
+                         "outgoing_games": self._games(outgoing, m["effective"]),
+                         "outgoing_today": holder,
+                         "outgoing_picked_up": (picked[outgoing]["effective"] if chain else None)})
         return done
 
     @staticmethod
@@ -439,25 +460,45 @@ class WeekPlanner:
         their gains), and that less the drop costs."""
         players = {p for m in moves for p in (m["incoming"], m["outgoing"]) if p is not None}
         gain = self.delta([], moves, self.today, players) if moves else 0.0
-        return {"first": first, "moves": [self.describe(m) for m in moves],
+        return {"first": first, "moves": [self.describe(m, moves) for m in moves],
                 "week_gain": gain, "week_edge": gain - sum(m["drop_cost"] for m in moves)}
 
-    def _games(self, player_id, effective) -> int:
-        return sum(1 for n in self.nights_of(player_id) if n >= effective)
+    def _games(self, player_id, effective, until=None) -> int:
+        """His team's games this week from `effective`, and before `until` (the night the plan
+        releases him) when given."""
+        return sum(1 for n in self.nights_of(player_id)
+                   if n >= effective and (until is None or n < until))
 
-    def describe(self, m) -> dict:
-        """A planned move for the plan window: when, who, and what it was priced at."""
+    @staticmethod
+    def released_on(m, moves):
+        """When the plan drops the player move `m` picks up -- a later move in the same plan whose
+        drop he is -- or None if he is kept through the week."""
+        return min((o["effective"] for o in moves
+                    if o is not m and o["outgoing"] == m["incoming"] and o["effective"] > m["effective"]),
+                   default=None)
+
+    def describe(self, m, moves=()) -> dict:
+        """A planned move for the plan window: when, who, and what it was priced at. His games are
+        the ones he plays while the plan holds him: a rental dropped on Thursday for the next one
+        does not count his Saturday (until 2026-09-29 it did, so a one-night rental could show
+        four games and a plan's total overstated its games)."""
+        until = self.released_on(m, moves)
+        # A slot's other options keep their own count: each was priced on its own chain of moves
+        # (a claim clearing after the pick's release is still worth a move), so the pick's release
+        # night does not bound them.
+        options = m.get("options", [])
         return {"day": m["day"], "effective": m["effective"],
                 "kind": "rental claim" if m["kind"] == "claim" else "rental",
                 "incoming": m["incoming"], "outgoing": m["outgoing"],
                 "gain": m["gain"], "bar": m["bar"], "drop_cost": m["drop_cost"],
-                "incoming_games": self._games(m["incoming"], m["effective"]),
+                "incoming_games": self._games(m["incoming"], m["effective"], until),
                 "outgoing_games": self._games(m["outgoing"], m["effective"]),
+                "released": until,
                 "today": m["day"] == self.today, "failed": m.get("failed", False),
                 "for_next_week": m.get("for_next_week", False),
                 # A team slot's (TeamPlans): its team, position, expected edge and ranked options.
                 "team": m.get("team"), "group": m.get("group"), "expected": m.get("expected"),
-                "options": m.get("options", [])}
+                "options": options}
 
 
 # ---------- the plan window's team-slot plans ----------
