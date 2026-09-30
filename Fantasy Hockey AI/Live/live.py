@@ -392,7 +392,8 @@ class LiveRunner:
         # Skaters' rest-of-season rate from the preseason board; goalies' from their projected
         # share of their team's remaining starts x the league-average line (goalie_ros).
         ros_estimate = {**self.ros_seed, **self.goalie_ros()}
-        returns = self.expected_returns(injured, status, nhl_team)
+        returns = {**self.expected_returns(injured, status, nhl_team),
+                   **self.return_overrides(injured)}
         _, periph = latest_spreads(self.day, self.scoreset.weights("skaters"), self.theta)
         self.periph = {**self.board_periph, **periph}
         rate_estimate.update(latest_rates(self.day, self.scoreset, self.goalie_line_mean))
@@ -471,6 +472,31 @@ class LiveRunner:
         type_of = {p: group_of.get(norm(parts[p]), -1) for p in injured if parts.get(p)}
         return view_module.expected_returns(injured, type_of, absence, nhl_team, self.calendar,
                                             pd.Timestamp(self.day))
+
+    def return_overrides(self, injured) -> dict:
+        """{injured player: return date} you know better than the model does, from
+        Settings/returns-<league>.json ({"Neal Pionk": "2026-10-02"}; keys starting "_" are notes).
+        Matched by name among today's injured players only; a date already past is ignored."""
+        path = paths.SETTINGS_DIR / f"returns-{self.league.name}.json"
+        if not path.exists():
+            return {}
+        entries = {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
+                   if not k.startswith("_")}
+        names = pd.read_parquet(paths.players()).set_index("player_id")["name"]
+        by_name = {}
+        for p in injured:
+            if p in names.index:
+                by_name.setdefault(names[p], []).append(int(p))
+        out, day = {}, pd.Timestamp(self.day)
+        for name, back in entries.items():
+            back, ids = pd.Timestamp(back), by_name.get(name, [])
+            if back < day:
+                log.warning("%s: %s's return %s has passed -- ignored", path.name, name, back.date())
+            elif len(ids) == 1:
+                out[ids[0]] = back
+            elif len(ids) > 1:
+                log.warning("%s: %d injured players named %s -- ignored", path.name, len(ids), name)
+        return out
 
     def peripheral(self, player_id):
         """His projected points' peripheral share (hits, blocks, shots, PIM), None for a goalie

@@ -149,7 +149,11 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `survival` | 1.0 | week mode: a move planned d days ahead ranks at survival^d x its edge (P(the free agent is still free)); 0.6 / 0.8 / 1.0 were within noise, 1.0 kept |
 | | `next_week` | 0.0 | week mode: a move made today on the week's last 2 days also counts next week's nights at this weight (with `gate`, this week's at phi(z)/phi(0)): buy next week's roster with moves about to expire. Off: on the live strategy, 2024-25, 8 drafts, every variant lost -- 0.5 -1.34 +/- 0.48, 1.0 -2.68 +/- 0.69, gate+0.5 -1.46 +/- 0.94, gate+1.0 -3.26 +/- 0.75 pts/wk -- and none raised the win rate (weekend rentals were traded for pickups Monday's fresh moves make anyway). Now only on the week's last day with P(win) >= 0.9 (needs `gate`): gate+0.5 -0.94 +/- 0.35, gate+1.0 -1.29 +/- 0.72; and with that Sunday's games not counted at all (what the code now does): -1.51 +/- 0.40 / -1.45 +/- 0.62 -- still off |
 | | `goalies` | false | week mode: goalies may be rented and dropped for a rental, tonight priced on the simulated line (P(start) and the matchup); a goalie projected to start half or more of his team's remaining games (Projections/goalie_workload.py) is never dropped for one. **On for `beagles` and `espn-la`** (the user, 2026-09-27): 2024-25, strategy-espn-la, 32 drafts, +0.70 +/- 0.41 pts/wk, win +0.013 +/- 0.006, ~9 more moves a season. Unprotected it read +1.62 +/- 0.52, half of it from renting starters away; before goalie workload rows, a goalie's rate was P(start) x the league-average line and elite starters read as replaceable (the plan rented Daccord for Shesterkin) |
-| | `spot_tolerance` | 0.0 | rest-of-season points: a skater within this much of replacement (the best free agent at his positions) is a streaming spot too, not only one below it; his drop cost is still charged. Goalies stay strictly below. Asked for 2026-09-28: the Beagles' week plans were all D and G because every forward was above replacement, Kane by 0.1 points. Off: seat-paired, 32 drafts, 2024-25 chose 10 for `beagles` (+1.38 +/- 0.32 pts/wk, win +0.004 +/- 0.007; 25: +1.27 +/- 0.40) and none for `espn-la` (10: +0.34 +/- 0.30; 25: +0.04 +/- 0.39), but 2025-26 did not confirm it (beagles 10: -0.21 +/- 0.44, win -0.006 +/- 0.007). **10 for `beagles`** (the user's call, 2026-09-28, unconfirmed) |
+| | `spot_tolerance` | 0.0 | rest-of-season points: a skater within this much of replacement (the best free agent at his positions) is a streaming spot too, not only one below it; his drop cost is still charged. Goalies stay strictly below. Asked for 2026-09-28: the Beagles' week plans were all D and G because every forward was above replacement, Kane by 0.1 points. Off: seat-paired, 32 drafts, 2024-25 chose 10 for `beagles` (+1.38 +/- 0.32 pts/wk, win +0.004 +/- 0.007; 25: +1.27 +/- 0.40) and none for `espn-la` (10: +0.34 +/- 0.30; 25: +0.04 +/- 0.39), but 2025-26 did not confirm it (beagles 10: -0.21 +/- 0.44, win -0.006 +/- 0.007). Set to 10 for `beagles` 2026-09-28 (the user's call); **5 for `beagles`** since 2026-09-29: in the realistic league (2024-25, 64 drafts) 0, 2.5 and 10 each lose 1.6-2.4 pts/wk against it (`Season/README.md`) |
+| | `starter_share` | 0.5 | week mode, `goalies`: a goalie projected to start this share of his team's remaining games is never a rental's drop. Judgment call, unmeasured |
+| | `late_days` | 1 | week mode, `next_week`: the pickup for next week is priced only on the week's last this-many days... |
+| | `clear_win_z` | 1.2816 | ...and only with the matchup z at least this (1.2816 = P(win) 0.9; needs `gate`). Judgment call |
+| | `chain_tie` | 0.1 | week mode: team slots within this many expected points count as tied, and the one whose pick finishes playing sooner goes first. Judgment call |
 | `rung3_streamer` | `horizon_weeks` | 1 | how far ahead rung 3 prices a swap |
 | `rung4_full_system` | `horizon_weeks` | 1 | how far ahead rung 4 prices an acquisition (matched to rung 3) |
 | | `drop_horizon_weeks` | 3 | window a forced IR-activation drop is priced over (rungs 2-4) |
@@ -165,6 +169,7 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | `draft` | `vor_values` | `consensus` | what the VOR draft board values players on: `consensus`, the external sources' preseason projections alone (the only values a real draft has), or `own_model`, our opening-week rest-of-season rows (a backtest reference; they need the season's own games) |
 | | `min_sources` | 2 | sources a player needs for the consensus; below it he keeps last season's total, or his thin consensus if he has none |
 | | `undated_sources` | `include` | a source with no publish date (Dom's 2025-26 sheet; every 2026-27 file today) is used, or dropped with `exclude`; logged either way |
+| `roster` | `repair_wait_days` | 7 | a roster that cannot fill every slot spends a move to repair it (every rung that transacts), unless an IR player expected back within this many days would fill the slot himself. Return dates are the injury model's, or `Settings/returns-<league>.json` for a live league. Judgment call, 2026-09-30, unmeasured |
 
 ### Where the values come from
 
@@ -183,8 +188,9 @@ was not touched.
   12-team points) and `net` lost (-3.37 +/- 1.04).
 - **Each league has its own strategy, `strategy-<league>.json`** (named in its league file's
   `strategy`, shared with no other league): strategy.json but for the league-level choices --
-  `adddrop.tail`, `streaming.mode`, `streaming.gate`, `streaming.next_week` (verify.py 'live
-  strategy' refuses anything else). Today: `espn-la` and `espn` choose `tail = cost` and `mode =
+  `adddrop.tail`, `streaming.mode`, `streaming.gate`, `streaming.next_week`, `goalies`, `spots`,
+  `spot_tolerance`, the judgment calls `starter_share`, `late_days`, `clear_win_z`, `chain_tie` and
+  `roster.repair_wait_days` (verify.py 'live strategy' refuses anything else). Today: `espn-la` and `espn` choose `tail = cost` and `mode =
   week`; `beagles` also turns on the Sunday next-week pickup (`gate = true`, `next_week = 1.0`).
 - **`claim_premium = 0`** since 2026-09-23, when claims were made to resolve: a claim clears the
   same bar as an add and priority is treated as free. Unmeasured; a sweep over {0, 5} is planned.

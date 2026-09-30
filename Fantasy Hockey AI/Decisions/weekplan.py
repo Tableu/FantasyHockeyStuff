@@ -18,7 +18,7 @@ planned for a later night is often gone by then (2024-25 backtest, the shipped f
 free a day later, 51% after three, ~44% after four to six), so a pickup today beats a slightly
 bigger one on Thursday that probably will not be there.
 
-With `next_week` > 0 (off: it did not pay, see LATE_DAYS), a move made on the week's last day
+With `next_week` > 0 (off: it did not pay, see `late_days`), a move made on the week's last day
 with the week won prices only next week's nights, on the roster the plan leaves, at that weight.
 
 Then it makes today's moves and keeps the rest as the plan; the
@@ -66,16 +66,14 @@ def long_absence(view, player_id, nights) -> bool:
     return not nights or back > nights[len(nights) // 2]
 
 
-# Goalie rentals never drop a goalie projected to start this share of his team's remaining games.
-STARTER_SHARE = 0.5
+# Goalie rentals never drop a goalie projected to start `starter_share` of his team's remaining
+# games (Settings/strategy.json, streaming).
 
-# `next_week` prices next week's nights only for a move made TODAY on the week's last LATE_DAYS
-# days with the week won (z >= CLEAR_WIN_Z, P(win) >= 0.9; the z needs `gate`), and that move's
+# `next_week` prices next week's nights only for a move made TODAY on the week's last `late_days`
+# days with the week won (z >= `clear_win_z`, 1.2816 = P(win) >= 0.9; the z needs `gate`), and that move's
 # nights this week count for nothing. It is off: every version tried lost (2024-25, live strategy,
 # 8 drafts, -0.9 to -3.3 pts/wk; this one -1.51 +/- 0.40 at 0.5, -1.45 +/- 0.62 at 1.0), and none
 # raised the win rate -- Monday's fresh moves make the next-week pickups anyway. Settings/README.md.
-LATE_DAYS = 1
-CLEAR_WIN_Z = 1.2816
 
 
 def run(view, params: streaming.StreamParams, horizon, source, slot_order, accepts, fieldable,
@@ -132,13 +130,13 @@ class WeekPlanner:
                                      goalies=self.goalies)
         if self.goalies:
             # A starter is never rented away, even when a free agent projects as well: a goalie
-            # projected to start STARTER_SHARE of his team's remaining games (his rest-of-season
+            # projected to start `starter_share` of his team's remaining games (his rest-of-season
             # rate over the league-average line; Projections/goalie_workload.py) keeps his spot.
             lines = view.goalie_projections["expected_line"]
             line = float(lines.iloc[0]) if len(lines) else None
             if line:
                 self.spots = [p for p in self.spots if not streaming.is_goalie(eligibility, p)
-                              or (view.ros_rate(p) or 0.0) < STARTER_SHARE * line]
+                              or (view.ros_rate(p) or 0.0) < params.starter_share * line]
         self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True)
         self.horizon = horizon
 
@@ -146,8 +144,8 @@ class WeekPlanner:
         self._by_night, self._reserve = {}, {}
         self.week_end = view.calendar.weeks[view.week - 1].end
         # Buying next week's roster: the week's last day, the matchup won (`gate` supplies z).
-        self.late = ((self.week_end - self.today).days < LATE_DAYS and params.gate
-                     and z >= CLEAR_WIN_Z)
+        self.late = ((self.week_end - self.today).days < params.late_days and params.gate
+                     and z >= params.clear_win_z)
         # Tonight a goalie is worth tonight's P(start) x the expected line: whether he starts is
         # often known by the lock, and that is what a goalie rental is for. (Other nights, his
         # rate: his usual share of starts.)
@@ -519,9 +517,8 @@ OPTIONS_PER_SLOT = 8        # the players on a slot's team priced as its options
 def group_of(eligibility) -> str:
     """The slot group a player with these positions fills."""
     return "G" if "G" in eligibility else "SKATER"
-# Slots this close in expected value (points) count as tied, and the one whose pick is done playing
-# sooner goes in: it leaves more of the week for another move.
-CHAIN_TIE = 0.1
+# Slots within `chain_tie` expected points of each other count as tied, and the one whose pick is
+# done playing sooner goes in: it leaves more of the week for another move.
 
 
 def survival(days) -> float:
@@ -637,7 +634,7 @@ class TeamPlans:
         return max([n for n in self.p.nights_of(m["incoming"]) if n >= m["effective"]] or [m["effective"]])
 
     def better(self, a, b) -> bool:
-        if abs(a[0] - b[0]) <= CHAIN_TIE:
+        if abs(a[0] - b[0]) <= self.p.params.chain_tie:
             return (self.ends(a), -a[0]) < (self.ends(b), -b[0])
         return a[0] > b[0]
 

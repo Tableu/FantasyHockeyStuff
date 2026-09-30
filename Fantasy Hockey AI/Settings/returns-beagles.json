@@ -1,0 +1,4 @@
+{
+  "_note": "Return dates you know better than the model (Live/live.py return_overrides): player name as the plan shows it, without the team -> the first date he can play. Only injured players are matched; a past date is ignored with a warning. Delete entries once they're back.",
+  "Neal Pionk": "2026-10-02"
+}

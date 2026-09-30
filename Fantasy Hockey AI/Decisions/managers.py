@@ -178,15 +178,24 @@ class Manager:
         agent (by `value`) who raises the number of fillable slots, dropping the cheapest player
         whose release keeps that gain -- or nobody, if a stash left a spot open. Costs a move
         each, like any add.
+
+        Except when the gap is short: if an IR player expected back within `repair_wait_days`
+        would fill the slot himself, it waits for him. A D on IR until Friday left a D slot empty
+        on Wednesday, and the repair spent a move -- and dropped a player -- to cover two nights.
         """
         state = view._state
         eligibility = state.eligibility
         need = len(self.slot_order)
         done = []
+        soon = view.day + pd.Timedelta(days=self.strategy.repair_wait_days)
+        returning = [p for p in view.ir
+                     if view.expected_return(p) is not None and view.expected_return(p) <= soon]
         while view.moves_left > 0:
             roster = list(view.roster)
             have = self._fillable(roster, eligibility)
             if have >= need:
+                break
+            if returning and self._fillable(roster + returning, eligibility) > have:
                 break
             # A player reported out cannot fill the slot, so he repairs nothing.
             pool = sorted((p for p in view.free_agents()

@@ -411,9 +411,6 @@ def check_ir() -> str:
             f"0 while injured, {forced} forced drops, no healthy player left on IR")
 
 
-STARTER_SHARE = 0.5         # a goalie projected to start this share of his team's rest is a starter
-
-
 def check_streaming() -> str:
     """Rung 7 (section 10): with zero streaming spots it is rung 5 seat for seat; with spots, no
     rental breaks the reserve, clears less than its drop cost, drops anyone but a designated spot,
@@ -463,7 +460,8 @@ def check_streaming() -> str:
             for r in dropped:
                 known = shares[(shares["player_id"] == r["outgoing"]) & (shares["game_date"] <= r["day"])]
                 share = float(known["start_share"].iloc[-1]) if len(known) else 0.0
-                assert share < STARTER_SHARE, f"a starter ({share:.0%} of starts) rented away: {r}"
+                starter = _strategy().streaming.starter_share
+                assert share < starter, f"a starter ({share:.0%} of starts) rented away: {r}"
             counts["goalie drops"] = len(dropped)
     return (f"k=0 identical to rung 5; k=2: {counts['daily']} daily / {counts['week']} week-mode / "
             f"{counts['next-week']} next-week-pickup / {counts['goalie']} goalie-rental rentals, reserve, "
@@ -598,7 +596,12 @@ def check_frozen_rosters() -> str:
             if have < len(_m.slot_order) and view.moves_left > 0:
                 fixable = any(_m._fillable(roster + [p], elig) > have
                               for p in view.free_agents() if not view.on_waivers(p))
-                if fixable:
+                # ...unless it is waiting for an IR player due back (roster.repair_wait_days).
+                soon = view.day + pd.Timedelta(days=_m.strategy.repair_wait_days)
+                returning = [p for p in view.ir if view.expected_return(p) is not None
+                             and view.expected_return(p) <= soon]
+                waiting = bool(returning) and _m._fillable(roster + returning, elig) > have
+                if fixable and not waiting:
                     stuck.append((_m.team_index, view.day.date(), have))
         manager.transactions = watched
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field)
@@ -1382,7 +1385,9 @@ def check_boom_bust(drafts=3, draws=300) -> str:
 # values the backtests measured.
 LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"),
                 ("streaming", "next_week"), ("streaming", "goalies"), ("streaming", "spots"),
-                ("streaming", "spot_tolerance"))
+                ("streaming", "spot_tolerance"), ("streaming", "starter_share"),
+                ("streaming", "late_days"), ("streaming", "clear_win_z"), ("streaming", "chain_tie"),
+                ("roster", "repair_wait_days"))
 
 
 def check_live_strategy() -> str:

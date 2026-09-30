@@ -39,6 +39,7 @@ class Strategy:
     vor_values: str                           # VOR board: "consensus" or "own_model" (reference)
     vor_min_sources: int                      # ...sources a player needs, else last season
     undated_sources: str                      # "include" or "exclude" a source with no publish date
+    repair_wait_days: int                     # repair waits for an IR player back within this many days
     description: str = ""
 
 
@@ -71,14 +72,14 @@ def _exactly(block, cls, label, convert):
 def from_dict(payload: dict, name: str = "") -> Strategy:
     """Parse a strategy file's contents. Every key is required; unknown keys are refused."""
     sections = {"description", "adddrop", "streaming", "rung3_streamer", "rung4_full_system",
-                "priors", "playoffs", "draft"}
+                "priors", "playoffs", "draft", "roster"}
     if set(payload) - sections or sections - {"description"} - set(payload):
         raise ValueError(f"strategy {name}: sections must be {sorted(sections)}; "
                          f"got {sorted(payload)}")
     add = _exactly(payload["adddrop"], adddrop.AddDropParams, "adddrop",
                    {"horizon_weeks": _horizon, "margin": _number, "claim_premium": _number})
     stream = _exactly(payload["streaming"], streaming.StreamParams, "streaming",
-                      {"lam": _number, "margin": _number})
+                      {"lam": _number, "margin": _number, "clear_win_z": _number})
     rung3, rung4, priors = (payload["rung3_streamer"], payload["rung4_full_system"],
                             payload["priors"])
     for label, block, keys in (
@@ -113,6 +114,12 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
     min_sources = draft["min_sources"]
     if isinstance(min_sources, bool) or not isinstance(min_sources, int) or min_sources < 1:
         raise ValueError(f"strategy {name}: draft.min_sources {draft['min_sources']!r}")
+    roster = payload["roster"]
+    if set(roster) != {"repair_wait_days"}:
+        raise ValueError(f"strategy {name} roster: needs exactly repair_wait_days; got {sorted(roster)}")
+    wait = roster["repair_wait_days"]
+    if isinstance(wait, bool) or not isinstance(wait, int) or wait < 0:
+        raise ValueError(f"strategy {name}: roster.repair_wait_days {wait!r}")
     if rung4["z_source"] not in ("closed_form", "sampled"):
         raise ValueError(f"strategy {name}: z_source {rung4['z_source']!r}; use closed_form or sampled")
     for source in (add.rate_source, rung4["drop_rate_source"]):
@@ -137,5 +144,6 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         vor_values=draft["vor_values"],
         vor_min_sources=draft["min_sources"],
         undated_sources=draft["undated_sources"],
+        repair_wait_days=wait,
         description=payload.get("description", ""),
     )

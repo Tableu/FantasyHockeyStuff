@@ -64,6 +64,11 @@ class StreamParams:
     goalies: bool               # week mode: goalies may be rented (and dropped for a rental)
     spot_tolerance: float       # rest-of-season points: a skater this close to replacement is a
                                 # spot too (0 = strictly below; goalies always strictly below)
+    starter_share: float        # week mode: a goalie projected to start this share of his team's
+                                # remaining games is never rented away
+    late_days: int              # week mode, `next_week`: the week's last this-many days...
+    clear_win_z: float          # ...with the matchup z at least this (the week won)
+    chain_tie: float            # week mode: slots this close in expected points count as tied
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -153,7 +158,7 @@ def spots(view, params, horizon, source, pool, eligibility, goalies=False) -> li
                 - replacement.at(eligibility.get(p, frozenset())))
         # `spot_tolerance`: a skater within that many points of replacement is a spot as well --
         # his drop cost still charges what he is worth over the free agent, so a rental must pay
-        # for it. Goalies stay strictly below: their values misread starters (weekplan.STARTER_SHARE).
+        # for it. Goalies stay strictly below: their values misread starters (`starter_share`).
         if over < (0.0 if is_goalie(eligibility, p) else params.spot_tolerance):
             scored.append((over, p))
     return [p for _, p in sorted(scored)[:params.spots]]

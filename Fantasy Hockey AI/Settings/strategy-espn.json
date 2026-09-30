@@ -22,7 +22,11 @@
     "survival": 1.0,
     "next_week": 0.0,
     "goalies": false,
-    "spot_tolerance": 0.0
+    "spot_tolerance": 0.0,
+    "starter_share": 0.5,
+    "late_days": 1,
+    "clear_win_z": 1.2816,
+    "chain_tie": 0.1
   },
   "rung3_streamer": {
     "horizon_weeks": 1
@@ -48,5 +52,8 @@
     "vor_values": "consensus",
     "min_sources": 2,
     "undated_sources": "include"
+  },
+  "roster": {
+    "repair_wait_days": 7
   }
 }
