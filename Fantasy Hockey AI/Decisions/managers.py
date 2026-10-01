@@ -150,6 +150,11 @@ class Manager:
         return slots_module.assign(self.slot_order, startable, view._state.eligibility,
                                    self.accepts)
 
+    # Entries `_fillable` keeps before starting over (a season asks ~3.6M, mostly repeats). One
+    # realistic-league season: 50,000 peaked at 780 MB a process, 500 at 442 MB, same time and
+    # results (2026-09-30) -- at 50,000 eight workers ran the machine out of memory.
+    FILL_CACHE_MAX = 500
+
     def _fillable(self, roster, eligibility) -> int:
         """How many active slots this roster could fill on a night when everyone plays.
 
@@ -157,7 +162,7 @@ class Manager:
         plan asks this of ~3.6M rosters a season, and matching_size's own cache key (a Counter
         of eligibility sets) cost ~20 us a call to build -- a sixth of a season's run time."""
         if (eligibility is not getattr(self, "_fill_eligibility", None)
-                or len(self._fill_cache) > 50_000):          # bounded: a season asks ~10^6
+                or len(self._fill_cache) > self.FILL_CACHE_MAX):
             self._fill_eligibility, self._fill_cache = eligibility, {}
         key = frozenset(roster)
         if len(key) != len(roster):        # a player listed twice counts twice in the matching
@@ -820,9 +825,67 @@ class Opponent(Orchestrated):
                                           for night, points in draws().items()}
         return seen
 
+    # A goalie streamed on the real manager's goalie days must look like a start tonight. Judgment
+    # (2026-09-30): real managers stream the confirmed or likely starter.
+    STREAM_GOALIE_P_START = 0.5
+
     def transactions(self, view) -> None:
         view._state.teams[self.team_index].budget = self.budget(view.week)
-        super().transactions(self._noisy(view))
+        seen = self._noisy(view)
+        # The real manager's goalie pickups, replayed on their weekdays: the orchestrator alone
+        # took goalies in 15% of pickups against 12088's 26% (steady over three seasons, 8-41%
+        # by manager), so on those days a goalie is streamed first and the orchestrator spends
+        # what is left.
+        goalie_days = sum(1 for weekday, goalie in self.profile.get("weeks", {}).get(view.week, ())
+                          if goalie and weekday == view.day.weekday())
+        if goalie_days:
+            self.manage_ir_step(seen)
+            for _ in range(goalie_days):
+                if not self._stream_goalie(seen):
+                    break
+        super().transactions(seen)
+
+    def _stream_goalie(self, view) -> bool:
+        """Add the free-agent goalie most likely to score tonight (a likely starter), dropping
+        the cheapest player over the add/drop window whose release keeps the roster fieldable --
+        never a goalie projected to start `starter_share` of his team's games. Spends one move.
+        False when there is no move, no likely starter or no legal drop."""
+        import valuation
+
+        if view.moves_left <= 0:
+            return False
+        g = view.goalie_projections
+        if not len(g):
+            return False
+        column = self.p_start_column if self.p_start_column in g.columns else "p_start"
+        free = view.free_agents()
+        options = sorted(((float(s) * float(line), int(p)) for p, s, line
+                          in zip(g["player_id"], g[column], g["expected_line"])
+                          if int(p) in free and not view.on_waivers(int(p))
+                          and int(p) not in view.injured and s >= self.STREAM_GOALIE_P_START),
+                         reverse=True)
+        if not options:
+            return False
+        incoming = options[0][1]
+        state, eligibility = view._state, view._state.eligibility
+        roster = list(view.roster)
+        outgoing = None
+        if view.roster_room() <= 0:
+            params, line = self.params, float(g["expected_line"].iloc[0])
+            protected = {p for p in roster if "G" in eligibility.get(p, ())
+                         and (view.ros_rate(p) or 0.0) >= self.stream_params.starter_share * line}
+            costs = sorted((valuation.player_value(view, p, params.horizon_weeks,
+                                                   params.rate_source), p)
+                           for p in roster if p not in protected)
+            outgoing = next((p for _, p in costs
+                             if self._fieldable([q for q in roster if q != p] + [incoming],
+                                                eligibility, roster)), None)
+            if outgoing is None:
+                return False
+        state.add(self.team_index, incoming, view.day, drop=outgoing, reason="goalie stream")
+        self.move_log.append({"day": view.day, "kind": "goalie stream", "incoming": incoming,
+                              "outgoing": outgoing})
+        return True
 
 
 LADDER[8] = Opponent

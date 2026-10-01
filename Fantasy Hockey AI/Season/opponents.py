@@ -19,7 +19,9 @@ it. Pickups before week 1 are dropped -- pre-season moves are free and the simul
 the opener.
 
 **Calibration.** The weekly budget carries activity, its spread across managers and the fade
-after January (the orchestrator decides the days, so day-of-week and goalie share are its own).
+after January. The profile's goalie pickups are replayed on their weekdays (a likely starter
+streamed, `managers.Opponent._stream_goalie`, since 2026-09-30: the orchestrator alone took 15%
+goalies against 26%); the rest of the days and players are the orchestrator's own.
 One parameter is fitted: the error `sd`, so the opponents score what 12088's managers did per NHL
 game day (Fleaflicker's standings; its matchups are not the simulator's weeks, so points per game
 day is the comparable unit). Pickup and cut quality -- points per game the added or dropped

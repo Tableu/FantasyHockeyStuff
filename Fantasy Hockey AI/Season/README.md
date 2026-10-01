@@ -306,23 +306,36 @@ a 10-day first and a 14-day 4 Nations one, against 24 simulator weeks to Mar 30)
 Oct 14-20, Dec 9-15, Jan 20-26). The harness scores exactly as Fleaflicker does: 28 top skaters'
 2024-25 season totals match to 0.02%, goalies 1.2% low.
 
-`opponents.py --validate` against 12088's own 2024-25, 2 drafts:
+`opponents.py --validate` against 12088's own 2024-25 (2 drafts; the goalie replay, 4 drafts):
 
 ```
-                               12088 2024-25   rung 8 (shipped)
-pickups per team-week              4.54            4.65
-at the 7-move cap                  43.7%           45.9%
-zero-pickup weeks                  21.2%           18.5%
-first / second half                5.74 / 3.43     5.69 / 3.68
-goalie share                       25.7%           14.7%
-Monday / Sunday                    19.0 / 22.4%    23.3 / 14.8%
-pickup / cut pts per game, 14d     3.13 / 3.12     3.07 / 3.05
-team points per NHL game day       30.19           29.84
-team points sd across teams        15.8            10.8
-our seat, points per week          --              207.4 (opponents 198.9)
+                               12088 2024-25   rung 8 (2026-09-29)   + goalie replay (2026-09-30)
+pickups per team-week              4.54            4.65                  4.67
+at the 7-move cap                  43.7%           45.9%                 46.9%
+zero-pickup weeks                  21.2%           18.5%                 19.7%
+first / second half                5.74 / 3.43     5.69 / 3.68           5.77 / 3.64
+goalie share                       25.7%           14.7%                 25.0%
+Monday / Sunday                    19.0 / 22.4%    23.3 / 14.8%          23.4 / 11.3%
+pickup / cut pts per game, 14d     3.13 / 3.12     3.07 / 3.05           3.22 / 3.18
+team points per NHL game day       30.19           29.84                 29.62
+team points sd across teams        15.8            10.8                  10.7
+our seat, points per week          --              207.4 (opp. 198.9)    211.2 (opp. 197.5)
 ```
 
-Known gaps: goalie share runs low, real managers differ more from each other than these do, and
+**The goalie replay** (2026-09-30, `managers.Opponent._stream_goalie`). The orchestrator alone took
+goalies in 15% of pickups; 12088's managers take 25.5%, steady over three seasons (25.5 / 25.7 /
+25.3%) and 8-41% by manager, the top quarter making half of all goalie pickups. Each profile
+already held which pickups were goalies and on which weekday, so on those days an opponent now
+streams the free-agent goalie most likely to score tonight (P(start) at least 0.5), dropping its
+cheapest player over the add/drop window (never a projected starter), and the orchestrator spends
+what is left of the week's budget. It matches the share by construction, keeps strength and
+activity, and shows what the old opponents were worth to us: with an uncontested goalie wire, our
+goalie rentals looked worth 3.93 +/- 0.94 pts/wk (64 drafts); against goalie-streaming opponents a
+32-draft screen gives 1.13 +/- 1.37 (halves 2.24 / 0.02). Results measured before this on a
+goalie setting were flattered; those without one should not move.
+
+Known gaps: real managers differ more from each other than these do (most of it, probably, the
+lineup neglect the user chose not to model, 2026-09-28), they stream more on Sundays, and
 injury news lag is **measured but not modelled** (of 692 injury spells to players rostered in 12088,
 owners cut within 7 days 16% of the time, never 61%; they mostly stash, as rung 8 does).
 
