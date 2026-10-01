@@ -35,6 +35,10 @@ WINDOW_LEAD = dt.timedelta(minutes=30)
 MODEL_FEATURES = paths.SIBLINGS / "ModelFeatures"
 PIPELINE = paths.SIBLINGS.parent / "pipeline"
 SNAPSHOT_KINDS = ("injuries", "lines", "goalies")
+# A quick refresh (the auto window, the Quick button) skips only the line charts. Injuries ride
+# along since the Fleaflicker listing reads its pages in parallel (~5 s instead of ~16 s), so a
+# late scratch posted as an injury reaches the next window's plan.
+QUICK_SNAPSHOT_KINDS = ("injuries", "goalies")
 
 
 def _run(command, cwd, echo, label):

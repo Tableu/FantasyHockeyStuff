@@ -11,8 +11,8 @@ the same steps run_live.py takes):
     Full refresh    fresh injury, line-chart and goalie reports -> tonight's projections -> read the
                     league from its platform -> the shipped manager's plan. Runs on opening, where
                     an injury report under 30 minutes old is reused rather than fetched again.
-    Quick refresh   goalie reports -> tonight's projections -> the plan again (lineup news, late
-                    scratches) -- what the auto window runs.
+    Quick refresh   injury and goalie reports -> tonight's projections -> the plan again (lineup
+                    news, late scratches) -- what the auto window runs.
     Auto window     while the window is open, a quick refresh about 30 minutes before each group of
                     games starts (Fleaflicker locks each player at his own game), once per group.
 
@@ -286,7 +286,7 @@ class PlanWindow:
         try:
             now = dt.datetime.fromisoformat(args.now) if args.now else utc_now()
             if not args.skip_snapshots:
-                kinds = planpass.SNAPSHOT_KINDS if mode == "full" else ("goalies",)
+                kinds = planpass.SNAPSHOT_KINDS if mode == "full" else planpass.QUICK_SNAPSHOT_KINDS
                 # Opening reuses a fresh injury report (the 10:00 / 15:00 runs, a window just
                 # closed); the Full refresh button always fetches.
                 opening = not self.last
