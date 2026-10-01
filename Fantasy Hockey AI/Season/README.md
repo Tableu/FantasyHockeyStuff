@@ -331,8 +331,10 @@ cheapest player over the add/drop window (never a projected starter), and the or
 what is left of the week's budget. It matches the share by construction, keeps strength and
 activity, and shows what the old opponents were worth to us: with an uncontested goalie wire, our
 goalie rentals looked worth 3.93 +/- 0.94 pts/wk (64 drafts); against goalie-streaming opponents a
-32-draft screen gives 1.13 +/- 1.37 (halves 2.24 / 0.02). Results measured before this on a
-goalie setting were flattered; those without one should not move.
+32-draft screen gives 1.13 +/- 1.37, and 64 drafts **1.57 +/- 0.91** (halves 1.13 / 2.01; win
++0.014 +/- 0.016) -- smaller, still positive in both halves, so goalie rentals stay on. Re-screened
+against these opponents: week mode still -5.63 +/- 1.47 (down by about what its goalie rentals
+lost), next-week pickups unchanged at -2.05 +/- 0.95. Every beagles setting keeps its sign.
 
 Known gaps: real managers differ more from each other than these do (most of it, probably, the
 lineup neglect the user chose not to model, 2026-09-28), they stream more on Sundays, and
@@ -356,9 +358,12 @@ turns one beagles setting back to `strategy.json`'s; negative = the setting earn
 ```
 turned off                       points a week        win rate          halves
 week mode -> daily (+its bundle)  -7.92 +/- 1.03       -0.111 +/- 0.015  -9.44 / -6.40
+  (goalie replay, 32-draft screen) -5.63 +/- 1.47       -0.035 +/- 0.027  -5.73 / -5.53
 goalie rentals                    -3.93 +/- 0.94       -0.040 +/- 0.015  -2.81 / -5.06
+  (goalie replay, 2026-09-30)     -1.57 +/- 0.91       -0.014 +/- 0.016  -1.13 / -2.01
 spot tolerance 5 -> 0             -2.21 +/- 0.73       -0.028 +/- 0.013  -1.01 / -3.42
 next-week pickups                 -2.03 +/- 0.61       -0.027 +/- 0.010  -0.72 / -3.34
+  (goalie replay, 32-draft screen) -2.05 +/- 0.95       -0.022 +/- 0.016  -2.59 / -1.51
 gate (also ends next-week)        -1.20 +/- 0.66       -0.020 +/- 0.012  -0.39 / -2.01
 tail cost                         -1.10 +/- 0.59       -0.012 +/- 0.010  -0.95 / -1.24
 unlimited spots -> 2              +1.32 +/- 1.16       -0.008 +/- 0.018  +2.51 / +0.13
