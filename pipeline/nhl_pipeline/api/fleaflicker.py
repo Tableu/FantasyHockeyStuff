@@ -45,7 +45,8 @@ def get_players(league_id: int, sort_season: int | None = None) -> list:
 
     A listing that reports its total has the rest of its pages fetched PAGE_WORKERS at a time; one
     that does not, or a parallel read Fleaflicker rate-limits (429 after http_client's retries),
-    is paged one at a time as before."""
+    is paged one at a time as before. Fleaflicker's burst lockout answers 403 to every call for a
+    few minutes; that is not retried here -- it raises, and the snapshot records the failure."""
     params = {"sport": "NHL", "league_id": league_id}
     if sort_season is not None:
         params["sort_season"] = sort_season

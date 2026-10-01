@@ -77,6 +77,11 @@ import simlayer
 
 AUTO_CHECK_MS = 60_000          # how often the auto window looks at the clock
 OPENING_INJURIES_MAX_AGE = 30   # minutes: on opening, an injury report this fresh is reused
+# Minutes: a quick refresh reuses an injury report this fresh. The listing is 44 Fleaflicker calls
+# and the league read ~18 more; ~100-190 calls within ~2 min locks every call out with a 403 for a
+# few minutes (2026-09-27), which would fail the league read and the plan. Two Quick taps in a
+# row therefore fetch the listing once.
+QUICK_INJURIES_MAX_AGE = 10
 PLAN_COLOUR = "#e0ecff"         # a row the plan recommends acting on
 STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": "#fff4d6"}
 # A row's look by its tags: a recommended action, an injury status, greyed (a placeholder message).
@@ -288,10 +293,12 @@ class PlanWindow:
             if not args.skip_snapshots:
                 kinds = planpass.SNAPSHOT_KINDS if mode == "full" else planpass.QUICK_SNAPSHOT_KINDS
                 # Opening reuses a fresh injury report (the 10:00 / 15:00 runs, a window just
-                # closed); the Full refresh button always fetches.
+                # closed); a quick refresh reuses one under QUICK_INJURIES_MAX_AGE; the Full
+                # refresh button always fetches.
                 opening = not self.last
-                fetched = planpass.snapshots(kinds, self.echo,
-                                             injuries_max_age=OPENING_INJURIES_MAX_AGE if opening else None)
+                max_age = (OPENING_INJURIES_MAX_AGE if opening
+                           else QUICK_INJURIES_MAX_AGE if mode == "quick" else None)
+                fetched = planpass.snapshots(kinds, self.echo, injuries_max_age=max_age)
                 for kind in fetched:                   # a reused report keeps its own time
                     self.last[kind] = dt.datetime.now()
             planpass.tonight(self.day, self.echo)
