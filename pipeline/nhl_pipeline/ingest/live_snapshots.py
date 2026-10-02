@@ -65,6 +65,7 @@ _DDL = [
     RowsSeen        INT NULL,
     RowsWritten     INT NULL,
     Error           VARCHAR(1000) NULL,
+    Scope           VARCHAR(10) NULL,
     CONSTRAINT PK_LiveSnapshotRuns PRIMARY KEY (SnapshotRunID),
     CONSTRAINT FK_LSR_Source FOREIGN KEY (SourceID) REFERENCES Injuries.Sources(SourceID)
 );"""),
@@ -153,6 +154,10 @@ def ensure_tables(cursor) -> None:
     for name, ddl in _DDL:
         cursor.execute(f"IF OBJECT_ID('{name}', 'U') IS NULL EXEC('" +
                        " ".join(line.strip() for line in ddl.splitlines()).replace("'", "''") + "')")
+    # Added 2026-10-01: which players a Fleaflicker injuries run read ('full' listing or 'targeted';
+    # NULL on the runs before, all full listings).
+    cursor.execute("IF COL_LENGTH('Live.SnapshotRuns', 'Scope') IS NULL "
+                   "ALTER TABLE Live.SnapshotRuns ADD Scope VARCHAR(10) NULL")
 
 
 def source_id(cursor, key: str) -> int:
@@ -178,6 +183,19 @@ def parse_utc(value):
 def start_run(cursor, kind: str, source: int, at: dt.datetime) -> int:
     cursor.execute("INSERT INTO Live.SnapshotRuns (Kind, SourceID, SnapshotAt) "
                    "OUTPUT inserted.SnapshotRunID VALUES (?, ?, ?)", kind, source, at)
+    return cursor.fetchone()[0]
+
+
+def set_scope(cursor, run_id: int, scope: str) -> None:
+    cursor.execute("UPDATE Live.SnapshotRuns SET Scope = ? WHERE SnapshotRunID = ?", scope, run_id)
+
+
+def last_full_read(cursor, kind: str, source: int):
+    """When this source last read everything (Scope 'full', or NULL from before Scope existed)
+    without error, or None."""
+    cursor.execute("SELECT MAX(SnapshotAt) FROM Live.SnapshotRuns WHERE Kind = ? AND SourceID = ? "
+                   "AND Error IS NULL AND RowsSeen IS NOT NULL AND (Scope IS NULL OR Scope = 'full')",
+                   kind, source)
     return cursor.fetchone()[0]
 
 
@@ -348,14 +366,23 @@ def _latest_status(cursor, source: int) -> dict:
     return {row.ExternalPlayerID: row for row in cursor.fetchall()}
 
 
+def held_injured(cursor, source: int) -> dict:
+    """{external id: PlayerID or None} for the players this source currently reports (latest row
+    not ACTIVE)."""
+    return {external_id: row.PlayerID for external_id, row in _latest_status(cursor, source).items()
+            if row.MappedStatus != "ACTIVE"}
+
+
 def _status_key(raw_status, mapped, ir_eligible, return_date, team_id):
     return (raw_status, mapped, None if ir_eligible is None else bool(ir_eligible), return_date, team_id)
 
 
-def write_status(cursor, run_id: int, source: int, rows: list, covered_team_ids=None) -> int:
+def write_status(cursor, run_id: int, source: int, rows: list, covered_team_ids=None,
+                 covered_external_ids=None) -> int:
     """Append the rows whose status changed since this source's last report, plus an ACTIVE row
     for every player who was on the report and no longer is. `covered_team_ids` limits the
-    ACTIVE rows to teams this run actually read (a failed team page must not clear its players)."""
+    ACTIVE rows to teams this run actually read (a failed team page must not clear its players);
+    `covered_external_ids` limits them to the players a targeted read asked about and got back."""
     latest = _latest_status(cursor, source)
     written = 0
     seen = set()
@@ -380,6 +407,8 @@ def write_status(cursor, run_id: int, source: int, rows: list, covered_team_ids=
         if external_id in seen or prior.MappedStatus == "ACTIVE":
             continue
         if covered_team_ids is not None and prior.TeamID not in covered_team_ids:
+            continue
+        if covered_external_ids is not None and external_id not in covered_external_ids:
             continue
         _insert_status(cursor, run_id, external_id, prior.RawPlayerName, prior.PlayerID, prior.TeamID,
                        None, "ACTIVE", False if prior.IREligible is not None else None, None, None)

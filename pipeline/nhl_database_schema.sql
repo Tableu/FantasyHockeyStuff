@@ -1186,6 +1186,7 @@ CREATE TABLE Live.SnapshotRuns
     RowsSeen        INT NULL,
     RowsWritten     INT NULL,
     Error           VARCHAR(1000) NULL,
+    Scope           VARCHAR(10) NULL,   -- Fleaflicker injuries: 'full' listing or 'targeted' (NULL before 2026-10-01: full)
     CONSTRAINT PK_LiveSnapshotRuns PRIMARY KEY (SnapshotRunID),
     CONSTRAINT FK_LSR_Source FOREIGN KEY (SourceID) REFERENCES Injuries.Sources(SourceID)
 );

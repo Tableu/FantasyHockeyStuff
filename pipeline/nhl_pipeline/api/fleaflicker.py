@@ -29,6 +29,8 @@ PAGE_WORKERS = 4
 # 2026-09-29: resultTotal 200) -- everyone not scoring, the injured included, drops out of it.
 # The whole pool is ~1,300.
 FULL_LISTING = 1000
+# Player ids per filtered listing call (get_players_by_id): one page, and a URL Fleaflicker accepts.
+ID_BATCH = 30
 
 
 class PartialListing(RuntimeError):
@@ -70,6 +72,28 @@ def get_players(league_id: int, sort_season: int | None = None) -> list:
         raise PartialListing(f"league {league_id}'s listing returned {len(players)} players; "
                              f"a full one has ~1,300")
     return players
+
+
+def get_players_by_id(league_id: int, player_ids) -> list:
+    """`league_id`'s listing entries for just these Fleaflicker player ids (filter.player_id),
+    ID_BATCH ids per call. A listing page holds 30 players and Fleaflicker refuses a long URL with
+    a 403 (60 ids, a 1.4 KB URL, passed; 114 ids, 2.6 KB, did not -- 2026-10-01), so a batch is one
+    page and one call. An id Fleaflicker does not list is simply absent from the result."""
+    ids = sorted({int(i) for i in player_ids})
+    players = []
+    for start in range(0, len(ids), ID_BATCH):
+        data = get_json(f"{BASE}/FetchPlayerListing",
+                        params={"sport": "NHL", "league_id": league_id,
+                                "filter.player_id": ids[start:start + ID_BATCH]})
+        players.extend(data.get("players", []))
+    return players
+
+
+def get_league_rosters(league_id: int) -> list:
+    """Every rostered player in `league_id`, one call (FetchLeagueRosters: 268 players in 0.5 s on
+    league 12090), as entries shaped like the listing's ({"proPlayer": {...}}), injury flag included."""
+    data = get_json(f"{BASE}/FetchLeagueRosters", params={"sport": "NHL", "league_id": league_id})
+    return [player for roster in data.get("rosters", []) for player in roster.get("players", [])]
 
 
 def _pages_in_parallel(params: dict, first: dict, total: int) -> list:

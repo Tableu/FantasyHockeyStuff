@@ -8,7 +8,9 @@ AI/Live/plan_gui.py, via planpass.py), or by hand; injuries are also scheduled a
 Each source is its own transaction: a failing source is recorded in Live.SnapshotRuns with its
 error and does not stop the others.
 
-    injuries   Fleaflicker league injury designations (OUT / IR) + ESPN's injury report
+    injuries   Fleaflicker league injury designations (OUT / IR) + ESPN's injury report. Fleaflicker's
+               whole listing (44 calls) runs once every 20 h; the runs between read the rostered
+               players plus, by id, everyone ESPN or Fleaflicker reports (about 5 calls)
     lines      Daily Faceoff's 32 team line charts, and the injury / GTD flags on them
     goalies    Daily Faceoff's starting goalies for a date (default: today, this PC's date).
                Skips the fetch when every game that day has started, unless --force.
@@ -18,6 +20,8 @@ Usage:
     python snapshot_live.py --kind lines --dry-run          # fetch + parse + diff, rolled back
     python snapshot_live.py --kind goalies --date 2026-10-01
     python snapshot_live.py --kind injuries --max-age 30    # skip a source snapshotted < 30 min ago
+    python snapshot_live.py --kind injuries --full-listing  # the whole Fleaflicker listing now
+    python snapshot_live.py --kind injuries --targeted      # never the whole listing (plan window opening)
 """
 
 import argparse
@@ -36,6 +40,11 @@ log = logging.getLogger("snapshot_live")
 SEASON = "2026-27"
 # Daily Faceoff's 32 line charts, fetched this many at a time (one after another took ~10 s).
 CHART_WORKERS = 4
+# The full Fleaflicker listing (44 calls) runs when the last one is this old; the runs between
+# read only the players likely to be flagged (_fleaflicker_targeted, about 5 calls).
+FULL_LISTING_EVERY = dt.timedelta(hours=20)
+# Fewer rostered players than this is not a drafted league's whole roster read (268 on 12090).
+ROSTERED_MIN = 200
 
 
 def run_source(conn, kind: str, source_key: str, work, dry_run: bool, max_age=None) -> None:
@@ -73,30 +82,85 @@ def run_source(conn, kind: str, source_key: str, work, dry_run: bool, max_age=No
         log.info("%s/%s: %d seen, %d written", kind, source_key, seen, written)
 
 
-def snapshot_injuries(conn, season_id, teams, player_index, dry_run, max_age=None):
+def snapshot_injuries(conn, season_id, teams, player_index, dry_run, max_age=None, full_listing=False,
+                      targeted_only=False):
+    # ESPN is fetched once, first: its report also picks which players the Fleaflicker read asks about.
+    try:
+        espn_rows, espn_error = espn_injuries.get_injuries(), None
+    except Exception as exc:
+        espn_rows, espn_error = None, exc
+
     def fleaflicker_work(cursor, run_id, source):
-        # Designations are the platform's, not the league's: read through the registry's active
-        # Fleaflicker league (today 12090). Sorted by the season before SEASON: once the first
-        # scoring period opens, the default listing stops at the 200 players scoring now, and on
-        # 2026-09-29 22:00 a snapshot saw 1 injured player instead of ~79 and wrote the other 78
-        # as cleared (write_status: off the report = ACTIVE) -- the live plan then activated two
-        # IR players who were OUT. get_players now refuses a listing that short.
-        rows = fleaflicker.injuries(fleaflicker.get_players(
-            fantasy_leagues.fleaflicker_league_id(), sort_season=int(SEASON[:4]) - 1))
+        league_id = fantasy_leagues.fleaflicker_league_id()
         resolver = live.fleaflicker_resolver(cursor, season_id, player_index)
+        last_full = live.last_full_read(cursor, "injuries", source)
+        # `targeted_only` (the plan window opening): never the full listing for age or a failed ESPN
+        # read -- only when there are no drafted rosters to read.
+        reason = ("asked for" if full_listing else None if targeted_only
+                  else "ESPN's report failed" if espn_rows is None
+                  else "no full listing yet" if last_full is None
+                  else f"last full listing {(live.utc_now() - last_full).total_seconds() / 3600:.0f} h ago"
+                  if live.utc_now() - last_full >= FULL_LISTING_EVERY else None)
+        targeted = None
+        if reason is None:
+            targeted = _fleaflicker_targeted(cursor, league_id, resolver, espn_rows, teams, player_index)
+        if targeted is None:
+            log.info("injuries/fleaflicker: full listing (%s)", reason or "rosters not drafted")
+            rows, covered = _fleaflicker_full(league_id), None
+        else:
+            rows, covered = targeted
+        live.set_scope(cursor, run_id, "full" if covered is None else "targeted")
         status = live.fleaflicker_status_rows(rows, teams, resolver)
         _warn_unresolved("Fleaflicker", status)
-        return len(status), live.write_status(cursor, run_id, source, status)
+        return len(status), live.write_status(cursor, run_id, source, status, covered_external_ids=covered)
 
     def espn_work(cursor, run_id, source):
-        rows = espn_injuries.get_injuries()
+        if espn_error is not None:
+            raise espn_error
         resolver = live.injuries_resolver(cursor, source, player_index, "espn")
-        status = live.espn_status_rows(rows, teams, resolver)
+        status = live.espn_status_rows(espn_rows, teams, resolver)
         _warn_unresolved("ESPN", status)
         return len(status), live.write_status(cursor, run_id, source, status)
 
     run_source(conn, "injuries", "fleaflicker", fleaflicker_work, dry_run, max_age)
     run_source(conn, "injuries", "espn", espn_work, dry_run, max_age)
+
+
+def _fleaflicker_full(league_id) -> list:
+    # Designations are the platform's, not the league's: read through the registry's active
+    # Fleaflicker league (today 12090). Sorted by the season before SEASON: once the first
+    # scoring period opens, the default listing stops at the 200 players scoring now, and on
+    # 2026-09-29 22:00 a snapshot saw 1 injured player instead of ~79 and wrote the other 78
+    # as cleared (write_status: off the report = ACTIVE) -- the live plan then activated two
+    # IR players who were OUT. get_players now refuses a listing that short.
+    return fleaflicker.injuries(fleaflicker.get_players(league_id, sort_season=int(SEASON[:4]) - 1))
+
+
+def _fleaflicker_targeted(cursor, league_id, resolver, espn_rows, teams, player_index):
+    """Fleaflicker's flags for the players likely to have one, in about 5 calls instead of the
+    full listing's 44: every rostered player (one FetchLeagueRosters call), and by id everyone
+    ESPN reports now or reported last time (a player who left ESPN's report is how it shows an
+    activation) plus everyone Fleaflicker itself holds injured. Returns (injury rows, the external
+    ids read): only those can be cleared, so a player this read did not cover keeps his status.
+    New Fleaflicker-only injuries of unrostered players ESPN never lists wait for the full listing.
+    None when the league has no drafted rosters to read (then the full listing runs)."""
+    rostered = fleaflicker.get_league_rosters(league_id)
+    covered = {str(entry["proPlayer"]["id"]) for entry in rostered}
+    if len(covered) < ROSTERED_MIN:
+        return None
+    fleaflicker_id = {player_id: external_id for external_id, player_id in resolver.id_map.items()}
+    espn = live.injuries_resolver(cursor, live.source_id(cursor, "espn"), player_index, "espn")
+    espn_ids = ({r["player_id"] for r in live.espn_status_rows(espn_rows, teams, espn)}
+                if espn_rows is not None else set())
+    espn_ids |= set(live.held_injured(cursor, live.source_id(cursor, "espn")).values())
+    wanted = {fleaflicker_id[p] for p in espn_ids if p in fleaflicker_id}
+    wanted |= set(live.held_injured(cursor, live.source_id(cursor, "fleaflicker")))
+    wanted -= covered
+    listed = fleaflicker.get_players_by_id(league_id, wanted)
+    covered |= {str(entry["proPlayer"]["id"]) for entry in listed}
+    log.info("injuries/fleaflicker: targeted read, %d rostered + %d asked by id (%d listed)",
+             len(rostered), len(wanted), len(listed))
+    return fleaflicker.injuries(rostered + listed), covered
 
 
 def snapshot_lines(conn, teams, player_index, dry_run):
@@ -197,6 +261,10 @@ def main():
     parser.add_argument("--date", default=None, help="goalies: the game date (default: today)")
     parser.add_argument("--force", action="store_true", help="goalies: fetch even if every game has started")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--full-listing", action="store_true",
+                        help="injuries: read Fleaflicker's whole listing even if one ran in the last 20 h")
+    parser.add_argument("--targeted", action="store_true",
+                        help="injuries: never Fleaflicker's whole listing (unless no rosters are drafted)")
     parser.add_argument("--max-age", type=int, default=None,
                         help="injuries: skip a source whose last good snapshot is younger (minutes)")
     args = parser.parse_args()
@@ -211,7 +279,8 @@ def main():
     player_index = name_resolver.load_player_index(cursor)
 
     if args.kind == "injuries":
-        snapshot_injuries(conn, season_id, teams, player_index, args.dry_run, args.max_age)
+        snapshot_injuries(conn, season_id, teams, player_index, args.dry_run, args.max_age,
+                          args.full_listing, args.targeted)
         merge_status(conn, args.dry_run)
     elif args.kind == "lines":
         snapshot_lines(conn, teams, player_index, args.dry_run)

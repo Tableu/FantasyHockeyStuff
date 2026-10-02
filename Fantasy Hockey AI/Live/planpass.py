@@ -54,14 +54,19 @@ def _run(command, cwd, echo, label):
     return lines
 
 
-def snapshots(kinds=SNAPSHOT_KINDS, echo=print, force_goalies=False, injuries_max_age=None) -> set:
+def snapshots(kinds=SNAPSHOT_KINDS, echo=print, force_goalies=False, injuries_max_age=None,
+              injuries_targeted=False) -> set:
     """Returns the kinds fetched. `injuries_max_age` (minutes): reuse an injury report that recent
-    instead of fetching it -- Fleaflicker's is 44 pages, ~16 s, and is also taken at 10:00 and 15:00."""
+    instead of fetching it. `injuries_targeted`: Fleaflicker's rostered players and its likely
+    injured by id (about 4 calls), never its whole 44-page listing, which the 10:00 and 15:00 runs
+    take at least every 20 h."""
     fetched = set()
     for kind in kinds:
         command = ["snapshot_live.py", "--kind", kind] + (["--force"] if kind == "goalies" and force_goalies else [])
         if kind == "injuries" and injuries_max_age is not None:
             command += ["--max-age", str(injuries_max_age)]
+        if kind == "injuries" and injuries_targeted:
+            command += ["--targeted"]
         lines = _run(command, PIPELINE, echo, f"snapshot {kind}")
         reused = [l for l in lines if ": skipped, last snapshot" in l]
         if reused:
