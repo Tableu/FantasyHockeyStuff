@@ -53,16 +53,24 @@ class Team:
         # realistic league's opponents set one (Decisions/managers.Opponent: a real manager's
         # activity that week); the league's cap still bounds it.
         self.budget = None
+        # This week's league limit when it is not config.moves_per_week, or None. Fleaflicker
+        # prorates its weekly limit by the week's days (12090: "Week: 7", yet 6 in the 6-day week 1,
+        # 2026-10-01); only the live runner sets it, for the week it plans in.
+        self.week_cap = None
         self.waiver_priority = team
         self.weekly_points = defaultdict(float)
         self.matchup_wins = 0.0
 
     @property
     def moves_left(self) -> int:
-        cap = self.config.moves_per_week
+        cap = self.week_limit
         if self.budget is not None:
             cap = min(cap, self.budget)
         return max(cap - self.moves_used, 0)
+
+    @property
+    def week_limit(self) -> int:
+        return self.config.moves_per_week if self.week_cap is None else self.week_cap
 
     def holds(self, player_id) -> bool:
         return player_id in self.roster or player_id in self.ir
@@ -73,9 +81,9 @@ class Team:
                               f"{self.config.roster_size} roster spots")
         if len(self.ir) > self.config.ir:
             raise IllegalMove(f"team {self.team} holds {len(self.ir)} of {self.config.ir} IR")
-        if self.moves_used > self.config.moves_per_week:
+        if self.moves_used > self.week_limit:
             raise IllegalMove(f"team {self.team} used {self.moves_used} of "
-                              f"{self.config.moves_per_week} moves this week")
+                              f"{self.week_limit} moves this week")
         overlap = set(self.roster) & set(self.ir)
         if overlap:
             raise IllegalMove(f"team {self.team} holds {overlap} on both roster and IR")
@@ -121,6 +129,7 @@ class LeagueState:
         """Reset the move budget. Unused moves expire; they do not carry over."""
         self.week = week
         for team in self.teams:
+            team.week_cap = None
             if self.config.moves_carry_over:
                 team.moves_used = max(0, team.moves_used - self.config.moves_per_week)
             else:

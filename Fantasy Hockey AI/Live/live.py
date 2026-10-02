@@ -101,6 +101,10 @@ class LeagueSnapshot:
     # Whether a move made now counts toward no week's limit, as the platform says (Fleaflicker:
     # before its first period begins); None when it cannot say, and the calendar decides.
     moves_free: bool | None = None
+    # This week's move limit as the platform shows it (Fleaflicker's team page), and the week's
+    # length in days for prorating the league's weekly limit; None when it cannot say.
+    move_limit: int | None = None
+    week_days: int | None = None
 
     @classmethod
     def load(cls, path: Path) -> "LeagueSnapshot":
@@ -113,6 +117,7 @@ class LeagueSnapshot:
                    opponent_week_points=float(raw.get("opponent_week_points", 0.0)),
                    lineup={k: [int(p) for p in v] for k, v in raw.get("lineup", {}).items()},
                    waivers={int(k): v for k, v in raw.get("waivers", {}).items()},
+                   move_limit=raw.get("move_limit"), week_days=raw.get("week_days"),
                    source=raw.get("source", f"file {Path(path).name}"))
 
 
@@ -158,7 +163,20 @@ class LeagueSnapshot:
                     waivers[player_id] = clears
         moves_free = (adapter.before_first_period(when)
                       if when is not None and hasattr(adapter, "before_first_period") else None)
+        week_days = adapter.week_days(day, when=when) if hasattr(adapter, "week_days") else None
+        # The platform's own count for my team (Fleaflicker's team page), over ours from the
+        # transaction list: on 2026-10-01 they agreed on 4 used, and the page alone knew the
+        # limit was 6, not the rules page's 7.
+        move_limit = None
+        shown = adapter.acquisitions(my_team_id) if hasattr(adapter, "acquisitions") else None
+        if shown is not None:
+            used, move_limit = shown
+            if used != teams[me]["moves_used"]:
+                log.warning("%s shows %d move(s) used this week; the transaction list counts %d -- "
+                            "using %d", adapter.platform, used, teams[me]["moves_used"], used)
+                teams[me]["moves_used"] = used
         return cls(teams=teams, me=me, opponent=opponent, moves_free=moves_free,
+                   move_limit=move_limit, week_days=week_days,
                    my_week_points=matchup.points if matchup else 0.0,
                    opponent_week_points=matchup.opponent_points if matchup else 0.0,
                    lineup=lineup, waivers=waivers,
@@ -551,6 +569,7 @@ class LiveRunner:
         universe = set(self.eligibility)
         state = state_module.LeagueState(self.config, universe, self.eligibility)
         state.week = self.calendar.week_from(day)
+        week_cap = self._week_cap(snapshot)
         for index, team in enumerate(snapshot.teams):
             unknown = [p for p in team["roster"] + team["ir"] if p not in self.eligibility]
             if unknown:
@@ -559,6 +578,7 @@ class LiveRunner:
             holder.roster = [p for p in team["roster"] if p in self.eligibility]
             holder.ir = [p for p in team["ir"] if p in self.eligibility]
             holder.moves_used = team["moves_used"]
+            holder.week_cap = week_cap
             for p in holder.roster + holder.ir:
                 state.owner[p] = index
                 state.pool.discard(p)
@@ -569,6 +589,21 @@ class LiveRunner:
         state.free_moves = (snapshot.moves_free if snapshot.moves_free is not None
                             else day < self.calendar.weeks[0].start)
         return state
+
+    def _week_cap(self, snapshot):
+        """This week's move limit for every team: the platform's own figure when it shows one, else
+        the league's weekly limit prorated by the week's days (Fleaflicker: 6 in a 6-day week, 14 in
+        a 14-day one), else None (config.moves_per_week)."""
+        weekly = self.config.moves_per_week
+        prorated = (None if snapshot.week_days is None
+                    else max(1, round(weekly * snapshot.week_days / 7)))
+        if snapshot.move_limit is not None:
+            if prorated is not None and snapshot.move_limit != prorated:
+                log.warning("the platform's move limit this week is %d; prorating %d a week over %d "
+                            "days gives %d -- using %d", snapshot.move_limit, weekly, snapshot.week_days,
+                            prorated, snapshot.move_limit)
+            return snapshot.move_limit
+        return prorated
 
     def _draws(self, skaters, goalies) -> dict:
         """Tonight's per-player fantasy-point samples, skaters and goalies on the same sims, as the

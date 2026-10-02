@@ -18,7 +18,10 @@ moves are not transactions) -- the league's rule (Settings/rosters/league.json m
 """
 
 import datetime as dt
+import html
 import json
+import logging
+import re
 import time
 import urllib.request
 import zoneinfo
@@ -27,6 +30,8 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 
 from platforms.base import Matchup, TeamRoster
+
+log = logging.getLogger("platforms.fleaflicker")
 
 # Fleaflicker's scoring days roll over at 6:00 AM Eastern, daylight time included (period starts
 # are 10:00 UTC in October, 11:00 UTC after the clocks change).
@@ -38,6 +43,10 @@ EASTERN = zoneinfo.ZoneInfo("America/New_York")
 # with 403 Forbidden for a while (2026-09-27: ~280 transaction pages in a row did it).
 REUSE_SECONDS = 60
 ROSTER_WORKERS = 3
+# The team page's own count, e.g. "Acquisitions Week 4 /6": moves used this week and this week's
+# limit. The API has neither (FetchRoster, FetchLeagueRules: checked 2026-10-01).
+TEAM_PAGE = "https://www.fleaflicker.com/nhl/leagues/{league}/teams/{team}"
+_ACQUISITIONS = re.compile(r"Acquisitions\s*Week\s*(\d+)\s*/\s*(\d+)")
 
 API = "https://www.fleaflicker.com/api"
 
@@ -201,6 +210,25 @@ class Fleaflicker:
         week's limit (the user, 2026-09-27)."""
         rows = self._period_rows()
         return bool(rows) and when < rows[0][3]
+
+    def week_days(self, day: dt.date, when: dt.datetime | None = None) -> int | None:
+        """Days in the period a move made now counts toward (6 in 2026-27's week 1, 14 in week 19)."""
+        period = self.period_at(when) if when is not None else self.period_of(day)
+        return None if period is None else (period[2] - period[1]).days + 1
+
+    def acquisitions(self, team_id: int):
+        """(moves used this week, this week's limit) as the team's page shows them, or None when the
+        page cannot be read or does not show them. Read live, never from a past `season`."""
+        url = TEAM_PAGE.format(league=self.league_id, team=team_id)
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                page = response.read().decode("utf-8", "replace")
+        except Exception as error:     # the plan goes on with the computed limit
+            log.warning("Fleaflicker team page %s not read: %s", url, error)
+            return None
+        match = _ACQUISITIONS.search(html.unescape(re.sub(r"<[^>]+>", " ", page)))
+        return None if match is None else (int(match.group(1)), int(match.group(2)))
 
     def period_of(self, day: dt.date):
         return next(((n, lo, hi) for n, lo, hi in self.periods() if lo <= day <= hi), None)
