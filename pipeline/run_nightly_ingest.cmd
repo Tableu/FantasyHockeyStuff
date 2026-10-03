@@ -4,6 +4,8 @@ rem   1. pipeline: yesterday's games, lineups, season totals, then the live inju
 rem   2. ModelFeatures: the season's variant-A lineup rows and goalie starts, which tonight's
 rem      P(start) reads as its in-season history (Projections/project_tonight.py)
 rem   3. ModelFeatures: the skaters' season lines so far, for the plan window's stats
+rem   4. ModelFeatures: the season's feature table so far, then Projections: every skater's
+rem      rest-of-season projection from it, which the plan prices moves on (Live/live.py skater_ros)
 cd /d "%~dp0"
 if not exist logs\live mkdir logs\live
 set PYTHONIOENCODING=utf-8
@@ -13,3 +15,6 @@ cd /d "%~dp0..\Fantasy Hockey AI\ModelFeatures"
 python build_lineup_features.py --season 2026-27 --variant A >> %LOG% 2>&1
 python build_goalie_starts.py --season 2026-27 >> %LOG% 2>&1
 python build_season_stats.py --season 2026-27 >> %LOG% 2>&1
+python build_feature_table.py --season 2026-27 >> %LOG% 2>&1
+cd /d "%~dp0..\Fantasy Hockey AI\Projections"
+python ros_predict.py --season 2026-27 --min-games-played 0 --weights points-league >> %LOG% 2>&1

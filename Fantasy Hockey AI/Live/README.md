@@ -71,6 +71,17 @@ The in-season inputs come from the other folders: tonight's projections from
 `ModelFeatures/build_tonight.py` + `Projections/project_tonight.py` (run by `--refresh`), the
 live injury and lineup reports from `pipeline/snapshot_live.py`.
 
+**Moves are priced on the rest-of-season model** (since 2026-10-03; `live.LiveRunner.skater_ros`):
+each skater's rate per team game is the newest `Projections/reports/ros_projections_<season>_<date>.parquet`
+on or before the plan's day, scored under the league's own scoring. The nightly ingest
+(`pipeline/run_nightly_ingest.cmd`) rebuilds the season's feature table and runs `ros_predict.py`
+after the games. A skater it has not projected (not dressed yet) gets the preseason board scaled
+to the model's level, so one comparison never mixes the two; goalies keep their start share. With
+no projection file the plan prices on the board alone and lists that under its problems. Until
+then the plan priced on the preseason board, frozen; the history-prior model measured level with
+it in the realistic league and, unlike the board, follows the season (Decisions/valuation.py
+`rate`). The Roster and Free agents tabs' Rate and ROS pts are these numbers.
+
 ## The draft board
 
 **The live board**: `python draft_board.py --season 2026-27 --weights points-league` writes

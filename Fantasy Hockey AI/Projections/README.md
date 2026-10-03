@@ -138,10 +138,50 @@ python ros_predict.py --season 2025-26 --as-of 2026-01-15 --weights points-leagu
 team plays every night, so each player's most recent state is taken and its `state_age_days`
 reported rather than hidden. Games remaining come off the schedule, so the same models serve
 a projection made in October and one made in March. Scoring is applied only if asked for.
+For a season in progress the remaining games come from ModelFeatures' `schedule_<season>.parquet`
+(the feature table holds only the games played). The nightly job runs it for the live season:
+
+```bash
+python ros_predict.py --season 2026-27 --min-games-played 0 --weights points-league
+```
+
+`--min-games-played 0` keeps a player whose only row is his first game: with the history prior he
+is projected from his own seasons, not the position alone.
 
 Checked end to end against what actually happened after 2026-01-15: Spearman 0.813 and
 Pearson 0.819 on rest-of-season points across 846 players, with goals within 0.3% and assists
 within 2.2% in aggregate.
+
+### The prior: the player's own seasons, not his position (2026-10-03)
+
+The shrinkage pulled each factor toward the **position's** average, and the realistic league
+showed what that costs: pricing moves on that model lost to the frozen preseason consensus by
+22.4 +/- 1.6 pts/wk on 2024-25 and 4.9 +/- 1.2 on 2025-26. When the two disagreed the model was
+wrong in the direction of the disagreement -- it overrated hot or promoted players and underrated
+players with a track record in a slump, by up to -1.28 a team game -- and a move is made exactly
+where they disagree (Decisions/valuation.py `rate` has the numbers). Early in a season a star with
+ten games was shrunk toward an average forward; the goals model's top feature was `position`.
+
+`--prior history`, now the default in `ros_baselines.py` and `ros_train.py`, shrinks toward the
+**player's own** last three seasons instead -- Marcel's 5/4/3 weights, from
+`season_totals.parquet` -- and that toward the position by how much history there is (`k_hist`,
+fitted jointly with `k`). The `hist_*` columns are features too. `--prior position` keeps the old.
+
+| 2024-25 holdout (trained on 2023-24) | MAE | RMSE | bias | Spearman |
+|---|---|---|---|---|
+| shrunk, position prior | 29.94 | 45.07 | +3.4% | 0.833 |
+| shrunk, history prior | 27.93 | 41.84 | +7.7% | 0.846 |
+| model, position prior | 26.66 | 40.67 | +3.1% | 0.866 |
+| **model, history prior** | **25.62** | **38.28** | **+3.8%** | **0.868** |
+
+On 2025-26 (trained on 2023-24 and 2024-25) the model goes 25.62 -> 25.31 MAE, 37.89 -> 37.00 RMSE.
+The fitted constants show the change: this season's weight after 20 games falls from 43% to 21%
+for goals per 60 and from 49% to 17% for assists, while ice time and availability still move
+within a few weeks. In the realistic league the history-prior model is level with the frozen
+consensus (+3.4 +/- 1.1 pts/wk on 2024-25 at 64 drafts, -0.0 +/- 1.5 on 2025-26) -- the 2024-25
+and 2025-26 holdouts and the 2026-27 deployment build are built with it, and the live plan prices
+moves on it (Live/live.py `skater_ros`). The position-prior builds are kept as
+`ros_predictions_season_<season>_position.parquet` and `models/<season>/ros_season_position`.
 
 ### The deployment build, and why the round budget is the regularizer
 

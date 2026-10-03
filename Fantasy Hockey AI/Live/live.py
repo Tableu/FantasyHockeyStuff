@@ -408,9 +408,11 @@ class LiveRunner:
             "p_start_model": goalies["p_start"].to_numpy(),
             "expected_line": self.goalie_line_mean, "line_sd": self.goalie_line_sd})
         rate_estimate = dict(self.seed_rate)
-        # Skaters' rest-of-season rate from the preseason board; goalies' from their projected
-        # share of their team's remaining starts x the league-average line (goalie_ros).
-        ros_estimate = {**self.ros_seed, **self.goalie_ros()}
+        # Skaters' rest-of-season rate from the rest-of-season model (skater_ros), with the
+        # preseason board scaled to the model's level for anyone it has not projected; goalies'
+        # from their projected share of their team's remaining starts x the league line.
+        skaters_ros, ros_note = self.skater_ros()
+        ros_estimate = {**skaters_ros, **self.goalie_ros()}
         returns = {**self.expected_returns(injured, status, nhl_team),
                    **self.return_overrides(injured)}
         _, periph = latest_spreads(self.day, self.scoreset.weights("skaters"), self.theta)
@@ -459,7 +461,7 @@ class LiveRunner:
         manager = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
         manager.plan.week_alternatives = WEEK_ALTERNATIVES
         manager.transactions(view())
-        problems = []
+        problems = [ros_note] if ros_note else []
         try:
             state.assert_ir_resolved(snapshot.me, injured)
         except state_module.IllegalMove as error:
@@ -546,6 +548,35 @@ class LiveRunner:
             return None
         share = getattr(self, "periph", self.board_periph).get(int(player_id))
         return None if share is None else round(share, 3)
+
+    def skater_ros(self) -> tuple:
+        """({skater: rest-of-season points per team game}, a note when the model is missing).
+
+        The rest-of-season model's projection (Projections/ros_predict.py, run nightly: the newest
+        `ros_projections_<season>_<date>.parquet` on or before today), its stat line scored under
+        this league's scoring over his team's games remaining. Everyone it has not projected yet
+        (not dressed this season) gets the preseason board, scaled by the model's level over
+        the players both cover, so one comparison never mixes the two scales (the board runs
+        ~15% high; scaled and unscaled tested alike, Decisions/valuation.rate). Why the model
+        and not the board (2026-10-03): with the multi-season prior it was level with the
+        frozen board in the realistic league (2024-25 +3.4 +/- 1.1 pts/wk at 64 drafts, 2025-26
+        -0.0 +/- 1.5), and it updates with the season, which the board never does; the user's call.
+        With no projection file, the board alone, as before, and the plan says so."""
+        files = sorted(paths.PROJECTIONS_REPORTS.glob(f"ros_projections_{self.season}_*.parquet"))
+        files = [f for f in files if f.stem.rsplit("_", 1)[-1] <= self.day.isoformat()]
+        if not files:
+            return dict(self.ros_seed), ("no rest-of-season projections for this season yet "
+                                         "(Projections/ros_predict.py): moves priced on the preseason board")
+        rows = pd.read_parquet(files[-1])
+        games = rows["games_remaining"].to_numpy("float64")
+        points = self.scoreset.score_columns(rows, prefix="proj_")
+        model = {int(p): float(v / g) for p, v, g in zip(rows["player_id"], points, games) if g > 0}
+        shared = [p for p in model if p in self.ros_seed]
+        scale = (sum(model[p] for p in shared) / sum(self.ros_seed[p] for p in shared)
+                 if shared and sum(self.ros_seed[p] for p in shared) > 0 else 1.0)
+        log.info("rest of season: %d skaters from %s, the rest from the board x %.3f",
+                 len(model), files[-1].name, scale)
+        return {**{p: v * scale for p, v in self.ros_seed.items()}, **model}, None
 
     def goalie_ros(self) -> dict:
         """{goalie: rest-of-season points per team game} from today's (or the latest earlier)

@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+from pathlib import Path
 import json
 import logging
 
@@ -113,9 +114,18 @@ def state_as_of(table, as_of):
     return latest
 
 
-def games_remaining(table, as_of, horizon_days):
-    """Team games left in the window, per team, counted off the schedule."""
-    schedule = ros.team_schedule(table)
+def games_remaining(table, as_of, horizon_days, schedule_file=None):
+    """Team games left in the window, per team, counted off the schedule: the season's full
+    schedule (ModelFeatures/build_schedule.py) when there is one -- a season in progress has only
+    its played games in the feature table, which would leave every team with none to come --
+    else the games in the table (a finished season's)."""
+    if schedule_file is not None and schedule_file.exists():
+        games = pd.read_parquet(schedule_file)
+        games["game_date"] = pd.to_datetime(games["game_date"])
+        schedule = pd.concat([games.rename(columns={"home_team_id": "team_id"})[["game_date", "team_id"]],
+                              games.rename(columns={"away_team_id": "team_id"})[["game_date", "team_id"]]])
+    else:
+        schedule = ros.team_schedule(table)
     future = schedule[schedule["game_date"] > as_of]
     if horizon_days is not None:
         future = future[future["game_date"] <= as_of + pd.Timedelta(days=horizon_days)]
@@ -141,10 +151,14 @@ def run(args):
     # already reduced to one row per player would count one game per player instead.
     table["season"] = args.season
     table = baselines.add_asof(table)
+    # A build trained on the player's own multi-season prior needs his history beside each row.
+    if any(entry["prior"].get("mode") == "history" for entry in fitted.values()):
+        table = baselines.add_history(table)
     state = state_as_of(table, as_of)
     state = ros_train.add_shrunk(state, fitted)
 
-    remaining = games_remaining(table, as_of, horizon_days)
+    remaining = games_remaining(table, as_of, horizon_days,
+                                Path(features_dir) / f"schedule_{args.season}.parquet")
     state["games_remaining"] = state["team_id"].map(remaining).fillna(0.0)
     state["window_team_games"] = state["games_remaining"]
     state = state[state["gp_std"].fillna(0) >= args.min_games_played]
