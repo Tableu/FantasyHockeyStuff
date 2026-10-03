@@ -151,11 +151,16 @@ class Context:
     """Everything a run needs, loaded once per season and format."""
 
     def __init__(self, season, prior_season, league_name, scoring, strategy, workers,
-                 field_config=None):
+                 field_config=None, ros_tag=None):
         self.season, self.league_name, self.scoring = season, league_name, scoring
         self.shipped = strategy
         self.config = league_module.load(league_name)
-        self.data = inputs.load_season(season)
+        self.data = inputs.load_season(season, ros_tag=ros_tag)
+        # Which rest-of-season build the managers price on is part of a run's identity: the code
+        # hash does not cover Projections' outputs, so without this a cached baseline played on
+        # one build would be paired with a candidate played on another.
+        ros_file = paths.ros_predictions(season, tag=ros_tag)
+        self.ros_build = f"{ros_file.name}:{ros_file.stat().st_size}" if ros_file.exists() else None
         self.data["prior_season"] = prior_season
         universe = pd.concat([self.data["projections"][["player_id", "position"]],
                               self.data["goalie_candidates"][["player_id", "position"]]]
@@ -167,6 +172,8 @@ class Context:
         self.scoreset = simlayer.load_scoreset(scoring)
         self.data["prior"] = {self.scoreset.name: ladder.prior_season(prior_season,
                                                                       self.scoreset, strategy)}
+        self.data["board_values"] = {self.scoreset.name: ladder.consensus_values(
+            self.data, self.scoreset, strategy)}
         self.data["vor"] = {self.scoreset.name: ladder.vor_board(
             self.data, prior_season, self.scoreset, self.config, self.eligibility, strategy)}
         self.field = field_config or field_module.load()
@@ -179,7 +186,7 @@ class Context:
         payload = {"params": params_of(candidate), "season": self.season,
                    "league": self.league_name, "scoring": self.scoring,
                    "field": self.field.describe(),
-                   "replications": replications, "code": self.code}
+                   "replications": replications, "code": self.code, "ros": self.ros_build}
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
     def _seats(self, rungs, candidate, replications) -> pd.DataFrame:

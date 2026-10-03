@@ -44,7 +44,7 @@ class AddDropParams:
     # each is what it is). See `strategy.py`.
     horizon_weeks: int | None         # weeks past the current one both sides are priced over
     margin: float                     # sds of the gain a move must clear; inf never moves
-    rate_source: str                  # "ros" (rest-of-season, holdout) or "per_game"
+    rate_source: str                  # "ros" (rest-of-season, holdout), "per_game" or "board" (the frozen consensus)
     claim_premium: float              # extra points a waiver claim must clear; inf never claims
     shortlist: int                    # free agents priced on the roster per pass
     drop_shortlist: int               # cheapest fieldable drops tried against each

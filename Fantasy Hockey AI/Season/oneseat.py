@@ -197,6 +197,8 @@ def parse_args():
     p.add_argument("--verify", action="store_true",
                    help="Check the pairing: layouts, and a candidate equal to the shipped system "
                         "scoring exactly zero in every seat")
+    p.add_argument("--ros-tag", default=None,
+                   help="Price `ros` on an alternative rest-of-season build (ros_train.py --tag)")
     p.add_argument("--out", default=None, help="JSON path for the per-draft result")
     return p.parse_args()
 
@@ -216,7 +218,7 @@ def main():
     base_layout, cand_layout = layouts(opponents)
 
     ctx = tune.Context(args.season, args.prior_season or tune.previous(args.season), args.league,
-                       args.weights, shipped, args.workers)
+                       args.weights, shipped, args.workers, ros_tag=args.ros_tag)
     if 8 in opponents:
         import opponents as opponents_module
 

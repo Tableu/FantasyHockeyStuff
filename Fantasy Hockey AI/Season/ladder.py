@@ -193,11 +193,7 @@ def board_values(data, prior_season_name, scoreset, strategy):
     board = data["prior"][scoreset.name][0]
     board.index = board.index.astype(int)
     if strategy.vor_values == "consensus":
-        opener = data["projections"]["game_date"].min()
-        external = inputs.load_external_projections(data["season"], opener,
-                                                    strategy.undated_sources)
-        values = draft_module.values_for("consensus", scoreset, board, external=external,
-                                         min_sources=strategy.vor_min_sources)
+        values = consensus_values(data, scoreset, strategy)
     else:
         if data.get("ros") is None:
             raise SystemExit("the own_model VOR board needs rest-of-season projections -- run "
@@ -207,6 +203,19 @@ def board_values(data, prior_season_name, scoreset, strategy):
             prior_goalie_lines=inputs.load_goalie_starts(prior_season_name),
             opening_days=strategy.opening_days, team_openers=team_openers(data))
     return values
+
+
+def consensus_values(data, scoreset, strategy):
+    """Each player's season value from the external sources' consensus, published before the
+    opener (last season's line where fewer than vor_min_sources project him): the consensus VOR
+    board's values, and what the live plan prices skaters' rest of season on -- frozen at the
+    preseason (Live/live.py ros_seed; the `board` rate source)."""
+    board = data["prior"][scoreset.name][0]
+    board.index = board.index.astype(int)
+    opener = data["projections"]["game_date"].min()
+    external = inputs.load_external_projections(data["season"], opener, strategy.undated_sources)
+    return draft_module.values_for("consensus", scoreset, board, external=external,
+                                   min_sources=strategy.vor_min_sources)
 
 
 # A simulated leaguemate's board, per (season, scoring, format, sources). Subsets repeat across
@@ -259,6 +268,10 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
     if any(r in (5, 7, 8) for r in base) and strategy.adddrop.rate_source == "ros"             and data.get("ros") is None:
         raise SystemExit("rung 5 reads rest-of-season projections and none are built -- run "
                          "Projections/ros_train.py --horizon season --predictions-out")
+    if any(m.strategy.adddrop.rate_source == "board" for m in field
+           if hasattr(m.strategy, "adddrop")) and scoreset.name not in data.get("board_values", {}):
+        raise SystemExit("a seat prices moves on the preseason board (rate_source board) and no "
+                         "consensus values are loaded (data['board_values'], ladder.consensus_values)")
     # Draws are only paid for if a rung on the board actually uses them.
     sims = decision_sims if any(r in (4, 5, 6, 7, 8) for r in base) else 0
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
@@ -415,6 +428,7 @@ def main():
     for name in weights:
         scoreset = simlayer.load_scoreset(name)
         data["prior"][scoreset.name] = prior_season(args.prior_season, scoreset, strategy)
+        data.setdefault("board_values", {})[scoreset.name] = consensus_values(data, scoreset, strategy)
         if any(r > 10 for r in rungs):
             data["vor"][scoreset.name] = vor_board(data, args.prior_season, scoreset, config,
                                                    eligibility, strategy)

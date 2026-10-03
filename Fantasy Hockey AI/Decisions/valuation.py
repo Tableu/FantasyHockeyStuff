@@ -37,7 +37,34 @@ def rate(view, player_id, source="per_game") -> float:
     cost the shipped system 1.65 +/- 1.00 pts/wk in the realistic league (2024-25, 64 drafts,
     halves -1.54 / -1.76), win -0.020; it made more moves and fewer rentals. Availability mixes
     injuries with healthy scratches, so dividing it out inflates fringe players too.
+
+    `source="board"`: a skater's preseason consensus per team game, frozen all season
+    (view.board_rate); a goalie's rest-of-season rate (his start share); anyone else the per-game
+    carried rate. What the live plan priced on until 2026-10-03 -- a comparison arm now.
+
+    Measured 2026-10-03 (realistic league, beagles strategy), `ros` against `board`:
+      * The position-prior rest-of-season model lost to the frozen board, -22.4 +/- 1.6 pts/wk on
+        2024-25 and -4.9 +/- 1.2 on 2025-26. When the two disagreed (3,900 skaters added or
+        dropped) the model was wrong in the disagreement's direction -- it overrated a hot or
+        promoted player (+0.26 to +0.38 a team game) and underrated one with a track record in a
+        slump (-0.45, -1.28 at the widest gaps) -- and a move is made exactly where they disagree,
+        so pricing on it acted on its own errors. The board's error is mostly a level (+0.4),
+        which a comparison cancels (the board scaled to the model's level: +24.1 vs +22.4).
+      * With the player's own multi-season prior (Projections/ros_baselines.py, `history`) the
+        model is level with the board: +3.4 +/- 1.1 on 2024-25 (64 drafts), -0.0 +/- 1.5 on
+        2025-26. The live plan prices on it since (Live/live.py skater_ros).
+      * Not kept: blends of the board with the model. Board 0.4 / position-prior model 0.6:
+        +21.2 (the board's level). A weight sliding 0.7 -> 0.4 over six weeks: +1.7 +/- 0.8 over
+        the board at 64 drafts, then +1.5 +/- 1.0 over the history-prior model alone (halves
+        +3.1 / -0.2, win +0.001) -- nothing once the model has its prior. The board with the
+        nightly model's per-game rate instead: -6.0 +/- 1.5 vs the board; that rate alone,
+        -9.7 vs `ros`.
+      * Frozen at the model's opening-week rows instead of the board: -65.5 -- the position-prior
+        model's first rows shrank stars to an average forward.
     """
+    if source == "board" and board_covers(view, player_id):
+        value = view.board_rate(player_id)
+        return value if value is not None else view.ros_rate(player_id)
     if source == "ros":
         value = view.ros_rate(player_id)
         if value is not None:
@@ -45,11 +72,21 @@ def rate(view, player_id, source="per_game") -> float:
     return view.projected_rate(player_id)
 
 
+def board_covers(view, player_id) -> bool:
+    """Whether rate source `board` has a rest-of-season rate for him: a skater on the preseason
+    consensus, or a goalie with a start share (as live's ros_estimate holds exactly those)."""
+    if view.board_rate(player_id) is not None:
+        return True
+    return "G" in view._state.eligibility.get(player_id, ()) and view.ros_rate(player_id) is not None
+
+
 def known(view, player_id, source="per_game") -> bool:
     """Whether anything has projected this player yet. Unknown is not zero: `rate` falls back to 0
     for a player with no row, which is fine for ranking a free agent nobody has seen but wrong for
     choosing whom to drop."""
     if source == "ros" and view.ros_rate(player_id) is not None:
+        return True
+    if source == "board" and board_covers(view, player_id):
         return True
     return view.projected_rate(player_id, default=None) is not None
 

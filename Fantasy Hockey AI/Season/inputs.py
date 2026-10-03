@@ -140,7 +140,7 @@ def _assert_in_season(days, season: str, path) -> None:
             f"belongs to another season.")
 
 
-def load_ros(season: str):
+def load_ros(season: str, tag: str | None = None):
     """Rest-of-season projections for the replayed season, from a build that never saw it.
 
     Optional: returns None when the file has not been built, and a manager that needs it says so.
@@ -148,7 +148,7 @@ def load_ros(season: str):
     columns: every row carries its realized window (`target_*`), the table spans one season, and
     the seasons it was trained on do not include this one.
     """
-    path = paths.ros_predictions(season)
+    path = paths.ros_predictions(season, tag=tag)
     if not path.exists():
         log.info("no rest-of-season projections at %s; managers that need them will refuse", path)
         return None
@@ -350,7 +350,7 @@ def load_goalie_history(season: str) -> pd.DataFrame:
     return table
 
 
-def load_season(season: str, variant: str = "A") -> dict:
+def load_season(season: str, variant: str = "A", ros_tag: str | None = None) -> dict:
     """Everything a run needs, loaded once and shared across every manager and replication."""
     return {
         "season": season,
@@ -361,7 +361,7 @@ def load_season(season: str, variant: str = "A") -> dict:
         "goalie_candidates": load_goalie_candidates(season, variant),
         "availability": load_availability(season, variant),
         "p_start": load_p_start(season),
-        "ros": load_ros(season),
+        "ros": load_ros(season, ros_tag),
         "goalie_ros": load_goalie_ros(season),
         "injury_absence": load_injury_absence(season),
     }

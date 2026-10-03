@@ -634,7 +634,10 @@ class FullSystem(Manager):
         # per-game rate was last written while he was out (P(plays) ~0), which made him the cheapest
         # drop: rung 4 cut the returning player 80% of the time (2026-09-28). The rest-of-season
         # rate does not collapse that way, so it stands when there is one.
-        if source != "ros" or view.ros_rate(returning) is None:
+        # `board` is live's rest-of-season rate (valuation.rate), so it stands the same way.
+        covered = (view.ros_rate(returning) is not None if source == "ros"
+                   else source == "board" and valuation.board_covers(view, returning))
+        if not covered:
             healthy = view.healthy_rate(returning)
             if healthy is not None:
                 rates[returning] = max(rates[returning], healthy)

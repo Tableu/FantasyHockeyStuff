@@ -309,6 +309,23 @@ class Season:
                     zip(rows["player_id"].astype(int),
                         rows["start_share"].astype(float) * self.goalie_line_mean))
 
+        # The preseason consensus as a rate per team game, frozen all season: what the live plan
+        # priced skaters' rest of season on until 2026-10-03 (Live/live.py ros_seed -- the board's
+        # value over his team's games), for a seat on rate source `board` (valuation.rate).
+        # Skaters only, as live: a goalie keeps his start share x the league line from `latest_ros`.
+        self.board_ros = {}
+        board = (self.data.get("board_values") or {}).get(self.scoreset.name)
+        if board is not None and len(board):
+            slate = self.data["projections"][["game_id", "team_id"]].drop_duplicates()
+            team_games = slate.groupby("team_id")["game_id"].nunique()
+            goalies = set(self.data["goalie_candidates"]["player_id"].astype(int))
+            full = int(team_games.max()) if len(team_games) else 82
+            for player_id, value in board.items():
+                if int(player_id) in goalies or pd.isna(value):
+                    continue
+                games = team_games.get(self.latest_team.get(int(player_id)), full)
+                self.board_ros[int(player_id)] = float(value) / max(int(games), 1)
+
         # Opening-week seed for both rates, for the same reason `latest_team` is seeded: both fill
         # only once a player's team has played, so on the first nights a star whose club had not
         # opened yet had no rate, priced at zero, and was the first man dropped (rung 5 dropped 33
@@ -568,7 +585,7 @@ class Season:
             future_draws=(lambda _d=day, _w=week: self.future_draws(_d, _w)),
             **self._season_shape(team_index, week, opponent),
             rate_estimate=self.latest_rate, healthy_estimate=self.healthy_rate,
-            ros_estimate=self.latest_ros, returns=self.returns)
+            ros_estimate=self.latest_ros, board_estimate=self.board_ros, returns=self.returns)
         # A per-seat pricing choice, so the candidate seat can differ (valuation.player_value).
         view.goalie_absence = self.field[team_index].strategy.adddrop.goalie_absence
         return view

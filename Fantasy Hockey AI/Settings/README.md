@@ -132,7 +132,7 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 |---|---|---|---|
 | `adddrop` (rung 5+) | `horizon_weeks` | 3 | weeks past the current one both sides of a swap are priced over |
 | | `margin` | 1.0 | sds of its own gain a move must clear; `"inf"` never moves (rung 6) |
-| | `rate_source` | `ros` | `ros` (rest-of-season projection) or `per_game` |
+| | `rate_source` | `ros` | `ros` (the model's rest-of-season projection, updated through the season), `per_game`, or `board` (the preseason consensus per team game, frozen all season -- what the live plan prices skaters on today, Live/live.py ros_seed; goalies on their start share). `board` is a backtest arm for that comparison (2026-10-02) |
 | | `claim_premium` | 0.0 | extra points a waiver claim must clear; `"inf"` never claims |
 | | `shortlist` | 10 | free agents priced on the roster per pass |
 | | `drop_shortlist` | 4 | cheapest fieldable drops tried against each |

@@ -149,13 +149,15 @@ def goalie_ros(season: str) -> Path:
     return PROJECTIONS_REPORTS / f"goalie_ros_{season}.parquet"
 
 
-def ros_predictions(season: str, horizon: str = "season") -> Path:
+def ros_predictions(season: str, horizon: str = "season", tag: str | None = None) -> Path:
     """Rest-of-season projections from a build that held `season` out.
 
     Written by `Projections/ros_train.py --predictions-out`. Not `ros_projections_*.parquet`,
     which `ros_predict.py` makes from the deployment build -- trained on the season being replayed.
+    `tag` names an alternative build (`ros_train.py --tag`, e.g. "history" for the multi-season prior).
     """
-    return PROJECTIONS_REPORTS / f"ros_predictions_{horizon}_{season}.parquet"
+    suffix = f"_{tag}" if tag else ""
+    return PROJECTIONS_REPORTS / f"ros_predictions_{horizon}_{season}{suffix}.parquet"
 
 
 def scoreset(name: str) -> Path:

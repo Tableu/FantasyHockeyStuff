@@ -415,6 +415,15 @@ the plan's own side of each trial took it from 142 s, results bit-identical. A p
 trial gains across the planner's rounds and a vectorised lineup solve were tried and gave nothing
 (each new move touches most of the week's nights; a solve is ~9 us, mostly numpy's small-array cost).
 
+**The rest-of-season build is part of a run's identity.** `--ros-tag <tag>` prices `ros` on another
+build (`ros_predictions_season_<season>_<tag>.parquet`, e.g. `position` for the old prior), and the
+oneseat/tune cache key carries the build, so a cached baseline played on one model is never paired
+with a candidate played on another (the code hash does not cover Projections' outputs). The
+opponents price on the same build: with the history-prior model they score 29.47 pts per NHL game
+day against the old model's 29.6 and 12088's 30.19 (2024-25, sd 0), so the calibration stands.
+Rate source `board` (the preseason consensus, frozen) is the comparison arm for the model:
+`--set 'adddrop.rate_source="board"'`.
+
 ```bash
 python opponents.py --summary                                 # 12088's activity targets
 python opponents.py --validate --sd 0 0.5                     # rung 8 against 12088 2024-25
