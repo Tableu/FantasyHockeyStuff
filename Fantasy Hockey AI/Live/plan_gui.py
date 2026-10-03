@@ -354,14 +354,25 @@ class PlanWindow:
 
         box = ttk.Frame(views)
         views.add(box, text="Box score")
-        self.box_columns = [("team", "Team", 50), ("number", "#", 36), ("player", "Player", 170),
+        self.box_columns = [("number", "#", 36), ("player", "Player", 170),
                             ("position", "Pos", 40), ("fantasy", "Fan. pts", 65), ("goals", "G", 34),
                             ("assists", "A", 34), ("ppp", "PPP", 40), ("shp", "SHP", 40), ("shots", "SOG", 40),
                             ("hits", "Hits", 40), ("blocks", "Blk", 40), ("pim", "PIM", 40),
                             ("plus_minus", "+/-", 40), ("toi", "TOI", 55), ("saves", "SV", 40),
                             ("goals_against", "GA", 40), ("decision", "Dec", 40)]
         self.sorts["box"] = ["fantasy", True]
-        self.box_table = sheets.Table(box, self.box_columns, ROW_STYLES, on_sort=lambda key: self._sort_box(key))
+        # One table per NHL team, away above home; a header click sorts both.
+        self.box_tables, self.box_titles = [], []
+        for row in range(2):
+            side = ttk.Frame(box, padding=(0, 0 if row == 0 else 6, 0, 0))
+            side.grid(row=row, column=0, sticky="nsew")
+            box.rowconfigure(row, weight=1)
+            title = tk.StringVar()
+            ttk.Label(side, textvariable=title, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+            self.box_titles.append(title)
+            self.box_tables.append(sheets.Table(side, self.box_columns, ROW_STYLES,
+                                                on_sort=lambda key: self._sort_box(key)))
+        box.columnconfigure(0, weight=1)
 
         plays = ttk.Frame(views)
         views.add(plays, text="Plays")
@@ -731,7 +742,7 @@ class PlanWindow:
 
     def _sort_box(self, key):
         state = self.sorts["box"]
-        state[1] = not state[1] if key == state[0] else key not in ("team", "player", "position", "decision")
+        state[1] = not state[1] if key == state[0] else key not in ("player", "position", "decision")
         state[0] = key
         self._fill_box()
 
@@ -740,18 +751,21 @@ class PlanWindow:
         if not game:
             return
         key, descending = self.sorts["box"]
-        players = game["away"]["players"] + game["home"]["players"]
         field = "name" if key == "player" else key
-        present = [p for p in players if p.get(field) is not None]
-        text = key in ("team", "player", "position", "decision", "toi")
+        text = key in ("player", "position", "decision", "toi")
         value = (lambda p: str(p[field])) if text else (lambda p: p[field])
-        players = sorted(present, key=value, reverse=descending) + [p for p in players if p.get(field) is None]
-        rows = []
-        for p in players:
-            cells = {**p, "player": p["name"]}
-            rows.append((tuple("" if cells.get(k) is None else cells[k] for k, _, _ in self.box_columns),
-                         owner_tags([p.get("owner")])))
-        self._set(self.box_table, rows, sort_key=key, descending=descending)
+        for side, title, table in zip(("away", "home"), self.box_titles, self.box_tables):
+            team = game[side]
+            title.set(f"{team['abbrev']}  {team['score']}  ({team['sog']} shots)")
+            present = [p for p in team["players"] if p.get(field) is not None]
+            players = (sorted(present, key=value, reverse=descending)
+                       + [p for p in team["players"] if p.get(field) is None])
+            rows = []
+            for p in players:
+                cells = {**p, "player": p["name"]}
+                rows.append((tuple("" if cells.get(k) is None else cells[k] for k, _, _ in self.box_columns),
+                             owner_tags([p.get("owner")])))
+            self._set(table, rows, sort_key=key, descending=descending)
 
     def _fill_plays(self):
         choice = self.play_filter.get()
