@@ -12,7 +12,12 @@ database.
                    your opponent's) and players.parquet's NHL ids (ModelFeatures/build_players.py)
     games()        today's games (score/now): score, period, clock, your players and your
                    opponent's on each
-    goals()        every goal today, newest first, with the fantasy points it earned each owner
+    goals()        every goal today, newest first by when it was scored (GoalClock), with the
+                   fantasy points it earned each owner
+    GoalClock      when each goal was scored: the NHL's feeds carry only the game clock, so the
+                   server notes when a goal first appears in score/now (watch_loop reads it every
+                   cache window while games are on), and estimates it from puck drop for a goal it
+                   could not have seen arrive (scored before it first looked at that game)
     game(id)       one game: line score, shots by period, team stats, box score with fantasy
                    points, the plays after a sortOrder
     lines(id)      each team's forward lines, defence pairs and special-teams units as used, from
@@ -52,8 +57,8 @@ REPORT_INTERVAL_S = 60          # the HTML TOI reports change about once a minut
 FEED_IDLE_S = 3 * 3600          # a feed nobody asked about for this long is dropped
 FINAL_STATES = {"OFF", "FINAL"}
 LIVE_STATES = {"LIVE", "CRIT"}
-# The goal feed's order across games: a goal's wall-clock time, estimated from puck drop -- about
-# 8 minutes to the first faceoff, 37 minutes of real time per 20-minute period, 18 between periods.
+# A goal's wall-clock time when the server could not see it arrive, estimated from puck drop --
+# about 8 minutes to the first faceoff, 37 minutes of real time per 20-minute period, 18 between.
 FIRST_FACEOFF_S, PERIOD_REAL_S, INTERMISSION_S = 8 * 60, 37 * 60, 18 * 60
 RECENT_5V5_S = 600              # the lines' recent window: the last 10 minutes of 5v5
 MIN_UNIT_S = lineup_calc.MIN_SPECIAL_TEAMS_SECONDS   # shared ice a unit needs before it is shown
@@ -61,6 +66,9 @@ PERIOD_S = lineup_calc.PERIOD_SECONDS
 FORWARDS = set(lineup_calc.FORWARD_POSITIONS)
 STRENGTHS = {"ev": "EV", "pp": "PP", "sh": "SH"}
 TEAM_SUFFIX = re.compile(r"\(([A-Z]{2,3})\)\s*$")
+WATCH_LIVE_S = 20               # score/now's cache window, while a game is on or about to start
+WATCH_IDLE_S = 300              # otherwise
+WATCH_LEAD = dt.timedelta(minutes=30)
 
 
 def clock(seconds: int) -> str:
@@ -83,6 +91,7 @@ class Feed:
         self.expires = 0.0
         self.modified = None            # the HTML page's Last-Modified
         self.fetched_at = None
+        self.as_of = None               # UTC moment the NHL made the copy held (now less its Age)
         self.version = 0                # bumped whenever the body changes
         self.used = time.monotonic()
         self.lock = threading.Lock()
@@ -121,17 +130,116 @@ class Feed:
             max_age = int(match.group(1)) if match else DEFAULT_MAX_AGE_S
             age = int(response.headers.get("Age", "0") or 0)
             self.expires = time.monotonic() + max(1, max_age - age)
+            self.as_of = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=age)
         if body != self.body:
             self.body = body
             self.version += 1
 
 
-class FeedStore:
-    """Every Feed the server holds, by URL; one a day nobody asks about is dropped."""
+def goal_key(game, goal) -> str:
+    return (f"{game['id']}:{(goal.get('periodDescriptor') or {}).get('number')}:"
+            f"{goal.get('timeInPeriod')}:{goal.get('playerId')}")
 
-    def __init__(self):
+
+def estimated_time(game, goal) -> dt.datetime:
+    """When a goal was scored, from puck drop and its period and game clock."""
+    start = dt.datetime.fromisoformat(game["startTimeUTC"].replace("Z", "+00:00"))
+    number = (goal.get("periodDescriptor") or {}).get("number", 1)
+    seconds = (FIRST_FACEOFF_S + (number - 1) * (PERIOD_REAL_S + INTERMISSION_S)
+               + mmss(goal.get("timeInPeriod")) * PERIOD_REAL_S / PERIOD_S)
+    return start + dt.timedelta(seconds=seconds)
+
+
+class GoalClock:
+    """When each of the day's goals was scored, kept in <directory>/goal_times_<date>.json so a
+    restart keeps them. A goal that appears in score/now after the server has already looked at
+    its game is timed by the copy it appeared in (the NHL's copy time, about 20-40 s after the
+    goal); one already there at the first look is estimated (estimated_time) and marked so."""
+
+    def __init__(self, directory):
+        self.directory = Path(directory)
+        self.day, self.games, self.times = None, set(), {}
+        self.lock = threading.Lock()
+
+    def _path(self, day):
+        return self.directory / f"goal_times_{day}.json"
+
+    def _load(self, day):
+        self.day, self.games, self.times = day, set(), {}
+        path = self._path(day)
+        if path.exists():
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.games = set(saved.get("games", []))
+            self.times = {k: (dt.datetime.fromisoformat(v[0]), bool(v[1])) for k, v in saved.get("goals", {}).items()}
+
+    def observe(self, data, as_of):
+        """Note every goal in a score/now copy made at `as_of` (UTC)."""
+        day = data.get("currentDate")
+        if not day:
+            return
+        with self.lock:
+            if day != self.day:
+                self._load(day)
+            changed = False
+            for game in data.get("games", []):
+                first_look = game["id"] not in self.games
+                for goal in game.get("goals", []):
+                    key = goal_key(game, goal)
+                    if key not in self.times:
+                        self.times[key] = ((estimated_time(game, goal), False) if first_look or as_of is None
+                                           else (as_of, True))
+                        changed = True
+                if first_look:
+                    self.games.add(game["id"])
+                    changed = True
+            if changed:
+                self.directory.mkdir(parents=True, exist_ok=True)
+                self._path(day).write_text(json.dumps({
+                    "games": sorted(self.games),
+                    "goals": {k: [t.isoformat(), seen] for k, (t, seen) in self.times.items()}}),
+                    encoding="utf-8")
+
+    def time_of(self, game, goal) -> tuple:
+        """(UTC time, whether it was seen arriving)."""
+        with self.lock:
+            found = self.times.get(goal_key(game, goal))
+        return found if found else (estimated_time(game, goal), False)
+
+
+class FeedStore:
+    """Every Feed the server holds, by URL; one a day nobody asks about is dropped. Its GoalClock
+    times the day's goals for every league."""
+
+    def __init__(self, goal_times_dir):
         self.feeds: dict[str, Feed] = {}
         self.lock = threading.Lock()
+        self.clock = GoalClock(goal_times_dir)
+
+    def score_now(self) -> dict:
+        feed = self.feed(f"{API}/score/now")
+        data = feed.get()
+        self.clock.observe(data, feed.as_of)
+        return data
+
+    def watch_loop(self):
+        """Read score/now every cache window while a game is on or starts within WATCH_LEAD, so
+        each goal is timed as it arrives whether or not anyone is watching; every few minutes
+        otherwise. Runs on its own thread for the server's life."""
+        while True:
+            pause = WATCH_IDLE_S
+            try:
+                data = self.score_now()
+                now = dt.datetime.now(dt.timezone.utc)
+                for game in data.get("games", []):
+                    start = dt.datetime.fromisoformat(game["startTimeUTC"].replace("Z", "+00:00"))
+                    if game.get("gameState") in LIVE_STATES or (
+                            game.get("gameState") not in FINAL_STATES and start - now <= WATCH_LEAD):
+                        pause = WATCH_LIVE_S
+                        break
+            except Exception as error:  # noqa: BLE001 -- a missed look; the next one tries again
+                print(f"goal watch failed: {type(error).__name__}: {error}", file=sys.stderr)
+                pause = WATCH_LIVE_S
+            time.sleep(pause)
 
     def feed(self, url, html=False) -> Feed:
         with self.lock:
@@ -201,7 +309,7 @@ class Games:
         return self.store.feed(url, html)
 
     def score_now(self) -> dict:
-        return self.feed(f"{API}/score/now").get()
+        return self.store.score_now()
 
     def game_feed(self, game_id, part) -> dict:
         feed = self.feed(f"{API}/gamecenter/{game_id}/{part}")
@@ -277,12 +385,12 @@ class Games:
                             "points": points}
 
                 period = goal.get("periodDescriptor") or {}
-                start = dt.datetime.fromisoformat(g["startTimeUTC"].replace("Z", "+00:00")).timestamp()
-                number = period.get("number", 1)
+                scored, seen = self.store.clock.time_of(g, goal)
                 rows.append({
                     "game_id": g["id"],
-                    "order": (start + FIRST_FACEOFF_S + (number - 1) * (PERIOD_REAL_S + INTERMISSION_S)
-                              + mmss(goal.get("timeInPeriod")) * PERIOD_REAL_S / PERIOD_S, n),
+                    # Seen arriving, or estimated; within one copy's arrivals, the estimate's order.
+                    "order": (scored.timestamp(), estimated_time(g, goal).timestamp(), n),
+                    "at": scored.isoformat(timespec="seconds"), "at_estimated": not seen,
                     "period": period.get("number"), "period_type": period.get("periodType"),
                     "time": goal.get("timeInPeriod"), "team": goal.get("teamAbbrev"),
                     "scorer": person(goal["playerId"], goal["name"]["default"], goal.get("goalsToDate"), "goals"),
@@ -293,8 +401,8 @@ class Games:
                     "score": f"{away} {goal.get('awayScore')}-{goal.get('homeScore')} {home}",
                     "clip": goal.get("highlightClipSharingUrl"),
                 })
-        # Newest first, by each goal's estimated wall-clock time (game clocks alone don't compare
-        # across games); within a game the NHL's own order breaks a tie.
+        # Newest first, by when each goal was scored (GoalClock); game clocks don't compare
+        # across games.
         rows.sort(key=lambda r: r["order"], reverse=True)
         for r in rows:
             del r["order"]

@@ -189,7 +189,8 @@ class Refresh(BaseModel):
 
 def make_app(worker: Worker) -> FastAPI:
     app = FastAPI(title="Fantasy hockey plan server")
-    store = live_games.FeedStore()
+    store = live_games.FeedStore(LIVE / "reports" / "goals")
+    threading.Thread(target=store.watch_loop, daemon=True).start()
     views = {name: live_games.Games(lambda league=league: worker.newest_plan(league),
                                     simlayer.load_scoreset(league.scoring), paths.players(), store)
              for name, league in worker.leagues.items()}

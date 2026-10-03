@@ -407,9 +407,10 @@ class PlanWindow:
         self.goals_fantasy_only = tk.BooleanVar(value=False)
         ttk.Checkbutton(bar, text="Only goals with your players or your opponent's",
                         variable=self.goals_fantasy_only, command=self._fill_goals).pack(side="right", padx=8)
-        self.goals_table = sheets.Table(frame, [("time", "Time", 70), ("team", "Team", 45), ("player", "Scorer", 150),
-                                                ("note", "Assists", 240), ("strength", "Str", 50),
-                                                ("score", "Score", 110), ("fantasy", "Fantasy points", 225),
+        self.goals_table = sheets.Table(frame, [("at", "At", 70), ("time", "Game", 70), ("team", "Team", 45),
+                                                ("player", "Scorer", 150),
+                                                ("note", "Assists", 215), ("strength", "Str", 45),
+                                                ("score", "Score", 105), ("fantasy", "Fantasy points", 200),
                                                 ("clip", "Clip", 40)],
                                         ROW_STYLES, on_row_click=self._pick_goal)
         self.goal_picked = None
@@ -805,11 +806,14 @@ class PlanWindow:
             assists = ", ".join(f"{a['name']} ({a['to_date']})" for a in g["assists"]) or "unassisted"
             scorer = f"{g['scorer']['name']} ({g['scorer']['to_date']})"
             strength = g["strength"] + (" EN" if g.get("modifier") == "empty-net" else "")
-            rows.append(((f"{period_name(g['period'], g.get('period_type'))} {g['time']}", g["team"], scorer,
+            at = local_time(g["at"].replace("T", " ")[:19]) if g.get("at") else ""
+            if at and g.get("at_estimated"):
+                at = "~" + at                     # not seen arriving: estimated from puck drop
+            rows.append(((at, f"{period_name(g['period'], g.get('period_type'))} {g['time']}", g["team"], scorer,
                           assists, strength, g["score"], "; ".join(fantasy), "\u25b6" if g.get("clip") else ""),
                          owner_tags(owners)))
             self.goal_rows.append(g)
-        self._set(self.goals_table, rows or [(("", "", "No goals yet.", "", "", "", "", ""), ("empty",))])
+        self._set(self.goals_table, rows or [(("", "", "", "No goals yet.", "", "", "", "", ""), ("empty",))])
 
     def _pick_goal(self, index):
         self.goal_picked = self.goal_rows[index] if index < len(self.goal_rows) else None
