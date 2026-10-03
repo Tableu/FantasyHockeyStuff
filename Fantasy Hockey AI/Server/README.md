@@ -51,3 +51,7 @@ publish -- or stop the container and run server.py on Windows, where plan_gui.py
   refreshes and stream their progress, and it follows the server's auto refreshes. The window
   needs the server running.
 - Measured 2026-10-02: a full refresh 36 s, a quick one 21 s.
+- **measure_steps.py** times each refresh and nightly step in its own process with its peak memory
+  (the plan's Phase 0 table): `docker compose exec server python measure_steps.py`. Linux only.
+  2026-10-02 in the container: every step ran; the largest was build_tonight on a late-season day
+  (34 s, 417 MB), and the container peaked at 635 MiB with no swap.
