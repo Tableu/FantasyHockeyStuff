@@ -352,8 +352,6 @@ class PlanWindow:
         views = ttk.Notebook(bottom)
         views.pack(fill="both", expand=True)
 
-        box = ttk.Frame(views)
-        views.add(box, text="Box score")
         self.box_columns = [("number", "#", 36), ("player", "Player", 170),
                             ("position", "Pos", 40), ("fantasy", "Fan. pts", 65), ("goals", "G", 34),
                             ("assists", "A", 34), ("ppp", "PPP", 40), ("shp", "SHP", 40), ("shots", "SOG", 40),
@@ -361,18 +359,18 @@ class PlanWindow:
                             ("plus_minus", "+/-", 40), ("toi", "TOI", 55), ("saves", "SV", 40),
                             ("goals_against", "GA", 40), ("decision", "Dec", 40)]
         self.sorts["box"] = ["fantasy", True]
-        # One table per NHL team, away above home; a header click sorts both.
-        self.box_tables, self.box_titles = [], []
-        for row in range(2):
-            side = ttk.Frame(box, padding=(0, 0 if row == 0 else 6, 0, 0))
-            side.grid(row=row, column=0, sticky="nsew")
-            box.rowconfigure(row, weight=1)
+        # A box score tab per NHL team, away first, named for the team once a game is picked; a
+        # header click sorts both.
+        self.game_views, self.box_frames, self.box_tables, self.box_titles = views, [], [], []
+        for side in ("Away", "Home"):
+            frame = ttk.Frame(views)
+            views.add(frame, text=f"{side} box score")
             title = tk.StringVar()
-            ttk.Label(side, textvariable=title, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+            ttk.Label(frame, textvariable=title, font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(4, 2))
+            self.box_frames.append(frame)
             self.box_titles.append(title)
-            self.box_tables.append(sheets.Table(side, self.box_columns, ROW_STYLES,
+            self.box_tables.append(sheets.Table(frame, self.box_columns, ROW_STYLES,
                                                 on_sort=lambda key: self._sort_box(key)))
-        box.columnconfigure(0, weight=1)
 
         plays = ttk.Frame(views)
         views.add(plays, text="Plays")
@@ -754,8 +752,9 @@ class PlanWindow:
         field = "name" if key == "player" else key
         text = key in ("player", "position", "decision", "toi")
         value = (lambda p: str(p[field])) if text else (lambda p: p[field])
-        for side, title, table in zip(("away", "home"), self.box_titles, self.box_tables):
+        for side, frame, title, table in zip(("away", "home"), self.box_frames, self.box_titles, self.box_tables):
             team = game[side]
+            self.game_views.tab(frame, text=f"{team['abbrev']} box score")
             title.set(f"{team['abbrev']}  {team['score']}  ({team['sog']} shots)")
             present = [p for p in team["players"] if p.get(field) is not None]
             players = (sorted(present, key=value, reverse=descending)
