@@ -79,7 +79,7 @@ class Worker:
         self.current: Job | None = None
         self.numbers = itertools.count(1)
         self.lock = threading.Lock()
-        self.windows_done = set()       # puck times the auto window already re-planned
+        self.windows_done = set()       # puck times the auto window re-planned since it started
 
     def day(self) -> dt.date:
         return dt.date.fromisoformat(self.args.date) if self.args.date else dt.date.today()
@@ -119,12 +119,24 @@ class Worker:
             with self.lock:
                 self.current = None
 
+    def planned_for(self, window) -> bool:
+        """Whether this group of games already has its plan: re-planned by the auto window since
+        the server started, or (on the real clock) a plan saved inside its lead -- so a restart
+        does not re-run a window the server ran before it, and a tap there counts too."""
+        if window in self.windows_done:
+            return True
+        if self.args.now:                   # rehearsal: the files' real times are not its clock
+            return False
+        since = (window - planpass.WINDOW_LEAD).to_pydatetime()
+        return any(dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc).replace(tzinfo=None) >= since
+                   for f in planpass.saved_plans(self.league, self.day()))
+
     def auto_loop(self):
         """A quick refresh ~30 minutes before each group of games, once per group."""
         while True:
             try:
                 window = planpass.next_window(self.day(), self.now())
-                if window is not None and window not in self.windows_done and self.current is None:
+                if window is not None and self.current is None and not self.planned_for(window):
                     self.windows_done.add(window)
                     self.start("quick", by=f"auto: games at {window:%H:%M} UTC")
             except Exception as error:  # noqa: BLE001 -- a bad check must not end the loop
