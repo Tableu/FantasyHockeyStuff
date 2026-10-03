@@ -13,7 +13,8 @@ which plan_gui.py shows) call. Nothing here is scheduled -- a pass runs when one
     plan(...)          the shipped manager's plan (live.LiveRunner)
     save(...)          reports/<league>/plans/plan_{date}_{stem}.md + .json + plan_latest.md
 
-Planner runs them in order as one refresh (full or quick) -- the server's passes. Each step
+Planner runs them in order as one refresh (full or quick) for every league the server plans --
+the data steps once, then each league's read, plan and save. Each step
 reports progress through `echo` (print by default; the server passes its job's progress lines).
 """
 
@@ -148,19 +149,25 @@ def saved_plans(league, day: dt.date) -> list:
 
 
 class Planner:
-    """One league's refreshes for one day, as the server runs them: the
-    steps above in order, the board and sampler built once, and when each step last ran."""
+    """The day's refreshes as the server runs them, for one league or several: the data steps once
+    (snapshots, tonight's rows and projections -- they are nobody's league), then each league's
+    read, plan and save. Each league's board and sampler are built once a day. `last` is when each
+    data step last ran; `league_last[name]` when that league was last read."""
 
-    def __init__(self, league, day: dt.date, league_file=None, platform_season=None,
+    def __init__(self, leagues, day: dt.date, league_file=None, platform_season=None,
                  skip_snapshots=False):
-        self.league, self.day = league, day
+        self.leagues, self.day = list(leagues), day
+        if league_file and len(self.leagues) > 1:
+            raise SystemExit("a league file is one league's snapshot: plan that league alone")
         self.league_file, self.platform_season = league_file, platform_season
         self.skip_snapshots = skip_snapshots
-        self.runner = None                 # built on the first run (the board, the sampler)
-        self.last = {}                     # step -> when it last ran
+        self.runners = {}                  # league name -> its LiveRunner, built on its first run
+        self.last = {}                     # data step -> when it last ran
+        self.league_last = {league.name: {} for league in self.leagues}
 
     def run(self, mode: str, now: dt.datetime, echo=print) -> dict:
-        """A 'full' or 'quick' refresh; returns the plan, already saved."""
+        """A 'full' or 'quick' refresh: {league name: its plan, already saved -- or the error that
+        stopped that league, whose failure (its platform down) leaves the others' plans}."""
         if not self.skip_snapshots:
             kinds = SNAPSHOT_KINDS if mode == "full" else QUICK_SNAPSHOT_KINDS
             # Every refresh fetches injuries; between full listings that is about 4 Fleaflicker
@@ -171,12 +178,20 @@ class Planner:
                 self.last[kind] = dt.datetime.now()
         tonight(self.day, echo)
         self.last["projections"] = dt.datetime.now()
-        if self.runner is None:
-            echo("building the board and the sampler (once a day)...")
-            self.runner = live.LiveRunner(self.day, self.league)
-        snapshot = read_league(self.league, self.day, self.league_file, self.platform_season,
-                               echo, now=now)
-        self.last["league read"] = dt.datetime.now()
-        result = plan(self.runner, snapshot, now, echo)
-        save(self.league, result, self.day, f"{now:%H%M}", echo)
-        return result
+        results = {}
+        for league in self.leagues:
+            say = echo if len(self.leagues) == 1 else (lambda text, name=league.name: echo(f"{name}: {text}"))
+            try:
+                if league.name not in self.runners:
+                    say("building the board and the sampler (once a day)...")
+                    self.runners[league.name] = live.LiveRunner(self.day, league)
+                snapshot = read_league(league, self.day, self.league_file, self.platform_season,
+                                       say, now=now)
+                self.league_last[league.name]["league read"] = dt.datetime.now()
+                result = plan(self.runners[league.name], snapshot, now, say)
+                save(league, result, self.day, f"{now:%H%M}", say)
+                results[league.name] = result
+            except (Exception, SystemExit) as error:
+                say(f"failed: {type(error).__name__}: {error}")
+                results[league.name] = error
+        return results

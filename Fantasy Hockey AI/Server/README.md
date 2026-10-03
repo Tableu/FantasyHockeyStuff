@@ -7,22 +7,28 @@ behind a small HTTP API, which the plan window (Live/plan_gui.py) shows.
 
 ## The server
 
-    python server.py                    # league beagles, today, http://127.0.0.1:8000
-    python server.py --date 2026-09-29 --league-file ../Live/fixtures/beagles/fake_league.json         --skip-snapshots --no-auto      # rehearsal
+    python server.py                    # every active league (beagles, espn-la), today, http://127.0.0.1:8000
+    python server.py --league beagles   # one league; repeat --league for several
+    python server.py --league beagles --date 2026-09-29 --league-file ../Live/fixtures/beagles/fake_league.json --skip-snapshots --no-auto      # rehearsal
+
+One server plans every league. A refresh takes the snapshots and tonight's projections once, then
+reads, plans and saves each league in turn (one league failing leaves the others' plans), and the
+auto window re-plans every league. Every call but the job's takes `?league=<name>`, defaulting to
+the first league served; plan_gui.py sends its own `--league`.
 
 | Call | Does |
 | --- | --- |
-| GET /plan | The day's newest saved plan: {file, saved_at, plan} (404 before the first) |
-| POST /refresh {"mode": "full" or "quick"} | Starts a refresh and returns its job; a tap while one runs joins it |
-| GET /jobs/{id}?after=n | The job's state and its progress lines after line n |
-| GET /status | The day, the running job, when each step last ran, the newest plan's file and time |
+| GET /plan | The league's newest saved plan today: {league, file, saved_at, plan} (404 before the first) |
+| POST /refresh {"mode": "full" or "quick"} | Starts a refresh of every league and returns its job; a tap while one runs joins it |
+| GET /jobs/{id}?after=n | The job's state, each league's saved plan file, its progress lines after line n |
+| GET /status | The leagues served, the day, the running job, when each step last ran (with the league's own read), its newest plan |
 | GET /games | Today's games: score, clock, how many of your players and your opponent's are in each |
 | GET /goals | Every goal today, newest first, with the fantasy points it earned either side |
 | GET /games/{id}?after=n | One game: line score, team stats, box score with fantasy points, plays after sortOrder n |
 | GET /games/{id}/lines | Each team's lines, pairs and power-play / penalty-kill units as used |
 
 The live games calls are games.py's: the NHL's public feeds held in memory (nothing goes to the
-database), one shared copy per feed, fetched again only once the NHL's cache says it expired (about
+database), one shared copy per feed for every league, fetched again only once the NHL's cache says it expired (about
 20 s) and only when someone asks. The lines come from the NHL's HTML time-on-ice reports (about a
 minute behind; asked with If-Modified-Since, which they honour with a 304) and the nightly lineup
 build's clustering. Live, the strength each second comes from who the reports put on the ice, not
@@ -45,7 +51,11 @@ Needs Docker Desktop (it installs WSL2).
     cd /app/pipeline && python snapshot_live.py --kind injuries --dry-run
     docker compose down                 # stops it (otherwise it comes back with Docker Desktop)
 
-A rehearsal server (--date, --league-file, --skip-snapshots, --no-auto) runs by hand in the shell
+Memory: with both leagues' boards and samplers loaded the server holds about 480 MiB (2026-10-02;
+about 230 with one), so a late-season build_tonight step (417 MB) brings the container near its
+1 GiB and into swap.
+
+A rehearsal server (--league, --date, --league-file, --skip-snapshots, --no-auto) runs by hand in the shell
 on another port, e.g. `python server.py --host 0.0.0.0 --port 8001 ...`, which compose does not
 publish -- or stop the container and run server.py on Windows, where plan_gui.py finds it at
 127.0.0.1:8000.

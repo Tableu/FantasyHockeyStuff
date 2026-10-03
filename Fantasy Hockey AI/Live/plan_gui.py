@@ -79,6 +79,7 @@ import threading
 import time
 import tkinter as tk
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from tkinter import ttk
@@ -126,13 +127,14 @@ def clock(when: dt.datetime) -> str:
 
 
 class Server:
-    """The plan server (Server/server.py) over HTTP."""
+    """The plan server (Server/server.py) over HTTP, for one of the leagues it plans."""
 
-    def __init__(self, url):
-        self.url = url.rstrip("/")
+    def __init__(self, url, league):
+        self.url, self.league = url.rstrip("/"), league
 
     def _call(self, path, body=None):
         data = None if body is None else json.dumps(body).encode("utf-8")
+        path += ("&" if "?" in path else "?") + "league=" + urllib.parse.quote(self.league)
         request = urllib.request.Request(self.url + path, data=data,
                                          headers={"Content-Type": "application/json"} if data else {})
         with urllib.request.urlopen(request, timeout=SERVER_TIMEOUT_S) as response:
@@ -212,7 +214,7 @@ class PlanWindow:
     def __init__(self, root, args):
         self.root, self.args = root, args
         self.league = leagues.load(args.league)
-        self.server = Server(args.server)
+        self.server = Server(args.server, self.league.name)
         self.served = {}                   # the server's last /status and the shown plan's file
         self.live = {"busy": False, "again": False, "lines_at": 0.0, "error": None, "games": None}
         self.game_id = None                # the game the Games and Lines tabs show
@@ -523,10 +525,13 @@ class PlanWindow:
         refresh there when it has no plan today."""
         def work():
             try:
-                status = self.server.status()
-                if status["league"] != self.league.name:
-                    raise RuntimeError(f"the server plans {status['league']}, not {self.league.name}: "
-                                       f"open the window with --league {status['league']}")
+                try:
+                    status = self.server.status()
+                except urllib.error.HTTPError as error:      # 404: a league it does not plan
+                    if error.code != 404:
+                        raise
+                    detail = json.loads(error.read().decode("utf-8") or "{}").get("detail", "")
+                    raise RuntimeError(f"{detail}: open the window with --league and one of those") from None
                 self.messages.put(("status", status))
                 body = self.server.plan()
                 if body is not None:

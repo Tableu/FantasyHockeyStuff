@@ -6,7 +6,9 @@ database.
                    NHL's cache says its copy expired (Cache-Control max-age less the Age header,
                    about 20 s), and only when someone asks: a game nobody is watching is not
                    fetched. A finished game is fetched once more, then kept.
-    Owners         which fantasy team holds each NHL player, from the newest saved plan (your roster,
+    FeedStore      the server's feeds, shared by every league it plans: a game is fetched once
+                   however many leagues (and windows) watch it
+    Owners         which fantasy team holds each NHL player, from the league's newest plan (your roster,
                    your opponent's) and players.parquet's NHL ids (ModelFeatures/build_players.py)
     games()        today's games (score/now): score, period, clock, your players and your
                    opponent's on each
@@ -124,6 +126,23 @@ class Feed:
             self.version += 1
 
 
+class FeedStore:
+    """Every Feed the server holds, by URL; one a day nobody asks about is dropped."""
+
+    def __init__(self):
+        self.feeds: dict[str, Feed] = {}
+        self.lock = threading.Lock()
+
+    def feed(self, url, html=False) -> Feed:
+        with self.lock:
+            now = time.monotonic()
+            for stale in [u for u, f in self.feeds.items() if now - f.used > FEED_IDLE_S]:
+                del self.feeds[stale]
+            if url not in self.feeds:
+                self.feeds[url] = Feed(url, html)
+            return self.feeds[url]
+
+
 class Owners:
     """Which fantasy team holds each NHL player: yours and your opponent's, from the newest plan."""
 
@@ -169,25 +188,17 @@ class Owners:
 
 
 class Games:
-    """The live view's feeds and what is computed from them, for one league."""
+    """The live view for one league: the shared feeds, seen through its owners and scoring."""
 
-    def __init__(self, newest_plan, scoreset, players_path):
-        self.scoreset, self.players_path = scoreset, players_path
+    def __init__(self, newest_plan, scoreset, players_path, store: FeedStore):
+        self.scoreset, self.players_path, self.store = scoreset, players_path, store
         self.owners = Owners(newest_plan, scoreset)
-        self.feeds: dict[str, Feed] = {}
-        self.lock = threading.Lock()
-        self.lines_cache = {}           # game id -> (feed versions, result)
+        self.lines_cache = {}           # game id -> (feed versions, result, owners' key)
 
     # ---------- feeds ----------
 
     def feed(self, url, html=False) -> Feed:
-        with self.lock:
-            now = time.monotonic()
-            for stale in [u for u, f in self.feeds.items() if now - f.used > FEED_IDLE_S]:
-                del self.feeds[stale]
-            if url not in self.feeds:
-                self.feeds[url] = Feed(url, html)
-            return self.feeds[url]
+        return self.store.feed(url, html)
 
     def score_now(self) -> dict:
         return self.feed(f"{API}/score/now").get()

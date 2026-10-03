@@ -41,7 +41,8 @@ python draft_gui.py --league espn-la --standalone --slot 1  # a live ESPN draft:
 python draft_assistant.py --league espn --slot 10           # an unreadable draft: type picks
 python draft_gui.py                                         # the window
 python plan_gui.py                                          # today's plan from the server at 127.0.0.1:8000
-python plan_gui.py --server http://host:8000                # another server (one per league: --league to match)
+python plan_gui.py --league espn-la                        # the ESPN league's plan, from the same server
+python plan_gui.py --server http://host:8000                # another server
 python run_live.py --make-fake                              # fixtures/beagles/fake_league.json
 python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh
 python run_live.py --date 2026-09-29 --platform-season 2025          # rehearse on 12090's 2025 rosters
