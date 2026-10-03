@@ -3,7 +3,7 @@
 
 Every other export is keyed by id and carries no names, which is right for the models and useless
 for a draft board a person picks from. This writes `Reference.Players` (id, name, NHL position,
-birth date) and `Reference.Teams` (id, abbreviation) as two small files. Nothing downstream joins
+birth date, the NHL's own player id -- how the live game feeds name a player) and `Reference.Teams` (id, abbreviation) as two small files. Nothing downstream joins
 on a name; they are labels only.
 
 It also writes `Fantasy.PlatformPlayerIDs` -- a platform's own player id -> PlayerID, per season --
@@ -44,8 +44,8 @@ def main():
     # `active`: his NHL page's isActive, refreshed daily for every projected or league-pool
     # player by pipeline/import_player_teams.py (false = unsigned, retired or abroad).
     players = fetch(cursor, "SELECT PlayerID AS player_id, FullName AS name, PositionCode AS "
-                            "position, BirthDate AS birth_date, CAST(Active AS BIT) AS active "
-                            "FROM Reference.Players")
+                            "position, BirthDate AS birth_date, CAST(Active AS BIT) AS active, "
+                            "NHLPlayerID AS nhl_id FROM Reference.Players")
     teams = fetch(cursor, "SELECT TeamID AS team_id, Abbreviation AS team FROM Reference.Teams")
     ids = fetch(cursor, """
         SELECT p.PlatformName AS platform, s.DisplayName AS season, x.ExternalPlayerID AS external_id,

@@ -11,7 +11,8 @@ draft_gui.py        the same in a window
 live.py             the live runner: the shipped manager on the real league (see its docstring)
 plan_gui.py         the day's plan in a window, from the plan server (Server/server.py): its newest
                     plan on opening, Full / Quick refresh buttons that run on the server, and the
-                    server's own re-plan ~30 min before each group of games followed as it runs
+                    server's own re-plan ~30 min before each group of games followed as it runs;
+                    Games, Goals and Lines tabs follow tonight's games live (Server/games.py)
 run_live.py         the same pass in the terminal (reports/<league>/plans/plan_{date}_*.md)
 planpass.py         the pass's steps, shared by both: snapshots, tonight, read league, plan, save
 sheets.py           the windows' read-only tksheet tables: row colours by tag, header-click sorting

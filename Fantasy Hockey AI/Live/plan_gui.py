@@ -54,6 +54,19 @@ starts, both nightly), the projected season before that -- the tab title says wh
 
 The tables show the league as it stands; the moves are only recommendations until you make them.
     Matchup      the week so far, P(win), the opponent's roster
+
+Tonight's games, live from the server (Server/games.py; the NHL's feeds, held in its memory), checked
+every 5 s while one of these tabs is shown:
+    Games        today's games -- score, clock, how many of your players and your opponent's are in
+                 each; click one for its box score (fantasy points under the league's scoring, your
+                 players and your opponent's coloured), its plays (newest first, filterable), its team
+                 stats and its score and shots by period
+    Goals        every goal today, newest first: scorer, assists, strength, the new score and the
+                 fantasy points it earned either side, with tonight's totals; the highlight clip
+                 opens in the browser
+    Lines        a game's forward lines, defence pairs and power-play / penalty-kill units as they are
+                 being used, from the NHL's time-on-ice reports (about a minute behind): the last 10
+                 minutes of 5v5 or the game so far
 """
 
 import argparse
@@ -67,6 +80,7 @@ import time
 import tkinter as tk
 import urllib.error
 import urllib.request
+import webbrowser
 from tkinter import ttk
 
 import pandas as pd
@@ -81,11 +95,17 @@ WATCH_MS = 60_000               # how often the window looks at the server
 JOB_POLL_S = 1                  # how often a running refresh's progress is fetched
 SERVER_TIMEOUT_S = 30
 DEFAULT_SERVER = "http://127.0.0.1:8000"
+LIVE_POLL_MS = 5_000            # the Games / Goals / Lines tabs, while shown
+LINES_POLL_S = 15               # the lines change about once a minute (the TOI reports)
+OWNER_COLOURS = {"me": "#d1fae5", "opp": "#ede9fe"}     # your players' rows, your opponent's
+PLAY_FILTERS = ("All", "Goals", "Penalties", "Shots", "Your players", "Opponent's players")
+SHOT_TYPES = {"goal", "shot-on-goal", "missed-shot", "blocked-shot"}
 PLAN_COLOUR = "#e0ecff"         # a row the plan recommends acting on
 STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": "#fff4d6"}
 # A row's look by its tags: a recommended action, an injury status, greyed (a placeholder message).
 ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "empty": {"fg": "#9ca3af"},
-              **{status: {"bg": colour} for status, colour in STATUS_COLOURS.items()}}
+              **{status: {"bg": colour} for status, colour in STATUS_COLOURS.items()},
+              **{owner: {"bg": colour} for owner, colour in OWNER_COLOURS.items()}}
 
 
 # Columns the Roster and Free agents tabs leave out of the shared player columns.
@@ -136,6 +156,36 @@ class Server:
     def job(self, job_id, after=0):
         return self._call(f"/jobs/{job_id}?after={after}")
 
+    def games(self):
+        return self._call("/games")
+
+    def goals(self):
+        return self._call("/goals")
+
+    def game(self, game_id, after=-1):
+        return self._call(f"/games/{game_id}?after={after}")
+
+    def lines(self, game_id):
+        return self._call(f"/games/{game_id}/lines")
+
+
+def period_name(number, kind=None) -> str:
+    return {"OT": "OT", "SO": "SO"}.get(kind, f"P{number}" if number else "")
+
+
+def game_state(g) -> str:
+    """'Final', 'Final/OT', 'P2 12:34', 'P2 intermission' or the puck time (local)."""
+    if g["state"] in ("OFF", "FINAL"):
+        return "Final" + (f"/{g['period_type']}" if g.get("period_type") in ("OT", "SO") else "")
+    if g["state"] in ("LIVE", "CRIT"):
+        period = period_name(g.get("period"), g.get("period_type"))
+        return f"{period} intermission" if g.get("intermission") else f"{period} {g.get('clock') or ''}".strip()
+    return local_time(g["start_utc"].replace("T", " ").replace("Z", ""))
+
+
+def owner_tags(owners) -> tuple:
+    return tuple(o for o in ("me", "opp") if o in owners)
+
 
 def _action(plan):
     """A row's recommended action: 'drop', 'move to IR', ... or an add's kind (upgrade, rental)."""
@@ -164,6 +214,10 @@ class PlanWindow:
         self.league = leagues.load(args.league)
         self.server = Server(args.server)
         self.served = {}                   # the server's last /status and the shown plan's file
+        self.live = {"busy": False, "again": False, "lines_at": 0.0, "error": None, "games": None}
+        self.game_id = None                # the game the Games and Lines tabs show
+        self.plays, self.plays_game, self.plays_last = [], None, -1
+        self.goal_rows = []
         self.watching = False              # a /status look under way
         self.plan = None
         self.busy = False
@@ -229,9 +283,14 @@ class PlanWindow:
                                                        if c[0] not in FREE_AGENTS_HIDDEN],
                                        sort_as="free_agents")
         self._build_matchup()
+        self._build_games()
+        self._build_goals()
+        self._build_lines()
+        self.tabs.bind("<<NotebookTabChanged>>", lambda event: self._live_fetch())
         body.add(self._build_sidebar(body), weight=1)
 
         root.after(200, self._drain)
+        root.after(LIVE_POLL_MS, self._live_tick)
         self._open()
 
     # ---------- layout ----------
@@ -268,6 +327,113 @@ class PlanWindow:
         table = ttk.Frame(frame)
         table.pack(fill="both", expand=True)
         self.opponent = sheets.Table(table, columns, ROW_STYLES)
+
+    def _build_games(self):
+        """Today's games on top; the clicked game's box score, plays, team stats and periods below."""
+        self.games_frame = frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text="Games")
+        split = ttk.PanedWindow(frame, orient="vertical")
+        split.pack(fill="both", expand=True)
+        top = ttk.Frame(split)
+        split.add(top, weight=1)
+        self.games_table = sheets.Table(top, [("away", "Away", 70), ("score", "Score", 70), ("home", "Home", 70),
+                                              ("state", "Game", 130), ("sog", "Shots", 70),
+                                              ("mine", "Yours", 60), ("opp", "Opponent's", 85)],
+                                        ROW_STYLES, on_row_click=self._pick_game)
+        bottom = ttk.Frame(split, padding=(0, 6, 0, 0))
+        split.add(bottom, weight=3)
+        def place_sash(event):                                # once laid out: room for 8 games, drag for more
+            if split.winfo_height() > 300:
+                split.sashpos(0, 200)
+                split.unbind("<Configure>")
+        split.bind("<Configure>", place_sash)
+        self.game_var = tk.StringVar(value="Click a game for its box score, plays and team stats.")
+        ttk.Label(bottom, textvariable=self.game_var, style="Big.TLabel").pack(anchor="w", pady=(0, 4))
+        views = ttk.Notebook(bottom)
+        views.pack(fill="both", expand=True)
+
+        box = ttk.Frame(views)
+        views.add(box, text="Box score")
+        self.box_columns = [("team", "Team", 50), ("number", "#", 36), ("player", "Player", 170),
+                            ("position", "Pos", 40), ("fantasy", "Fan. pts", 65), ("goals", "G", 34),
+                            ("assists", "A", 34), ("ppp", "PPP", 40), ("shp", "SHP", 40), ("shots", "SOG", 40),
+                            ("hits", "Hits", 40), ("blocks", "Blk", 40), ("pim", "PIM", 40),
+                            ("plus_minus", "+/-", 40), ("toi", "TOI", 55), ("saves", "SV", 40),
+                            ("goals_against", "GA", 40), ("decision", "Dec", 40)]
+        self.sorts["box"] = ["fantasy", True]
+        self.box_table = sheets.Table(box, self.box_columns, ROW_STYLES, on_sort=lambda key: self._sort_box(key))
+
+        plays = ttk.Frame(views)
+        views.add(plays, text="Plays")
+        bar = ttk.Frame(plays, padding=(0, 4))
+        bar.pack(fill="x")
+        ttk.Label(bar, text="Show").pack(side="left")
+        self.play_filter = tk.StringVar(value=PLAY_FILTERS[0])
+        chooser = ttk.Combobox(bar, textvariable=self.play_filter, values=PLAY_FILTERS, state="readonly", width=20)
+        chooser.pack(side="left", padx=6)
+        chooser.bind("<<ComboboxSelected>>", lambda event: self._fill_plays())
+        self.plays_table = sheets.Table(plays, [("period", "Per", 45), ("time", "Time", 55), ("team", "Team", 50),
+                                                ("type", "Event", 110), ("note", "Detail", 460)], ROW_STYLES)
+
+        stats = ttk.Frame(views)
+        views.add(stats, text="Team stats")
+        self.team_stats_table = sheets.Table(stats, [("stat", "", 150), ("away", "Away", 100), ("home", "Home", 100)],
+                                             ROW_STYLES)
+        periods = ttk.Frame(views)
+        views.add(periods, text="By period")
+        self.periods_table = sheets.Table(periods, [("period", "Period", 70), ("away_goals", "Away goals", 85),
+                                                    ("home_goals", "Home goals", 85), ("away_shots", "Away shots", 85),
+                                                    ("home_shots", "Home shots", 85)], ROW_STYLES)
+
+    def _build_goals(self):
+        self.goals_frame = frame = ttk.Frame(self.tabs, padding=(0, 6, 0, 0))
+        self.tabs.add(frame, text="Goals")
+        bar = ttk.Frame(frame)
+        bar.pack(fill="x", pady=(0, 4))
+        self.goals_var = tk.StringVar(value="")
+        ttk.Label(bar, textvariable=self.goals_var, style="Big.TLabel").pack(side="left")
+        ttk.Button(bar, text="Play highlight", command=self._play_clip).pack(side="right", padx=4)
+        self.goals_fantasy_only = tk.BooleanVar(value=False)
+        ttk.Checkbutton(bar, text="Only goals with your players or your opponent's",
+                        variable=self.goals_fantasy_only, command=self._fill_goals).pack(side="right", padx=8)
+        self.goals_table = sheets.Table(frame, [("time", "Time", 70), ("team", "Team", 45), ("player", "Scorer", 150),
+                                                ("note", "Assists", 240), ("strength", "Str", 50),
+                                                ("score", "Score", 110), ("fantasy", "Fantasy points", 225),
+                                                ("clip", "Clip", 40)],
+                                        ROW_STYLES, on_row_click=self._pick_goal)
+        self.goal_picked = None
+
+    def _build_lines(self):
+        self.lines_frame = frame = ttk.Frame(self.tabs, padding=(0, 6, 0, 0))
+        self.tabs.add(frame, text="Lines")
+        bar = ttk.Frame(frame)
+        bar.pack(fill="x", pady=(0, 4))
+        ttk.Label(bar, text="Game").pack(side="left")
+        self.lines_game = tk.StringVar()
+        self.lines_chooser = ttk.Combobox(bar, textvariable=self.lines_game, state="readonly", width=34)
+        self.lines_chooser.pack(side="left", padx=6)
+        self.lines_chooser.bind("<<ComboboxSelected>>", lambda event: self._pick_lines_game())
+        self.lines_window = tk.StringVar(value="recent")
+        for value, text in (("recent", "Last 10 min of 5v5"), ("game", "Game so far")):
+            ttk.Radiobutton(bar, text=text, value=value, variable=self.lines_window,
+                            command=self._fill_lines).pack(side="left", padx=6)
+        self.lines_var = tk.StringVar(value="")
+        ttk.Label(bar, textvariable=self.lines_var).pack(side="left", padx=12)
+        sides = ttk.Frame(frame)
+        sides.pack(fill="both", expand=True)
+        self.lines_tables, self.lines_titles = [], []
+        for row in range(2):                    # away above, home below: a unit's names need the width
+            side = ttk.Frame(sides, padding=(0, 0 if row == 0 else 6, 0, 0))
+            side.grid(row=row, column=0, sticky="nsew")
+            sides.rowconfigure(row, weight=1)
+            title = tk.StringVar()
+            ttk.Label(side, textvariable=title, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+            self.lines_titles.append(title)
+            self.lines_tables.append(sheets.Table(side, [("unit", "Unit", 45), ("player", "Players", 470),
+                                                         ("shared", "Together", 70), ("note", "Each", 270)],
+                                                  ROW_STYLES))
+        sides.columnconfigure(0, weight=1)
+        self.lines_data = None
 
     def _build_sidebar(self, parent):
         side = ttk.Frame(parent, padding=(8, 0, 0, 0))
@@ -325,6 +491,8 @@ class PlanWindow:
                     self.quick_button.state(["disabled"])
                     self.status_var.set(f"Server refresh running ({payload['by']})...")
                     threading.Thread(target=self._follow, args=(payload["id"],), daemon=True).start()
+            elif kind == "live":
+                self._show_live(payload)
             elif kind == "start":
                 self.run(payload)
             elif kind == "watched":
@@ -417,6 +585,264 @@ class PlanWindow:
                 threading.Thread(target=work, daemon=True).start()
         finally:
             self.root.after(WATCH_MS, self._watch)
+
+    # ---------- live games: fetching ----------
+
+    def _live_tick(self):
+        try:
+            self._live_fetch()
+        finally:
+            self.root.after(LIVE_POLL_MS, self._live_tick)
+
+    def _live_fetch(self):
+        """What the shown tab needs from the server, on a worker thread (one at a time)."""
+        shown = self.tabs.select()
+        frames = {str(self.games_frame): "games", str(self.goals_frame): "goals", str(self.lines_frame): "lines"}
+        tab = frames.get(shown)
+        if tab is None:
+            return
+        if self.live["busy"]:
+            self.live["again"] = True         # e.g. a game clicked mid-fetch: fetch it when this one ends
+            return
+        want = {"games"}
+        if tab == "goals":
+            want.add("goals")
+        if tab == "games" and self.game_id:
+            want.add("game")
+        if tab == "lines" and self.game_id and time.monotonic() - self.live["lines_at"] >= LINES_POLL_S:
+            want.add("lines")
+        after = self.plays_last if self.plays_game == self.game_id else -1
+        self.live["busy"] = True
+        threading.Thread(target=self._live_work, args=(want, self.game_id, after), daemon=True).start()
+
+    def _live_work(self, want, game_id, after):
+        out = {"game_id": game_id}
+        try:
+            out["games"] = self.server.games()
+            if "goals" in want:
+                out["goals"] = self.server.goals()
+            if "game" in want:
+                out["game"] = self.server.game(game_id, after)
+                out["after"] = after
+            if "lines" in want:
+                out["lines"] = self.server.lines(game_id)
+        except Exception as error:  # noqa: BLE001 -- shown once in Progress; the next tick tries again
+            out["error"] = f"live games: {type(error).__name__}: {error}"
+        self.messages.put(("live", out))
+
+    def _show_live(self, out):
+        self.live["busy"] = False
+        if self.live["again"]:
+            self.live["again"] = False
+            self.root.after(0, self._live_fetch)
+        error = out.get("error")
+        if error and error != self.live["error"]:
+            self.echo(error)
+        self.live["error"] = error
+        if "games" in out:
+            self.live["games"] = out["games"]
+            self._fill_games()
+        if "goals" in out:
+            self.goal_data = out["goals"]
+            self._fill_goals()
+        if "game" in out and out["game_id"] == self.game_id:
+            self._show_game(out["game"], out["after"])
+        if "lines" in out and out["game_id"] == self.game_id:
+            self.live["lines_at"] = time.monotonic()
+            self.lines_data = out["lines"]
+            self._fill_lines()
+
+    # ---------- live games: showing ----------
+
+    @staticmethod
+    def _set(table, rows, **sort):
+        """Redraw only when something changed: a redraw every few seconds would jump the scroll."""
+        key = (rows, tuple(sorted(sort.items())))
+        if getattr(table, "shown_key", None) != key:
+            table.shown_key = key
+            table.set_rows(rows, **sort)
+
+    def _fill_games(self):
+        data = self.live["games"]
+        rows, labels = [], []
+        for g in data["games"]:
+            started = g["state"] not in ("FUT", "PRE")
+            rows.append(((g["away"]["abbrev"], f"{g['away']['score']} - {g['home']['score']}" if started else "",
+                          g["home"]["abbrev"], game_state(g),
+                          f"{g['away']['sog']} - {g['home']['sog']}" if started else "",
+                          g["mine"] or "", g["opp"] or ""),
+                         ("plan",) if g["id"] == self.game_id else ()))
+            labels.append(f"{g['away']['abbrev']} @ {g['home']['abbrev']} -- {game_state(g)}")
+        self._set(self.games_table, rows or [(("", "", "No NHL games today.", "", "", "", ""), ("empty",))])
+        self.lines_chooser.configure(values=labels)
+        ids = [g["id"] for g in data["games"]]
+        if self.game_id in ids:
+            self.lines_game.set(labels[ids.index(self.game_id)])
+
+    def _pick_game(self, index):
+        games = (self.live["games"] or {}).get("games", [])
+        if index < len(games):
+            self._choose_game(games[index]["id"])
+
+    def _pick_lines_game(self):
+        games = (self.live["games"] or {}).get("games", [])
+        index = self.lines_chooser.current()
+        if 0 <= index < len(games):
+            self._choose_game(games[index]["id"])
+
+    def _choose_game(self, game_id):
+        if game_id != self.game_id:
+            self.game_id, self.lines_data = game_id, None
+            self.live["lines_at"] = 0.0
+            self.game_var.set("Loading the game...")
+            for table in self.lines_tables:
+                self._set(table, [])
+            self.lines_var.set("")
+            self._fill_games()
+        self._live_fetch()
+
+    def _show_game(self, game, after):
+        if self.plays_game != game["id"] or after < 0:
+            self.plays, self.plays_game = [], game["id"]
+        self.plays = game["plays"] + self.plays
+        self.plays_last = max(self.plays_last if after >= 0 else -1, game["last_sort"])
+        self.game_data = game
+        away, home = game["away"], game["home"]
+        self.game_var.set(f"{away['abbrev']} {away['score']}  -  {home['score']} {home['abbrev']}    "
+                          f"{game_state({**game, 'start_utc': ''})}    shots {away['sog']} - {home['sog']}")
+        self._fill_box()
+        self._fill_plays()
+        labels = {"sog": "Shots on goal", "faceoffWinningPctg": "Faceoff %", "powerPlay": "Power play",
+                  "powerPlayPctg": "Power play %", "pim": "Penalty minutes", "hits": "Hits",
+                  "blockedShots": "Blocked shots", "giveaways": "Giveaways", "takeaways": "Takeaways",
+                  "faceoffWins": "Faceoffs won"}
+        pct = lambda c, v: f"{v:.0%}" if c.endswith("Pctg") and isinstance(v, (int, float)) else str(v)
+        self._set(self.team_stats_table,
+                  [((labels.get(t["category"], t["category"]), pct(t["category"], t["awayValue"]),
+                     pct(t["category"], t["homeValue"])), ()) for t in game["team_stats"]])
+        shots = {(p["periodDescriptor"]["number"]): p for p in game["shots_by_period"]}
+        rows = []
+        for p in game["linescore"]:
+            number = p["periodDescriptor"]["number"]
+            s = shots.get(number, {})
+            rows.append(((period_name(number, p["periodDescriptor"].get("periodType")), p["away"], p["home"],
+                          s.get("away", ""), s.get("home", "")), ()))
+        self._set(self.periods_table, rows)
+
+    def _sort_box(self, key):
+        state = self.sorts["box"]
+        state[1] = not state[1] if key == state[0] else key not in ("team", "player", "position", "decision")
+        state[0] = key
+        self._fill_box()
+
+    def _fill_box(self):
+        game = getattr(self, "game_data", None)
+        if not game:
+            return
+        key, descending = self.sorts["box"]
+        players = game["away"]["players"] + game["home"]["players"]
+        field = "name" if key == "player" else key
+        present = [p for p in players if p.get(field) is not None]
+        text = key in ("team", "player", "position", "decision", "toi")
+        value = (lambda p: str(p[field])) if text else (lambda p: p[field])
+        players = sorted(present, key=value, reverse=descending) + [p for p in players if p.get(field) is None]
+        rows = []
+        for p in players:
+            cells = {**p, "player": p["name"]}
+            rows.append((tuple("" if cells.get(k) is None else cells[k] for k, _, _ in self.box_columns),
+                         owner_tags([p.get("owner")])))
+        self._set(self.box_table, rows, sort_key=key, descending=descending)
+
+    def _fill_plays(self):
+        choice = self.play_filter.get()
+        keep = {"Goals": lambda p: p["type"] == "goal",
+                "Penalties": lambda p: p["type"] == "penalty",
+                "Shots": lambda p: p["type"] in SHOT_TYPES,
+                "Your players": lambda p: "me" in p["owners"],
+                "Opponent's players": lambda p: "opp" in p["owners"]}.get(choice, lambda p: True)
+        rows = [((period_name(p["period"], p.get("period_type")), p["time"], p["team"],
+                  p["type"].replace("-", " "), p["text"]), owner_tags(p["owners"]))
+                for p in self.plays if keep(p)]
+        self._set(self.plays_table, rows)
+
+    def _fill_goals(self):
+        data = getattr(self, "goal_data", None)
+        if not data:
+            return
+        totals = data["totals"]
+        self.goals_var.set(f"Tonight's goals: {data['team']} +{totals['me']:g}    "
+                           f"{data['opponent']} +{totals['opp']:g}")
+        rows, self.goal_rows = [], []
+        for g in data["goals"]:
+            people = [g["scorer"]] + g["assists"]
+            owners = [p["owner"] for p in people if p["owner"]]
+            if self.goals_fantasy_only.get() and not owners:
+                continue
+            fantasy = []
+            for owner, label in (("me", data["team"]), ("opp", data["opponent"])):
+                mine = [p for p in people if p["owner"] == owner]
+                if mine:
+                    fantasy.append(f"{label} +{sum(p['points'] for p in mine):g} "
+                                   f"({', '.join(p['name'] for p in mine)})")
+            assists = ", ".join(f"{a['name']} ({a['to_date']})" for a in g["assists"]) or "unassisted"
+            scorer = f"{g['scorer']['name']} ({g['scorer']['to_date']})"
+            strength = g["strength"] + (" EN" if g.get("modifier") == "empty-net" else "")
+            rows.append(((f"{period_name(g['period'], g.get('period_type'))} {g['time']}", g["team"], scorer,
+                          assists, strength, g["score"], "; ".join(fantasy), "\u25b6" if g.get("clip") else ""),
+                         owner_tags(owners)))
+            self.goal_rows.append(g)
+        self._set(self.goals_table, rows or [(("", "", "No goals yet.", "", "", "", "", ""), ("empty",))])
+
+    def _pick_goal(self, index):
+        self.goal_picked = self.goal_rows[index] if index < len(self.goal_rows) else None
+
+    def _play_clip(self):
+        clip = (self.goal_picked or {}).get("clip")
+        if clip:
+            webbrowser.open(clip)
+        else:
+            self.echo("click a goal with a clip (\u25b6) first; the NHL posts each clip a few minutes after the goal")
+
+    def _fill_lines(self):
+        data = self.lines_data
+        if not data:
+            return
+        window = self.lines_window.get()
+        note = data.get("note")
+        if note:
+            self.lines_var.set(note)
+        else:
+            missing = data.get("missing_seconds") or 0
+            self.lines_var.set(f"time-on-ice reports through {data.get('as_of')}"
+                               + (f"; {missing // 60}:{missing % 60:02d} of play missing from them" if missing else ""))
+        teams = data.get("teams") or []
+        for i, table in enumerate(self.lines_tables):
+            if i >= len(teams):
+                self.lines_titles[i].set("")
+                self._set(table, [])
+                continue
+            team = teams[i]
+            w = team["windows"][window]
+            self.lines_titles[i].set(f"{team['team']}  (" + ("the last " if window == "recent" else "")
+                                     + f"{w['seconds'] // 60} min of 5v5" + (")" if window == "recent" else " so far)"))
+            rows = []
+
+            def add(label, units, empty):
+                if not units:
+                    rows.append(((label, empty, "", ""), ("empty",)))
+                for u in units:
+                    names = ", ".join(p["name"] + {"me": " (you)", "opp": " (opp)"}.get(p["owner"], "")
+                                      for p in u["players"])
+                    each = ", ".join(f"{p['toi'] // 60}:{p['toi'] % 60:02d}" for p in u["players"])
+                    tags = ("empty",) if u["thin"] else owner_tags([p["owner"] for p in u["players"]])
+                    rows.append(((f"{label}{u['rank']}", names + (" -- not enough ice yet" if u["thin"] else ""),
+                                  f"{u['shared'] // 60}:{u['shared'] % 60:02d}", each), tags))
+
+            add("F", w["forwards"], "no 5v5 yet")
+            add("D", w["defence"], "no 5v5 yet")
+            add("PP", team["pp"], f"under a minute of power play ({team['pp_seconds']} s)")
+            add("PK", team["pk"], f"under a minute shorthanded ({team['sh_seconds']} s)")
+            self._set(table, rows)
 
     # ---------- showing the plan ----------
 

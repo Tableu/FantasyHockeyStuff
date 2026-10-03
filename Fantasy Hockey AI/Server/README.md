@@ -16,6 +16,18 @@ behind a small HTTP API, which the plan window (Live/plan_gui.py) shows.
 | POST /refresh {"mode": "full" or "quick"} | Starts a refresh and returns its job; a tap while one runs joins it |
 | GET /jobs/{id}?after=n | The job's state and its progress lines after line n |
 | GET /status | The day, the running job, when each step last ran, the newest plan's file and time |
+| GET /games | Today's games: score, clock, how many of your players and your opponent's are in each |
+| GET /goals | Every goal today, newest first, with the fantasy points it earned either side |
+| GET /games/{id}?after=n | One game: line score, team stats, box score with fantasy points, plays after sortOrder n |
+| GET /games/{id}/lines | Each team's lines, pairs and power-play / penalty-kill units as used |
+
+The live games calls are games.py's: the NHL's public feeds held in memory (nothing goes to the
+database), one shared copy per feed, fetched again only once the NHL's cache says it expired (about
+20 s) and only when someone asks. The lines come from the NHL's HTML time-on-ice reports (about a
+minute behind; asked with If-Modified-Since, which they honour with a 304) and the nightly lineup
+build's clustering. Live, the strength each second comes from who the reports put on the ice, not
+the play-by-play's situation codes, which lag and misreport during a game. Fantasy owners come from
+the newest plan and players.parquet's NHL ids.
 
 The refreshes are planpass.Planner's -- the same steps run_live.py takes -- and save the same plan files.
 The auto window (a quick refresh ~30 minutes before each group of games) runs in the server unless

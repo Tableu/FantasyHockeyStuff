@@ -11,6 +11,11 @@ small HTTP API, which the plan window (Live/plan_gui.py) shows. One league, one 
     POST /refresh {mode}       'full' or 'quick'; returns the job. A tap while a refresh runs joins it
     GET  /jobs/{id}?after=n    the job's state and its progress lines after line n
     GET  /status               the day, the running job, when each step last ran, the newest plan
+    GET  /games                today's games: score, clock, your players and your opponent's on each
+    GET  /goals                every goal today, newest first, with the fantasy points it earned
+    GET  /games/{id}?after=n   one game: line score, team stats, box score with fantasy points, plays
+                               after sortOrder n
+    GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
 
 The refreshes are planpass.Planner's, the same steps as run_live.py's, and save the same plan
 files. The auto window runs here: a quick refresh about 30 minutes before each group of games,
@@ -29,13 +34,17 @@ from pathlib import Path
 LIVE = Path(__file__).resolve().parents[1] / "Live"
 sys.path.insert(0, str(LIVE))
 
+import requests  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import seasonlayer  # noqa: E402,F401 -- puts Season/ on sys.path; see seasonlayer.py
+import games as live_games  # noqa: E402
 import leagues  # noqa: E402
+import paths  # noqa: E402
 import planpass  # noqa: E402
+import simlayer  # noqa: E402
 
 AUTO_CHECK_S = 60               # how often the auto window looks at the clock
 JOBS_KEPT = 20                  # finished jobs /jobs still answers for
@@ -154,6 +163,31 @@ class Refresh(BaseModel):
 
 def make_app(worker: Worker) -> FastAPI:
     app = FastAPI(title="Fantasy hockey plan server")
+    feeds = live_games.Games(worker.newest_plan, simlayer.load_scoreset(worker.league.scoring),
+                             paths.players())
+
+    def nhl(call, *args):
+        """A live-games call; the NHL unreachable is a 502, not a crash."""
+        try:
+            return call(*args)
+        except requests.RequestException as error:
+            raise HTTPException(502, f"NHL feed: {type(error).__name__}: {error}")
+
+    @app.get("/games")
+    def get_games():
+        return nhl(feeds.games)
+
+    @app.get("/goals")
+    def get_goals():
+        return nhl(feeds.goals)
+
+    @app.get("/games/{game_id}")
+    def get_game(game_id: int, after: int = -1):
+        return nhl(feeds.game, game_id, after)
+
+    @app.get("/games/{game_id}/lines")
+    def get_lines(game_id: int):
+        return nhl(feeds.lines, game_id)
 
     @app.get("/plan")
     def get_plan():
