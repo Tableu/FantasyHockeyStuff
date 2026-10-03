@@ -14,6 +14,7 @@ command line -- the same one-line format as AggregateWorkbook/databaseCredential
 """
 
 import argparse
+import os
 import shlex
 from pathlib import Path
 
@@ -33,9 +34,11 @@ def connection_string(path: Path = CREDENTIALS_PATH) -> str:
     for flag in ("-S", "-U", "-P", "-d"):
         parser.add_argument(flag)
     args, _ = parser.parse_known_args(tokens[1:])
+    # NHLSTATS_DB_SERVER replaces the file's -S (the test container: host.docker.internal).
+    server = os.environ.get("NHLSTATS_DB_SERVER") or args.S
     return (
         "DRIVER={ODBC Driver 18 for SQL Server};"
-        f"SERVER={args.S};DATABASE={args.d};UID={args.U};PWD={args.P};"
+        f"SERVER={server};DATABASE={args.d};UID={args.U};PWD={args.P};"
         "Encrypt=yes;TrustServerCertificate=yes;"
     )
 

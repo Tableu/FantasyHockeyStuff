@@ -1,24 +1,26 @@
 #!/usr/bin/env python
 """The daily plan, in a window -- the in-season counterpart of draft_gui.py, one league per run.
 
-    python plan_gui.py                              # league beagles, today
-    python plan_gui.py --league <name>
-    python plan_gui.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json   # rehearsal
+    python plan_gui.py                              # the plan server at 127.0.0.1:8000, league beagles
+    python plan_gui.py --server http://host:8000
+    python plan_gui.py --league <name>              # a server planning that league
 
-Nothing is scheduled: the plan runs when the window opens and while it stays open (planpass.py,
-the same steps run_live.py takes):
+The window is the plan server's (Server/server.py) and runs none of the steps itself (planpass.py,
+the server's refreshes). The day, the league's source and rehearsal options (--date,
+--league-file, --now, --skip-snapshots) are the server's too.
 
     Full refresh    fresh injury, line-chart and goalie reports -> tonight's projections -> read the
-                    league from its platform -> the shipped manager's plan. Runs on opening, where
-                    the injury report is fetched fresh but never as Fleaflicker's whole listing.
+                    league from its platform -> the shipped manager's plan
     Quick refresh   injury and goalie reports -> tonight's projections -> the plan again (lineup
-                    news, late scratches) -- what the auto window runs.
-    Auto window     while the window is open, a quick refresh about 30 minutes before each group of
-                    games starts (Fleaflicker locks each player at his own game), once per group.
+                    news, late scratches) -- what the auto window runs
+    Auto window     the server's: a quick refresh about 30 minutes before each group of games
+                    (Fleaflicker locks each player at his own game), once per group
 
-Every run is also saved as reports/<league>/plans/plan_{date}_{time}.md + .json, and on opening
-today's last saved plan is shown at once while the first refresh runs. Recommend-only:
-make the moves on the platform yourself.
+On opening the window shows the server's newest plan (a full refresh there when it has none
+today); its buttons start the server's refreshes and stream their progress; every minute it looks
+at the server and follows a refresh the server runs, or picks up a newer plan. The server saves
+every plan as reports/<league>/plans/plan_{date}_{time}.md + .json. Recommend-only: make the moves
+on the platform yourself.
 
     Tonight      tonight's lineup from the roster you hold now: expected points, chance he plays /
                  starts, puck time (local), injury / GTD flag and a lock once his game has started;
@@ -61,7 +63,10 @@ import logging
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
+import urllib.error
+import urllib.request
 from tkinter import ttk
 
 import pandas as pd
@@ -69,13 +74,13 @@ import pandas as pd
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import draft_board
 import leagues
-import live
-import livepaths
-import planpass
 import sheets
 import simlayer
 
-AUTO_CHECK_MS = 60_000          # how often the auto window looks at the clock
+WATCH_MS = 60_000               # how often the window looks at the server
+JOB_POLL_S = 1                  # how often a running refresh's progress is fetched
+SERVER_TIMEOUT_S = 30
+DEFAULT_SERVER = "http://127.0.0.1:8000"
 PLAN_COLOUR = "#e0ecff"         # a row the plan recommends acting on
 STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": "#fff4d6"}
 # A row's look by its tags: a recommended action, an injury status, greyed (a placeholder message).
@@ -88,16 +93,48 @@ ROSTER_HIDDEN = {"per_game", "plays_tonight", "plan", "where"}
 FREE_AGENTS_HIDDEN = {"plan", "where"}
 
 
-def utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0)
-
-
 def local_time(utc_text) -> str:
     """'2026-09-29 23:00:00' (UTC) -> '4:00 PM' on this PC's clock."""
     if not utc_text or utc_text in ("None", "NaT"):
         return ""
     stamp = pd.Timestamp(utc_text).tz_localize("UTC").tz_convert(dt.datetime.now().astimezone().tzinfo)
     return stamp.strftime("%I:%M %p").lstrip("0")
+
+
+def clock(when: dt.datetime) -> str:
+    return when.strftime("%I:%M %p").lstrip("0")
+
+
+class Server:
+    """The plan server (Server/server.py) over HTTP."""
+
+    def __init__(self, url):
+        self.url = url.rstrip("/")
+
+    def _call(self, path, body=None):
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(self.url + path, data=data,
+                                         headers={"Content-Type": "application/json"} if data else {})
+        with urllib.request.urlopen(request, timeout=SERVER_TIMEOUT_S) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def plan(self):
+        """{file, saved_at, plan}: the day's newest saved plan, or None before the first."""
+        try:
+            return self._call("/plan")
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return None
+            raise
+
+    def status(self):
+        return self._call("/status")
+
+    def refresh(self, mode):
+        return self._call("/refresh", {"mode": mode})
+
+    def job(self, job_id, after=0):
+        return self._call(f"/jobs/{job_id}?after={after}")
 
 
 def _action(plan):
@@ -125,18 +162,18 @@ class PlanWindow:
     def __init__(self, root, args):
         self.root, self.args = root, args
         self.league = leagues.load(args.league)
-        self.day = dt.date.fromisoformat(args.date) if args.date else dt.date.today()
-        self.runner = None                 # built once per day on the first run (the board, the sampler)
+        self.server = Server(args.server)
+        self.served = {}                   # the server's last /status and the shown plan's file
+        self.watching = False              # a /status look under way
         self.plan = None
         self.busy = False
-        self.windows_done = set()          # puck times already re-planned by the auto window
-        self.last = {}                     # step -> when this window last ran it
         self.messages = queue.Queue()
         # Sortable tables: name -> [column key, descending]. The roster keeps the plan's order until
         # a header is clicked; the free agents start best rate first.
         self.sorts = {"roster": [None, False], "free_agents": ["rate", True]}
 
-        root.title(f"Plan -- {self.league.name}: {self.league.team_name or 'my team'}")
+        root.title(f"Plan -- {self.league.name}: {self.league.team_name or 'my team'}"
+                   + f" (server {self.server.url})")
         root.geometry("1400x820")
         style = ttk.Style(root)
         if "vista" in style.theme_names():
@@ -195,11 +232,7 @@ class PlanWindow:
         body.add(self._build_sidebar(body), weight=1)
 
         root.after(200, self._drain)
-        root.after(AUTO_CHECK_MS, self._auto_check)
-        saved = self._show_saved()
-        self.run("full")
-        if saved:
-            self.status_var.set(f"Showing the plan saved at {saved} -- full refresh running...")
+        self._open()
 
     # ---------- layout ----------
 
@@ -208,8 +241,8 @@ class PlanWindow:
         bar.pack(fill="x")
         self.headline = tk.StringVar(value="Starting...")
         ttk.Label(bar, textvariable=self.headline, style="Big.TLabel").pack(side="left")
-        self.auto = tk.BooleanVar(value=not self.args.no_auto)
-        ttk.Checkbutton(bar, text="Auto: re-plan before each game window", variable=self.auto).pack(side="right", padx=8)
+        self.auto_var = tk.StringVar(value="Auto: the server's")
+        ttk.Label(bar, textvariable=self.auto_var).pack(side="right", padx=8)
         self.quick_button = ttk.Button(bar, text="Quick refresh", command=lambda: self.run("quick"))
         self.quick_button.pack(side="right", padx=4)
         self.full_button = ttk.Button(bar, text="Full refresh", command=lambda: self.run("full"))
@@ -248,30 +281,13 @@ class PlanWindow:
         self.log.pack(fill="both", expand=True)
         return side
 
-    def _show_saved(self):
-        """Today's last saved plan (reports/<league>/plans), shown at once while the opening
-        refresh runs -- instead of an empty window for most of a minute. Returns its time, or
-        None when there is none (or it predates a change to what the tables read)."""
-        plans = livepaths.league_reports(self.league.name) / "plans"
-        files = sorted(plans.glob(f"plan_{self.day.isoformat()}_*.json"), key=lambda f: f.stat().st_mtime)
-        if not files:
-            return None
-        try:
-            self.plan = json.loads(files[-1].read_text(encoding="utf-8"))
-            self.show()
-        except Exception as error:                     # noqa: BLE001 -- the refresh replaces it anyway
-            self.plan = None
-            self.echo(f"saved plan {files[-1].name} not shown: {type(error).__name__}: {error}")
-            return None
-        return dt.datetime.fromtimestamp(files[-1].stat().st_mtime).strftime("%I:%M %p").lstrip("0")
-
-    # ---------- running a pass ----------
+    # ---------- the server's refreshes ----------
 
     def echo(self, text):
         self.messages.put(("log", f"{dt.datetime.now():%H:%M:%S}  {text}"))
 
     def run(self, mode):
-        """Start a pass on a worker thread: 'full' or 'quick'."""
+        """Start a refresh on the server, followed on a worker thread: 'full' or 'quick'."""
         if self.busy:
             return
         self.busy = True
@@ -279,33 +295,6 @@ class PlanWindow:
         self.quick_button.state(["disabled"])
         self.status_var.set("Full refresh running..." if mode == "full" else "Quick refresh running...")
         threading.Thread(target=self._work, args=(mode,), daemon=True).start()
-
-    def _work(self, mode):
-        args = self.args
-        try:
-            now = dt.datetime.fromisoformat(args.now) if args.now else utc_now()
-            if not args.skip_snapshots:
-                kinds = planpass.SNAPSHOT_KINDS if mode == "full" else planpass.QUICK_SNAPSHOT_KINDS
-                # Every refresh fetches injuries; between full listings that is about 4
-                # Fleaflicker calls, far from the ~100-call lockout. Opening never takes the
-                # whole 44-page listing (the 10:00 / 15:00 runs do, at least every 20 h).
-                opening = not self.last
-                fetched = planpass.snapshots(kinds, self.echo, injuries_targeted=opening)
-                for kind in fetched:                   # a reused report keeps its own time
-                    self.last[kind] = dt.datetime.now()
-            planpass.tonight(self.day, self.echo)
-            self.last["projections"] = dt.datetime.now()
-            if self.runner is None:
-                self.echo("building the board and the sampler (once a day)...")
-                self.runner = live.LiveRunner(self.day, self.league)
-            snapshot = planpass.read_league(self.league, self.day, args.league_file, args.platform_season,
-                                            self.echo, now=now)
-            self.last["league read"] = dt.datetime.now()
-            plan = planpass.plan(self.runner, snapshot, now, self.echo)
-            planpass.save(self.league, plan, self.day, f"{now:%H%M}", self.echo)
-            self.messages.put(("plan", plan))
-        except BaseException as error:           # SystemExit from a step included: show it, keep the window
-            self.messages.put(("error", f"{type(error).__name__}: {error}"))
 
     def _drain(self):
         while not self.messages.empty():
@@ -315,10 +304,31 @@ class PlanWindow:
                 self.log.insert("end", payload + "\n")
                 self.log.see("end")
                 self.log.configure(state="disabled")
-            elif kind == "plan":
-                self.plan = payload
-                self._finished(f"Plan updated {dt.datetime.now():%I:%M %p}".replace(" 0", " "))
+            elif kind == "served":                # (/plan's answer, 'updated' or 'saved')
+                body, how = payload
+                self.plan, self.served["file"] = body["plan"], body["file"]
+                if how == "updated":
+                    self._finished(f"Plan updated {dt.datetime.now():%I:%M %p}".replace(" 0", " "))
+                else:
+                    saved = clock(dt.datetime.fromisoformat(body["saved_at"]))
+                    self.status_var.set(f"Showing the server's plan saved at {saved}")
+                    self._show_freshness()
                 self.show()
+            elif kind == "status":                # the server's /status
+                self.served["status"] = payload
+                self.auto_var.set("Auto: the server's (on)" if payload.get("auto") else "Auto: off on the server")
+                self._show_freshness()
+            elif kind == "follow":                # a refresh the server started on its own
+                if not self.busy:
+                    self.busy = True
+                    self.full_button.state(["disabled"])
+                    self.quick_button.state(["disabled"])
+                    self.status_var.set(f"Server refresh running ({payload['by']})...")
+                    threading.Thread(target=self._follow, args=(payload["id"],), daemon=True).start()
+            elif kind == "start":
+                self.run(payload)
+            elif kind == "watched":
+                self.watching = False
             elif kind == "error":
                 self.echo(payload)
                 self._finished("Last run failed -- see Progress")
@@ -331,17 +341,82 @@ class PlanWindow:
         self.status_var.set(status)
         self._show_freshness()
 
-    def _auto_check(self):
-        """While open: a quick refresh ~30 minutes before each group of games, once per group."""
+    def _open(self):
+        """On opening: the server's newest plan, a refresh it is running followed, or a full
+        refresh there when it has no plan today."""
+        def work():
+            try:
+                status = self.server.status()
+                if status["league"] != self.league.name:
+                    raise RuntimeError(f"the server plans {status['league']}, not {self.league.name}: "
+                                       f"open the window with --league {status['league']}")
+                self.messages.put(("status", status))
+                body = self.server.plan()
+                if body is not None:
+                    self.messages.put(("served", (body, "saved")))
+                if status["job"] is not None:
+                    self.messages.put(("follow", status["job"]))
+                elif body is None:
+                    self.echo(f"the server has no plan for {status['day']} yet -- full refresh")
+                    self.messages.put(("start", "full"))
+            except Exception as error:  # noqa: BLE001 -- show it, keep the window
+                self.messages.put(("error", f"server {self.server.url}: {type(error).__name__}: {error}"))
+        self.status_var.set(f"Reading the server at {self.server.url}...")
+        threading.Thread(target=work, daemon=True).start()
+        self.root.after(WATCH_MS, self._watch)
+
+    def _work(self, mode):
         try:
-            now = dt.datetime.fromisoformat(self.args.now) if self.args.now else utc_now()
-            window = planpass.next_window(self.day, now) if self.auto.get() and not self.busy else None
-            if window is not None and window not in self.windows_done:
-                self.windows_done.add(window)
-                self.echo(f"auto: games at {local_time(str(window))} start soon -- re-planning")
-                self.run("quick")
+            job = self.server.refresh(mode)
+            if job["mode"] != mode:
+                self.echo(f"the server is already running a {job['mode']} refresh -- following it")
+            self._follow(job["id"])
+        except Exception as error:  # noqa: BLE001
+            self.messages.put(("error", f"server {self.server.url}: {type(error).__name__}: {error}"))
+
+    def _follow(self, job_id):
+        """A server refresh's progress lines until it ends, then its plan (on a worker thread)."""
+        try:
+            after = 0
+            while True:
+                job = self.server.job(job_id, after)
+                for line in job["lines"]:
+                    self.messages.put(("log", line))
+                after = job["next"]
+                if job["state"] != "running":
+                    break
+                time.sleep(JOB_POLL_S)
+            self.messages.put(("status", self.server.status()))
+            if job["state"] == "failed":
+                self.messages.put(("error", f"server refresh failed: {job['error']}"))
+            else:
+                self.messages.put(("served", (self.server.plan(), "updated")))
+        except Exception as error:  # noqa: BLE001
+            self.messages.put(("error", f"server {self.server.url}: {type(error).__name__}: {error}"))
+
+    def _watch(self):
+        """Every minute: follow a refresh the server started (its auto window), or pick up a newer
+        plan than the one shown."""
+        def work():
+            try:
+                status = self.server.status()
+                self.messages.put(("status", status))
+                if status["job"] is not None:
+                    self.messages.put(("follow", status["job"]))
+                elif status["plan_file"] and status["plan_file"] != self.served.get("file"):
+                    body = self.server.plan()
+                    if body is not None:
+                        self.messages.put(("served", (body, "saved")))
+            except Exception as error:  # noqa: BLE001 -- a missed look; the next one tries again
+                self.echo(f"server not reached: {type(error).__name__}: {error}")
+            finally:
+                self.messages.put(("watched", None))
+        try:
+            if not self.busy and not self.watching:
+                self.watching = True
+                threading.Thread(target=work, daemon=True).start()
         finally:
-            self.root.after(AUTO_CHECK_MS, self._auto_check)
+            self.root.after(WATCH_MS, self._watch)
 
     # ---------- showing the plan ----------
 
@@ -548,24 +623,23 @@ class PlanWindow:
                            descending=descending)
 
     def _show_freshness(self):
-        lines = [f"{step}: {when:%I:%M %p}".replace(" 0", " ") for step, when in self.last.items()]
-        if self.args.skip_snapshots:
+        status = self.served.get("status")
+        if not status:
+            return
+        lines = [f"{step}: {clock(dt.datetime.fromisoformat(when))}" for step, when in status["last"].items()]
+        if status.get("skip_snapshots"):
             lines.append("reports: from the scheduled snapshots (--skip-snapshots)")
-        if self.args.league_file:
-            lines.append(f"league: {self.args.league_file} (not the platform)")
+        if status.get("league_file"):
+            lines.append(f"league: {status['league_file']} (not the platform)")
+        lines.append(f"server: {self.server.url}, day {status['day']}")
         self.fresh_var.set("\n".join(lines))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--league", default=leagues.DEFAULT_LEAGUE, help="A league in Settings/leagues/")
-    parser.add_argument("--date", default=None, help="Game date (default: today on this PC)")
-    parser.add_argument("--league-file", default=None, help="A league snapshot JSON instead of the platform")
-    parser.add_argument("--platform-season", type=int, default=None, help="Read a past season's league (rehearsal)")
-    parser.add_argument("--now", default=None, help="UTC moment for the per-game lock (default: now; rehearsal)")
-    parser.add_argument("--no-auto", action="store_true", help="Start with the auto window off")
-    parser.add_argument("--skip-snapshots", action="store_true",
-                        help="Use the scheduled snapshots instead of taking fresh ones (faster)")
+    parser.add_argument("--server", default=DEFAULT_SERVER,
+                        help=f"The plan server's address (default {DEFAULT_SERVER}; Server/server.py)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
     root = tk.Tk()

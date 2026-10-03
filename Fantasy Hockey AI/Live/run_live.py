@@ -16,8 +16,9 @@ drafting the consensus board) to exercise the runner against:
 Projections/project_tonight.py). `--now` (UTC) sets the moment the per-game lock is judged at.
 
 `--window` plans only when a group of games starts within 30 minutes of now and that group has no
-plan yet (plan_{date}_w{HHMM}.md, the puck time). The window version of all this is plan_gui.py,
-which runs these same steps (planpass.py) when it is opened and while it stays open.
+plan yet (plan_{date}_w{HHMM}.md, the puck time). The server version of all this is
+Server/server.py (shown by plan_gui.py), which runs these same steps (planpass.py) when asked and
+before each group of games.
 """
 
 import argparse

@@ -9,8 +9,9 @@ draft_board.py      the VOR board from the external sources' consensus (reports/
 draft_assistant.py  draft night in the terminal: follows the live draft (Fleaflicker), or --standalone
 draft_gui.py        the same in a window
 live.py             the live runner: the shipped manager on the real league (see its docstring)
-plan_gui.py         the day's plan in a window: runs a pass on opening, Full / Quick refresh buttons,
-                    and (while open) a quick re-plan ~30 min before each group of games
+plan_gui.py         the day's plan in a window, from the plan server (Server/server.py): its newest
+                    plan on opening, Full / Quick refresh buttons that run on the server, and the
+                    server's own re-plan ~30 min before each group of games followed as it runs
 run_live.py         the same pass in the terminal (reports/<league>/plans/plan_{date}_*.md)
 planpass.py         the pass's steps, shared by both: snapshots, tonight, read league, plan, save
 sheets.py           the windows' read-only tksheet tables: row colours by tag, header-click sorting
@@ -38,9 +39,8 @@ python draft_assistant.py --league <an espn league>         # an ESPN draft, onc
 python draft_gui.py --league espn-la --standalone --slot 1  # a live ESPN draft: double-click every pick
 python draft_assistant.py --league espn --slot 10           # an unreadable draft: type picks
 python draft_gui.py                                         # the window
-python plan_gui.py                                          # today's plan (league beagles)
-python plan_gui.py --league espn-la                        # today's plan for the ESPN league
-python plan_gui.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --now "2026-09-29 23:30"
+python plan_gui.py                                          # today's plan from the server at 127.0.0.1:8000
+python plan_gui.py --server http://host:8000                # another server (one per league: --league to match)
 python run_live.py --make-fake                              # fixtures/beagles/fake_league.json
 python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh
 python run_live.py --date 2026-09-29 --platform-season 2025          # rehearse on 12090's 2025 rosters
@@ -60,9 +60,10 @@ waivers is a claim, not an add), and moves used this week (each team's
 a league that has one -- espn-la reports none and allows 6 a week -- so check the limit in
 `Settings/rosters/<league>.json` after `import_league_settings.py`.
 
-Plans are never scheduled -- they run when you open plan_gui.py (or call run_live.py). Task
-Scheduler keeps only the injury / line / goalie snapshots and the nightly ingest running, so the
-window's data is fresh; `--skip-snapshots` uses those instead of taking new ones.
+Plans run in the plan server (Server/server.py: when the window asks, and its auto window) or
+when you call run_live.py. Task Scheduler keeps the injury snapshots and the nightly ingest
+running; the server's `--skip-snapshots` uses those instead of taking new ones, and its `--date`,
+`--league-file` and `--now` are the rehearsal options plan_gui.py used to take.
 
 The in-season inputs come from the other folders: tonight's projections from
 `ModelFeatures/build_tonight.py` + `Projections/project_tonight.py` (run by `--refresh`), the

@@ -1,0 +1,15 @@
+# What the server's steps import: pipeline/requirements.txt and the Fantasy Hockey AI folders'
+# requirements, without the desktop-only packages (tksheet: the plan window's tables) and the
+# preseason projection importers' workbook readers (tableauhyperapi, openpyxl).
+fastapi>=0.115
+google-auth>=2.30
+gspread>=6.0
+lightgbm>=4.5
+numpy>=1.26
+pandas>=2.2
+pyarrow>=17
+pyodbc>=5.0
+requests>=2.31
+scikit-learn>=1.5
+scipy>=1.14
+uvicorn>=0.30

@@ -1,5 +1,5 @@
-"""One plan pass, as steps both front ends call: run_live.py (the terminal) and plan_gui.py (the
-window). Nothing here is scheduled -- a pass runs when one of them asks.
+"""One plan pass, as steps run_live.py (the terminal) and the plan server (Server/server.py,
+which plan_gui.py shows) call. Nothing here is scheduled -- a pass runs when one of them asks.
 
     snapshots(kinds)   fresh injury / line-chart / starting-goalie reports into the Live schema
                        (pipeline/snapshot_live.py -- lines and goalies run only from here; injuries
@@ -13,7 +13,8 @@ window). Nothing here is scheduled -- a pass runs when one of them asks.
     plan(...)          the shipped manager's plan (live.LiveRunner)
     save(...)          reports/<league>/plans/plan_{date}_{stem}.md + .json + plan_latest.md
 
-Each step reports progress through `echo` (print by default; the window passes its log pane).
+Planner runs them in order as one refresh (full or quick) -- the server's passes. Each step
+reports progress through `echo` (print by default; the server passes its job's progress lines).
 """
 
 import datetime as dt
@@ -138,3 +139,44 @@ def save(league, result: dict, day: dt.date, stem: str, echo=print):
     shutil.copyfile(path, plans_dir / "plan_latest.md")
     echo(f"saved {path.name}")
     return path
+
+
+def saved_plans(league, day: dt.date) -> list:
+    """The day's saved plan JSONs, oldest first."""
+    plans = livepaths.league_reports(league.name) / "plans"
+    return sorted(plans.glob(f"plan_{day.isoformat()}_*.json"), key=lambda f: f.stat().st_mtime)
+
+
+class Planner:
+    """One league's refreshes for one day, as the server runs them: the
+    steps above in order, the board and sampler built once, and when each step last ran."""
+
+    def __init__(self, league, day: dt.date, league_file=None, platform_season=None,
+                 skip_snapshots=False):
+        self.league, self.day = league, day
+        self.league_file, self.platform_season = league_file, platform_season
+        self.skip_snapshots = skip_snapshots
+        self.runner = None                 # built on the first run (the board, the sampler)
+        self.last = {}                     # step -> when it last ran
+
+    def run(self, mode: str, now: dt.datetime, echo=print) -> dict:
+        """A 'full' or 'quick' refresh; returns the plan, already saved."""
+        if not self.skip_snapshots:
+            kinds = SNAPSHOT_KINDS if mode == "full" else QUICK_SNAPSHOT_KINDS
+            # Every refresh fetches injuries; between full listings that is about 4 Fleaflicker
+            # calls, far from the ~100-call lockout. The first refresh never takes the whole
+            # 44-page listing (the 10:00 / 15:00 runs do, at least every 20 h).
+            fetched = snapshots(kinds, echo, injuries_targeted=not self.last)
+            for kind in fetched:                   # a reused report keeps its own time
+                self.last[kind] = dt.datetime.now()
+        tonight(self.day, echo)
+        self.last["projections"] = dt.datetime.now()
+        if self.runner is None:
+            echo("building the board and the sampler (once a day)...")
+            self.runner = live.LiveRunner(self.day, self.league)
+        snapshot = read_league(self.league, self.day, self.league_file, self.platform_season,
+                               echo, now=now)
+        self.last["league read"] = dt.datetime.now()
+        result = plan(self.runner, snapshot, now, echo)
+        save(self.league, result, self.day, f"{now:%H%M}", echo)
+        return result

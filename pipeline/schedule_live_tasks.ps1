@@ -9,8 +9,8 @@
 #   FantasyHockey-PlayerTeams   05:00 daily               import_player_teams.py: new signings, then
 #                               each projected / league-pool player's NHL team (~12 min)
 #
-# The line-chart and starting-goalie snapshots are not scheduled: they run only while the plan
-# window is open (Fantasy Hockey AI/Live/plan_gui.py, via planpass.py), which also takes an injury
+# The line-chart and starting-goalie snapshots are not scheduled: the plan server takes them
+# (Fantasy Hockey AI/Server/server.py, via planpass.py) on each refresh, with an injury
 # snapshot. Their old tasks -- FantasyHockey-LiveLines, -LiveGoalies -- are still removed here if
 # present.
 #

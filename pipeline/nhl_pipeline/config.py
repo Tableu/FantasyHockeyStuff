@@ -3,6 +3,7 @@ lives in exactly one place, and builds the pyodbc connection string from it."""
 
 import argparse
 import json
+import os
 import shlex
 from pathlib import Path
 
@@ -23,7 +24,10 @@ def load_db_config(path: Path = CREDENTIALS_PATH) -> dict:
     parser.add_argument("-d")
     args, _ = parser.parse_known_args(tokens[1:])
 
-    return {"server": args.S, "user": args.U, "password": args.P, "database": args.d}
+    # NHLSTATS_DB_SERVER replaces the file's -S: in the test container the PC's SQL Server is
+    # host.docker.internal, not the file's localhost (Fantasy Hockey AI/Server/README.md).
+    server = os.environ.get("NHLSTATS_DB_SERVER") or args.S
+    return {"server": server, "user": args.U, "password": args.P, "database": args.d}
 
 
 def build_connection_string(cfg: dict) -> str:

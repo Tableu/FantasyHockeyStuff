@@ -1,0 +1,21 @@
+# The test server on this PC, capped like the Azure B2ats v2 VM (2 vCPU, 1 GiB RAM, plus swap).
+#   docker compose up -d --build        (from this folder) starts it with the plan server running
+#   docker compose exec server bash      a shell in it, the repo at /app
+#   docker compose logs -f server        the server's output
+services:
+  server:
+    build: .
+    image: fantasy-hockey-server
+    cpus: 2
+    mem_limit: 1g
+    memswap_limit: 3g          # 1 GiB of memory + 2 GiB of swap, as the VM will have
+    environment:
+      NHLSTATS_DB_SERVER: host.docker.internal   # the PC's SQL Server (TCP 1433)
+      TZ: America/Vancouver                      # "today" is the PC's local day, as on Windows
+    volumes:
+      - ../..:/app             # the repo: code, Settings, models and data files
+    ports:
+      - "127.0.0.1:8000:8000"  # the server's API, from this PC only (Phase 1.5)
+    working_dir: "/app/Fantasy Hockey AI/Server"
+    command: ["python", "server.py", "--host", "0.0.0.0"]   # the plan server (plan_gui.py shows it)
+    restart: unless-stopped    # back up when Docker Desktop starts, until `docker compose down`
