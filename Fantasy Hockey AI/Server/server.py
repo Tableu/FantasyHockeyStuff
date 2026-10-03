@@ -24,8 +24,9 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
-read, plan and saved plan files -- one league's failure (its platform down) leaves the others'
-plans. The auto window runs here: a quick refresh about 30 minutes before each group of games, once
+read, plan and saved plan files in a child process that exits after -- so the server's memory does
+not grow with the leagues it plans -- and one league's failure (its platform down) leaves the
+others' plans. The auto window runs here: a quick refresh about 30 minutes before each group of games, once
 per group, for every league. The live games' NHL feeds are fetched once for all leagues; each league
 sees them with its own rosters and scoring. No login yet: it listens on this PC only until it has
 one.
@@ -87,7 +88,8 @@ class Job:
 
 class Worker:
     """Runs one refresh at a time on its own thread, for every league served; keeps the day's
-    Planner (each league's board and sampler are built once a day) and the recent jobs."""
+    Planner (when each step last ran) and the recent jobs. The leagues are planned in a child
+    process per refresh (planpass.plan_in_child), so this process stays small."""
 
     def __init__(self, args):
         self.args = args
@@ -136,9 +138,7 @@ class Worker:
                                                 a.platform_season, a.skip_snapshots)
             results = self.planner.run(job.mode, self.now(), job.echo)
             failed = {name: r for name, r in results.items() if isinstance(r, BaseException)}
-            for name in results:
-                if name not in failed:
-                    job.plan_files[name] = planpass.saved_plans(self.leagues[name], day)[-1].name
+            job.plan_files = {name: r for name, r in results.items() if name not in failed}
             if failed:
                 job.error = "; ".join(f"{name}: {type(e).__name__}: {e}" for name, e in failed.items())
             job.state = "failed" if len(failed) == len(results) else "done"

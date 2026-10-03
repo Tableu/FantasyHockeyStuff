@@ -51,9 +51,10 @@ Needs Docker Desktop (it installs WSL2).
     cd /app/pipeline && python snapshot_live.py --kind injuries --dry-run
     docker compose down                 # stops it (otherwise it comes back with Docker Desktop)
 
-Memory: with both leagues' boards and samplers loaded the server holds about 480 MiB (2026-10-02;
-about 230 with one), so a late-season build_tonight step (417 MB) brings the container near its
-1 GiB and into swap.
+Memory: the leagues are planned in a child process per refresh (planpass.plan_in_child), which
+exits after, so the server stays the same size however many leagues it plans; it held about 480 MiB
+with two leagues planned in its own process (2026-10-02), of which under 1 MB per league was
+anything it kept.
 
 A rehearsal server (--league, --date, --league-file, --skip-snapshots, --no-auto) runs by hand in the shell
 on another port, e.g. `python server.py --host 0.0.0.0 --port 8001 ...`, which compose does not

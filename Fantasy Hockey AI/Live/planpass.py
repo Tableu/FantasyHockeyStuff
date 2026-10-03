@@ -16,14 +16,29 @@ which plan_gui.py shows) call. Nothing here is scheduled -- a pass runs when one
 Planner runs them in order as one refresh (full or quick) for every league the server plans --
 the data steps once, then each league's read, plan and save. Each step
 reports progress through `echo` (print by default; the server passes its job's progress lines).
+
+The leagues are planned in a child process, as the data steps already are:
+
+    python planpass.py --league beagles --league espn-la --date 2026-10-02 [--now ...]
+
+reads, plans and saves each league in turn (plan_leagues), printing its progress and, last, each
+league's result, then exits. A plan's working memory -- building a board and a sampler, planning --
+is a few hundred MB that a long-running process would keep after use (2026-10-02: the server held
+about 480 MiB with two leagues planned, of which under 1 MB per league was anything it kept); a
+child returns it at exit, so the server's memory no longer grows with the leagues it plans. Building
+a league's board and sampler takes about half a second, so nothing is kept between refreshes.
 """
 
+import argparse
+import collections
 import datetime as dt
 import json
 import os
 import shutil
 import subprocess
 import sys
+import threading
+from pathlib import Path
 
 import pandas as pd
 
@@ -41,6 +56,8 @@ SNAPSHOT_KINDS = ("injuries", "lines", "goalies")
 # along since the Fleaflicker listing reads its pages in parallel (~5 s instead of ~16 s), so a
 # late scratch posted as an injury reaches the next window's plan.
 QUICK_SNAPSHOT_KINDS = ("injuries", "goalies")
+PLAN_TIMEOUT_S = 600            # a planning child still running after this is stopped
+CHILD_ECHO, CHILD_RESULT = "@@echo ", "@@result "     # the planning child's progress and result lines
 
 
 def _run(command, cwd, echo, label):
@@ -148,11 +165,73 @@ def saved_plans(league, day: dt.date) -> list:
     return sorted(plans.glob(f"plan_{day.isoformat()}_*.json"), key=lambda f: f.stat().st_mtime)
 
 
+def plan_leagues(league_names, day: dt.date, now: dt.datetime, league_file=None, platform_season=None,
+                 echo=print) -> dict:
+    """Each league's read, plan and save, in this process: {league name: {"file": the saved plan's
+    name, "read_at": when its league was read} or {"error": why it stopped}} -- one league's failure
+    (its platform down) leaves the others' plans."""
+    import leagues as registry
+
+    results = {}
+    for name in league_names:
+        say = echo if len(league_names) == 1 else (lambda text, name=name: echo(f"{name}: {text}"))
+        try:
+            league = registry.load(name)
+            runner = live.LiveRunner(day, league)
+            snapshot = read_league(league, day, league_file, platform_season, say, now=now)
+            read_at = dt.datetime.now()
+            result = plan(runner, snapshot, now, say)
+            path = save(league, result, day, f"{now:%H%M}", say)
+            results[name] = {"file": path.with_suffix(".json").name, "read_at": read_at.isoformat(timespec="seconds")}
+        except (Exception, SystemExit) as error:
+            say(f"failed: {type(error).__name__}: {error}")
+            results[name] = {"error": f"{type(error).__name__}: {error}"}
+    return results
+
+
+def plan_in_child(league_names, day: dt.date, now: dt.datetime, league_file=None, platform_season=None,
+                  echo=print) -> dict:
+    """plan_leagues in a child process (this file's command line), its progress echoed as it
+    comes; the same result. A child that dies or overruns PLAN_TIMEOUT_S fails every league with
+    the end of what it printed."""
+    command = [sys.executable, str(Path(__file__).resolve()), "--date", day.isoformat(),
+               "--now", now.isoformat(), *(f"--league={name}" for name in league_names)]
+    if league_file:
+        command.append(f"--league-file={league_file}")
+    if platform_season:
+        command.append(f"--platform-season={platform_season}")
+    child = subprocess.Popen(command, cwd=Path(__file__).resolve().parent, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                             env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"})
+    overran = threading.Event()
+    timer = threading.Timer(PLAN_TIMEOUT_S, lambda: (overran.set(), child.kill()))
+    timer.start()
+    tail, result = collections.deque(maxlen=8), None
+    try:
+        for line in child.stdout:
+            line = line.rstrip("\n")
+            if line.startswith(CHILD_ECHO):
+                echo(line[len(CHILD_ECHO):])
+            elif line.startswith(CHILD_RESULT):
+                result = json.loads(line[len(CHILD_RESULT):])
+            elif line.strip():
+                tail.append(line)
+        code = child.wait()
+    finally:
+        timer.cancel()
+    if result is None:
+        why = f"stopped after {PLAN_TIMEOUT_S} s" if overran.is_set() else f"exited {code}"
+        error = f"planning process {why}: " + " | ".join(tail)
+        echo(error)
+        return {name: {"error": error} for name in league_names}
+    return result
+
+
 class Planner:
     """The day's refreshes as the server runs them, for one league or several: the data steps once
     (snapshots, tonight's rows and projections -- they are nobody's league), then each league's
-    read, plan and save. Each league's board and sampler are built once a day. `last` is when each
-    data step last ran; `league_last[name]` when that league was last read."""
+    read, plan and save in a child process (plan_in_child). `last` is when each data step last ran;
+    `league_last[name]` when that league was last read."""
 
     def __init__(self, leagues, day: dt.date, league_file=None, platform_season=None,
                  skip_snapshots=False):
@@ -161,13 +240,12 @@ class Planner:
             raise SystemExit("a league file is one league's snapshot: plan that league alone")
         self.league_file, self.platform_season = league_file, platform_season
         self.skip_snapshots = skip_snapshots
-        self.runners = {}                  # league name -> its LiveRunner, built on its first run
         self.last = {}                     # data step -> when it last ran
         self.league_last = {league.name: {} for league in self.leagues}
 
     def run(self, mode: str, now: dt.datetime, echo=print) -> dict:
-        """A 'full' or 'quick' refresh: {league name: its plan, already saved -- or the error that
-        stopped that league, whose failure (its platform down) leaves the others' plans}."""
+        """A 'full' or 'quick' refresh: {league name: its saved plan's file name -- or, for a league
+        that failed (its platform down; the others still plan), the error as an exception}."""
         if not self.skip_snapshots:
             kinds = SNAPSHOT_KINDS if mode == "full" else QUICK_SNAPSHOT_KINDS
             # Every refresh fetches injuries; between full listings that is about 4 Fleaflicker
@@ -179,19 +257,32 @@ class Planner:
         tonight(self.day, echo)
         self.last["projections"] = dt.datetime.now()
         results = {}
+        outcome = plan_in_child([league.name for league in self.leagues], self.day, now, self.league_file,
+                                self.platform_season, echo)
         for league in self.leagues:
-            say = echo if len(self.leagues) == 1 else (lambda text, name=league.name: echo(f"{name}: {text}"))
-            try:
-                if league.name not in self.runners:
-                    say("building the board and the sampler (once a day)...")
-                    self.runners[league.name] = live.LiveRunner(self.day, league)
-                snapshot = read_league(league, self.day, self.league_file, self.platform_season,
-                                       say, now=now)
-                self.league_last[league.name]["league read"] = dt.datetime.now()
-                result = plan(self.runners[league.name], snapshot, now, say)
-                save(league, result, self.day, f"{now:%H%M}", say)
-                results[league.name] = result
-            except (Exception, SystemExit) as error:
-                say(f"failed: {type(error).__name__}: {error}")
-                results[league.name] = error
+            got = outcome.get(league.name) or {"error": "the planning process said nothing about it"}
+            if "error" in got:
+                results[league.name] = RuntimeError(got["error"])
+                continue
+            self.league_last[league.name]["league read"] = dt.datetime.fromisoformat(got["read_at"])
+            results[league.name] = got["file"]
         return results
+
+
+def main():
+    """The planning child (plan_in_child): progress and result as tagged lines on stdout."""
+    parser = argparse.ArgumentParser(description="Plan leagues: each one's read, plan and save")
+    parser.add_argument("--league", action="append", required=True)
+    parser.add_argument("--date", required=True)
+    parser.add_argument("--now", required=True, help="UTC moment for the per-game lock")
+    parser.add_argument("--league-file", default=None)
+    parser.add_argument("--platform-season", type=int, default=None)
+    args = parser.parse_args()
+    result = plan_leagues(args.league, dt.date.fromisoformat(args.date), dt.datetime.fromisoformat(args.now),
+                          args.league_file, args.platform_season,
+                          echo=lambda text: print(CHILD_ECHO + str(text), flush=True))
+    print(CHILD_RESULT + json.dumps(result), flush=True)
+
+
+if __name__ == "__main__":
+    main()
