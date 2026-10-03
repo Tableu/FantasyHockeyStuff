@@ -134,6 +134,10 @@ def parse_args():
     parser.add_argument("--tag", default=None,
                         help="Suffix for this build's models, predictions and summaries, e.g. "
                              "no-age, so an experiment sits beside the real build")
+    parser.add_argument("--prior", choices=baselines.PRIORS, default="history",
+                        help="The shrunk estimate's prior: the position, or the player's own last "
+                             "three seasons (ros_baselines.add_history; its hist_* columns become "
+                             "features too)")
     parser.add_argument("--out", default="ros_model.json")
     parser.add_argument("--predictions-out", action="store_true",
                         help="Also write every test row's projection, with its realized window, "
@@ -267,6 +271,8 @@ def run(args):
     frames = [baselines.load(s, args.horizon).drop(columns=args.exclude_feature)
               for s in args.train]
     train_all = baselines.add_asof(pd.concat(frames, ignore_index=True))
+    if args.prior == "history":
+        train_all = baselines.add_history(train_all)
     deployment = args.no_holdout
     if deployment:
         if args.test in args.train:
@@ -276,12 +282,14 @@ def run(args):
     else:
         test = baselines.add_asof(baselines.load(args.test, args.horizon)
                                   .drop(columns=args.exclude_feature))
+        if args.prior == "history":
+            test = baselines.add_history(test)
 
     # Fit the shrinkage on the *training* rows only, thinned the same way the ladder was.
     fitted = {}
     ladder_train = baselines.thin(train_all, args.thin_days)
     for factor in baselines.FACTORS:
-        prior = baselines.fit_prior(ladder_train, factor)
+        prior = baselines.fit_prior(ladder_train, factor, args.prior)
         k = baselines.fit_k(ladder_train, factor, prior, args.loss)
         fitted[factor] = {"prior": prior, "k": k}
         fitted[factor]["recency"] = baselines.fit_recency(ladder_train, fitted, factor,

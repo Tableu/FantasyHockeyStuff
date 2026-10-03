@@ -13,8 +13,16 @@ Four rungs, in rising order of what they assume:
     season       season-to-date rate, unshrunk -- the naive answer
     last10       the most recent ten games -- what the per-game model leans on, included
                  precisely to test Section 4's claim that a horizon should discount it
-    shrunk       empirical Bayes toward a positional prior, weighted by evidence
+    shrunk       empirical Bayes toward a prior, weighted by evidence
     blended      shrunk, with a small recency term, for categories where form is real
+
+**The prior** (`--prior`, default `history`): `position`, what a forward or defenceman does; or `history`, the
+player's own last three seasons (Marcel's 5/4/3 weights, from season_totals.parquet), itself shrunk
+toward the position by how much of it there is (`k_hist`). Why history (2026-10-03): moves priced on
+the position-prior model lost 22 pts/wk to the frozen preseason consensus in the realistic league --
+early in a season a star with ten games was shrunk toward an average forward, and the model's error
+ran in the direction of its disagreement with the consensus (+0.38 to -1.28 a team game), i.e. it
+under-weighted the track record the consensus is built on.
 
 The structure being predicted is the one `ros.py` builds:
 
@@ -46,6 +54,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("ros_baselines")
 
 CATEGORIES = ["shots", "hits", "blocks", "assists", "goals", "pim", "ppp", "shp"]
+PRIORS = ("position", "history")
+HISTORY_WEIGHTS = (1.0, 0.8, 0.6)     # last season, the one before, the one before that (Marcel 5/4/3)
+TEAM_GAMES = 82
+SHORT_SEASONS = {"2012-13": 48, "2019-20": 70, "2020-21": 56}
 
 # Each factor: the as-of column, the forward truth, and what its evidence is counted in.
 FACTORS = {
@@ -75,6 +87,9 @@ def parse_args():
                              "overlapping windows do not dominate the averages (default 7)")
     parser.add_argument("--loss", choices=("mae", "mse"), default="mae",
                         help="Loss the shrinkage constants are fitted to (default mae)")
+    parser.add_argument("--prior", choices=PRIORS, default="history",
+                        help="What the shrinkage pulls toward: the position, or the player's own "
+                             "last three seasons (shrunk toward the position)")
     parser.add_argument("--out", default="ros_baselines.json")
     return parser.parse_args()
 
@@ -125,6 +140,48 @@ def add_asof(frame):
     return frame
 
 
+def previous_seasons(season, count):
+    start = int(season[:4])
+    return [f"{year}-{(year + 1) % 100:02d}" for year in range(start - 1, start - 1 - count, -1)]
+
+
+def add_history(frame, totals=None):
+    """Each row's player over his last three seasons, weighted 1 / 0.8 / 0.6: `hist_<factor>` and
+    the weighted evidence behind it, `hist_evidence_<factor>`, in the factor's own units (rates
+    per 60 over minutes, ice time over games, availability over team games). Read from
+    ModelFeatures' season_totals.parquet (the NHL's season lines, back to 2000-01), so a row
+    never sees its own season. A player with no NHL history gets no prior of his own (NaN), and
+    the positional prior stands."""
+    if totals is None:
+        totals = pd.read_parquet(paths.FEATURES_DIR / "season_totals.parquet")
+    totals = totals[~totals["is_goalie"].astype(bool)].copy()
+    totals["team_games"] = totals["season"].map(SHORT_SEASONS).fillna(TEAM_GAMES)
+    totals["hours"] = totals["gp"] * totals["toi_per_game"].fillna(0.0) / 3600.0
+    out = []
+    for season, rows in frame.groupby("season"):
+        parts = []
+        for weight, past in zip(HISTORY_WEIGHTS, previous_seasons(season, len(HISTORY_WEIGHTS))):
+            # A traded player has one row per team; his season is their sum.
+            year = totals[totals["season"] == past].groupby("player_id").agg(
+                gp=("gp", "sum"), hours=("hours", "sum"), team_games=("team_games", "max"),
+                **{c: (c, "sum") for c in CATEGORIES})
+            parts.append(year * weight)
+        history = pd.concat(parts).groupby(level=0).sum(min_count=1)
+        hist = pd.DataFrame(index=history.index)
+        hist["hist_availability"] = (history["gp"] / history["team_games"]).clip(0, 1)
+        hist["hist_evidence_attempts"] = history["team_games"]
+        hist["hist_toi_per_game"] = history["hours"] * 3600.0 / history["gp"].where(history["gp"] > 0)
+        hist["hist_evidence_games"] = history["gp"]
+        for category in CATEGORIES:
+            hist[f"hist_{category}_p60"] = history[category] / history["hours"].where(history["hours"] > 0)
+        hist["hist_evidence_minutes"] = history["hours"]
+        out.append(rows.join(hist, on="player_id"))
+    frame = pd.concat(out).loc[frame.index]
+    for column in [c for c in frame.columns if c.startswith("hist_evidence_")]:
+        frame[column] = frame[column].fillna(0.0)
+    return frame
+
+
 def thin(frame, days):
     """One as-of row per player per `days`, so a window is not counted seven times over."""
     if days <= 1:
@@ -134,17 +191,28 @@ def thin(frame, days):
     return frame.loc[~frame.assign(bucket=bucket).duplicated(["player_id", "bucket"])]
 
 
-def fit_prior(frame, factor):
-    """The positional prior: what a forward or defenceman does, from the training rows."""
+def fit_prior(frame, factor, mode="position"):
+    """The positional prior: what a forward or defenceman does, from the training rows. With
+    mode `history` the prior is the player's own (add_history), shrunk toward that by `k_hist`,
+    which fit_k sets."""
     target = FACTORS[factor]["target"]
     rows = frame[np.isfinite(frame[target])]
     overall = float(rows[target].mean())
     by_position = rows.groupby(rows["position"].astype(str))[target].mean().to_dict()
-    return {"overall": overall, "by_position": {k: float(v) for k, v in by_position.items()}}
+    return {"overall": overall, "by_position": {k: float(v) for k, v in by_position.items()},
+            "mode": mode, "factor": factor, "k_hist": None}
 
 
 def prior_values(frame, prior):
-    return frame["position"].astype(str).map(prior["by_position"]).fillna(prior["overall"])
+    positional = frame["position"].astype(str).map(prior["by_position"]).fillna(prior["overall"])
+    if prior.get("mode", "position") != "history":
+        return positional
+    factor = prior["factor"]
+    evidence_kind = FACTORS[factor]["evidence"]
+    own = frame[f"hist_{factor}"].to_numpy("float64")
+    evidence = frame[f"hist_evidence_{evidence_kind}"].to_numpy("float64")
+    return pd.Series(shrink(own, evidence, positional.to_numpy("float64"), prior["k_hist"]),
+                     index=frame.index)
 
 
 def shrink(asof, evidence, prior, k):
@@ -166,7 +234,8 @@ def fit_k(frame, factor, prior, loss_name="mae"):
     target = frame[spec["target"]].to_numpy("float64")
     asof = frame[f"asof_{factor}"].to_numpy("float64")
     evidence = frame[f"evidence_{spec['evidence']}"].to_numpy("float64")
-    prior_column = prior_values(frame, prior).to_numpy("float64")
+    # The position's column: with a history prior, the player's own is shrunk toward it below.
+    prior_column = prior_values(frame, {**prior, "mode": "position"}).to_numpy("float64")
     good = np.isfinite(target) & np.isfinite(evidence)
     target, asof = target[good], asof[good]
     evidence, prior_column = evidence[good], prior_column[good]
@@ -176,6 +245,25 @@ def fit_k(frame, factor, prior, loss_name="mae"):
         error = predicted - target
         return float(np.mean(np.abs(error)) if loss_name == "mae"
                      else np.mean(error ** 2))
+
+    if prior.get("mode", "position") == "history":
+        # Two constants: how much of his own history outweighs his position (k_hist), and how
+        # much of this season outweighs that (k) -- fitted together, to the same loss.
+        own = frame[f"hist_{factor}"].to_numpy("float64")[good]
+        hist_evidence = frame[f"hist_evidence_{spec['evidence']}"].to_numpy("float64")[good]
+
+        def loss2(logs):
+            player_prior = shrink(own, hist_evidence, prior_column, np.exp(logs[0]))
+            predicted = shrink(asof, evidence, player_prior, np.exp(logs[1]))
+            error = predicted - target
+            return float(np.mean(np.abs(error)) if loss_name == "mae" else np.mean(error ** 2))
+
+        best = min((optimize.minimize(loss2, start, method="Nelder-Mead",
+                                      options={"xatol": 1e-3, "fatol": 1e-7, "maxiter": 400})
+                    for start in ([np.log(10.0), np.log(10.0)], [np.log(200.0), np.log(50.0)])),
+                   key=lambda r: r.fun)
+        prior["k_hist"] = float(np.exp(best.x[0]))
+        return float(np.exp(best.x[1]))
 
     result = optimize.minimize_scalar(loss, bounds=(np.log(1e-3), np.log(1e4)),
                                       method="bounded")
@@ -261,26 +349,31 @@ def run(args):
     train = pd.concat([load(s, args.horizon) for s in args.train], ignore_index=True)
     test = load(args.test, args.horizon)
     train, test = add_asof(train), add_asof(test)
+    if args.prior == "history":
+        train, test = add_history(train), add_history(test)
     train, test = thin(train, args.thin_days), thin(test, args.thin_days)
     log.info("train %d rows (%s), test %d rows (%s), thinned to one row per player per %dd",
              len(train), ", ".join(args.train), len(test), args.test, args.thin_days)
 
     fitted = {}
     for factor in FACTORS:
-        prior = fit_prior(train, factor)
+        prior = fit_prior(train, factor, args.prior)
         k = fit_k(train, factor, prior, args.loss)
         fitted[factor] = {"prior": prior, "k": k}
         fitted[factor]["recency"] = fit_recency(train, fitted, factor, args.loss)
-        log.info("%-16s k %8.2f %-8s prior %7.3f  recency weight %.2f", factor, k,
-                 FACTORS[factor]["evidence"], prior["overall"], fitted[factor]["recency"])
+        log.info("%-16s k %8.2f %-8s prior %7.3f  recency weight %.2f%s", factor, k,
+                 FACTORS[factor]["evidence"], prior["overall"], fitted[factor]["recency"],
+                 "" if prior["k_hist"] is None else f"  k_hist {prior['k_hist']:.2f}")
 
     scoresets = [weights_module.load(w) for w in (args.weights or [])]
     truth = actual_totals(test)
     report = {"train": args.train, "test": args.test, "horizon_days": args.horizon,
               "loss": args.loss,
               "rows": {"train": len(train), "test": len(test)},
+              "prior": args.prior,
               "fitted": {f: {"k": round(v["k"], 3), "recency": round(v["recency"], 3),
-                             "prior": round(v["prior"]["overall"], 4)}
+                             "prior": round(v["prior"]["overall"], 4),
+                             "k_hist": v["prior"]["k_hist"]}
                          for f, v in fitted.items()},
               "rungs": {}}
 
