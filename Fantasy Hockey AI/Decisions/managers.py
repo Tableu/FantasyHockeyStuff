@@ -641,15 +641,23 @@ class FullSystem(Manager):
             healthy = view.healthy_rate(returning)
             if healthy is not None:
                 rates[returning] = max(rates[returning], healthy)
-        nights = valuation.RosterNights(view, full, rates, horizon, self.slot_order,
-                                        eligibility, self.accepts)
-        def cost(d):
+        mode = getattr(self.strategy, "activation_drop", "window")
+
+        def unknown(d):
             # Unknown is not worthless: a player nobody has projected is never the forced drop
             # while anyone else would do.
-            if d != returning and not valuation.known(view, d, source):
-                return float("inf")
-            return nights.removal_cost(d)
+            return d != returning and not valuation.known(view, d, source)
 
+        nights = valuation.RosterNights(view, full, rates, horizon, self.slot_order,
+                                        eligibility, self.accepts)
+
+        def cost(d):
+            return float("inf") if unknown(d) else nights.removal_cost(d)
+
+        # strategy roster.activation_drop: `window` skips the fillability constraint
+        # (strategy.ACTIVATION_DROPS has what each mode measured).
+        if mode == "window":
+            return min(full, key=lambda d: (cost(d), d))
         return self._cheapest_safe_drop(view, returning, cost)
 
 
@@ -900,7 +908,7 @@ VOR_TWIN = 10
 # beside the incumbent rung 17 so the pair differ in those parameters and nothing else.
 CANDIDATE, CANDIDATE_OF = 27, 17
 # What a candidate may change: the two transaction blocks, and the repair wait (roster).
-TUNABLE = ("adddrop", "streaming", "repair_wait_days")
+TUNABLE = ("adddrop", "streaming", "repair_wait_days", "activation_drop")
 
 
 def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, replication=0,

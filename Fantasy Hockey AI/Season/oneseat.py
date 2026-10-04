@@ -159,7 +159,8 @@ def summary(result) -> str:
 
 
 def with_settings(base, settings):
-    """`block.key=value` overrides of the add/drop and streaming blocks, and roster.repair_wait_days."""
+    """`block.key=value` overrides of the add/drop and streaming blocks, and the roster block
+    (repair_wait_days, activation_drop)."""
     changes = {"adddrop": {}, "streaming": {}, "roster": {}}
     for item in settings:
         key, _, raw = item.partition("=")

@@ -84,12 +84,13 @@ def _plain(value):
 def params_of(strategy) -> dict:
     return {"adddrop": {k: _plain(v) for k, v in dataclasses.asdict(strategy.adddrop).items()},
             "streaming": {k: _plain(v) for k, v in dataclasses.asdict(strategy.streaming).items()},
-            "roster": {"repair_wait_days": strategy.repair_wait_days}}
+            "roster": {"repair_wait_days": strategy.repair_wait_days,
+                       "activation_drop": strategy.activation_drop}}
 
 
 def label(strategy) -> str:
     return (f"{strategy.adddrop.describe()} | {strategy.streaming.describe()}"
-            f" | wait={strategy.repair_wait_days}")
+            f" | wait={strategy.repair_wait_days} act={strategy.activation_drop}")
 
 
 def with_(base, adddrop=None, streaming=None, roster=None):

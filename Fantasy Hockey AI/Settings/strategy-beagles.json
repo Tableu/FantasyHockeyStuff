@@ -55,6 +55,7 @@
     "undated_sources": "include"
   },
   "roster": {
-    "repair_wait_days": 7
+    "repair_wait_days": 7,
+    "activation_drop": "window"
   }
 }
