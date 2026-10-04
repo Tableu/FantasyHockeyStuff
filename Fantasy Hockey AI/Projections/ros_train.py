@@ -138,6 +138,12 @@ def parse_args():
                         help="The shrunk estimate's prior: the position, or the player's own last "
                              "three seasons (ros_baselines.add_history; its hist_* columns become "
                              "features too)")
+    parser.add_argument("--aging", action=argparse.BooleanOptionalAction, default=True,
+                        help="With --prior history: age-adjust the player's past seasons "
+                             "(ros_baselines.aging_curves); on by default, --no-aging off")
+    parser.add_argument("--prospects", action="store_true",
+                        help="Add the prospect features: non-NHL scoring translated by league, "
+                             "draft pick (ros_baselines.add_prospects)")
     parser.add_argument("--out", default="ros_model.json")
     parser.add_argument("--predictions-out", action="store_true",
                         help="Also write every test row's projection, with its realized window, "
@@ -272,7 +278,9 @@ def run(args):
               for s in args.train]
     train_all = baselines.add_asof(pd.concat(frames, ignore_index=True))
     if args.prior == "history":
-        train_all = baselines.add_history(train_all)
+        train_all = baselines.add_history(train_all, aging=args.aging)
+    if args.prospects:
+        train_all = baselines.add_prospects(train_all)
     deployment = args.no_holdout
     if deployment:
         if args.test in args.train:
@@ -283,13 +291,15 @@ def run(args):
         test = baselines.add_asof(baselines.load(args.test, args.horizon)
                                   .drop(columns=args.exclude_feature))
         if args.prior == "history":
-            test = baselines.add_history(test)
+            test = baselines.add_history(test, aging=args.aging)
+        if args.prospects:
+            test = baselines.add_prospects(test)
 
     # Fit the shrinkage on the *training* rows only, thinned the same way the ladder was.
     fitted = {}
     ladder_train = baselines.thin(train_all, args.thin_days)
     for factor in baselines.FACTORS:
-        prior = baselines.fit_prior(ladder_train, factor, args.prior)
+        prior = baselines.fit_prior(ladder_train, factor, args.prior, args.aging)
         k = baselines.fit_k(ladder_train, factor, prior, args.loss)
         fitted[factor] = {"prior": prior, "k": k}
         fitted[factor]["recency"] = baselines.fit_recency(ladder_train, fitted, factor,

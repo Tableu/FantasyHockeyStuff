@@ -58,6 +58,24 @@ PRIORS = ("position", "history")
 HISTORY_WEIGHTS = (1.0, 0.8, 0.6)     # last season, the one before, the one before that (Marcel 5/4/3)
 TEAM_GAMES = 82
 SHORT_SEASONS = {"2012-13": 48, "2019-20": 70, "2020-21": 56}
+# Aging (`--aging`): each past season moved to the player's age now along a curve fitted, by the
+# delta method, on consecutive seasons of the same player before the season being projected.
+AGING_MIN_GP = 20               # both seasons of a pair, so a rate is a rate
+AGING_MIN_PAIRS = 40            # an age with fewer pairs takes its neighbour's step
+AGING_AGES = (19, 37)           # steps outside this range repeat its edge
+AGES = np.arange(0, 61)
+# Prospects (`--prospects`): a player's non-NHL scoring, translated to the NHL by league.
+EQUIVALENT_MIN_GP = 20          # a league season and the NHL season after it, both at least this
+EQUIVALENT_MIN_PAIRS = 25       # a league with fewer moves up has no equivalent
+PROSPECT_WEIGHTS = (1.0, 0.6)   # last season, the one before
+# The rookie build (`ros_train.py --prospects --tag rookie`) projects players with at most this many
+# NHL games in their career before the season (add_history's career_gp); the main build everyone
+# else. Career, not the last three seasons: Barkov, back from a lost season, is no rookie. Measured 2026-10-03: the prospect features cut rookies' error 4-6% on both
+# holdouts but cost established players, so each build projects where it is better.
+ROOKIE_MAX_NHL_GAMES = 120
+ROOKIE_TAG = "rookie"
+PROSPECT_COLUMNS = ("pre_goals_pg", "pre_assists_pg", "pre_points_pg", "pre_gp", "pre_leagues",
+                    "draft_pick", "undrafted", "years_since_draft")
 
 # Each factor: the as-of column, the forward truth, and what its evidence is counted in.
 FACTORS = {
@@ -90,6 +108,9 @@ def parse_args():
     parser.add_argument("--prior", choices=PRIORS, default="history",
                         help="What the shrinkage pulls toward: the position, or the player's own "
                              "last three seasons (shrunk toward the position)")
+    parser.add_argument("--aging", action=argparse.BooleanOptionalAction, default=True,
+                        help="With --prior history: move each past season to the player's age now "
+                             "along fitted aging curves (aging_curves); on by default, --no-aging off")
     parser.add_argument("--out", default="ros_baselines.json")
     return parser.parse_args()
 
@@ -145,41 +166,194 @@ def previous_seasons(season, count):
     return [f"{year}-{(year + 1) % 100:02d}" for year in range(start - 1, start - 1 - count, -1)]
 
 
-def add_history(frame, totals=None):
+def season_ages(seasons, player_ids, births):
+    """Each player's age at 1 October of the season's first year, in whole years."""
+    start = pd.to_datetime(seasons.str[:4] + "-10-01")
+    born = pd.to_datetime(player_ids.map(births))
+    return ((start - born).dt.days / 365.25).fillna(-1).astype(int).to_numpy()
+
+
+def aging_curves(totals, births, before):
+    """{factor: cumulative log change by age (indexed by age 0-60)}, for the per-60 rates and ice
+    time per game, from pairs of consecutive seasons by the same player that end before `before`.
+    The step from age a to a+1 is the ratio of the pairs' rates (each weighted by the harmonic mean
+    of its two seasons' hours), smoothed over neighbouring ages. Players who fall out of the league
+    leave no pair, so the late decline is if anything understated."""
+    seasons = totals[totals["season"] < before].groupby(["season", "player_id"], as_index=False).agg(
+        gp=("gp", "sum"), hours=("hours", "sum"), **{c: (c, "sum") for c in CATEGORIES})
+    seasons = seasons[(seasons["gp"] >= AGING_MIN_GP) & (seasons["hours"] > 0)]
+    seasons["start"] = seasons["season"].str[:4].astype(int)
+    seasons["age"] = season_ages(seasons["season"], seasons["player_id"], births)
+    following = seasons.assign(start=seasons["start"] - 1)
+    pairs = seasons.merge(following, on=["player_id", "start"], suffixes=("", "_next"))
+    pairs = pairs[pairs["age"] >= 0]
+    weight = 2.0 / (1.0 / pairs["hours"] + 1.0 / pairs["hours_next"])
+    curves = {}
+    for factor in CATEGORIES + ["toi"]:
+        if factor == "toi":
+            now, later = pairs["hours"] / pairs["gp"], pairs["hours_next"] / pairs["gp_next"]
+        else:
+            now, later = pairs[factor] / pairs["hours"], pairs[f"{factor}_next"] / pairs["hours_next"]
+        steps = {}
+        for age, rows in pairs.groupby("age"):
+            if len(rows) >= AGING_MIN_PAIRS and (weight[rows.index] * now[rows.index]).sum() > 0:
+                steps[age] = (np.log((weight[rows.index] * later[rows.index]).sum()
+                                     / (weight[rows.index] * now[rows.index]).sum()), len(rows))
+        step = np.zeros(len(AGES))
+        lo, hi = AGING_AGES
+        for age in range(lo, hi + 1):
+            near = [(steps[a][0], steps[a][1]) for a in (age - 1, age, age + 1) if a in steps]
+            if near:
+                step[age] = sum(v * n for v, n in near) / sum(n for _, n in near)
+        step[:lo] = step[lo]
+        step[hi + 1:] = step[hi]
+        curves[factor] = np.concatenate([[0.0], np.cumsum(step)[:-1]])   # log change from age 0 to each age
+    return curves
+
+
+def add_history(frame, totals=None, aging=False):
     """Each row's player over his last three seasons, weighted 1 / 0.8 / 0.6: `hist_<factor>` and
     the weighted evidence behind it, `hist_evidence_<factor>`, in the factor's own units (rates
     per 60 over minutes, ice time over games, availability over team games). Read from
     ModelFeatures' season_totals.parquet (the NHL's season lines, back to 2000-01), so a row
     never sees its own season. A player with no NHL history gets no prior of his own (NaN), and
-    the positional prior stands."""
+    the positional prior stands.
+
+    With `aging`, each past season's per-60 rates and ice time are first moved from his age then
+    to his age now along aging_curves (fitted on seasons before the one projected), so a 34-year-
+    old's three seasons are not read as his level and a 21-year-old's are read as his floor."""
     if totals is None:
         totals = pd.read_parquet(paths.FEATURES_DIR / "season_totals.parquet")
     totals = totals[~totals["is_goalie"].astype(bool)].copy()
     totals["team_games"] = totals["season"].map(SHORT_SEASONS).fillna(TEAM_GAMES)
     totals["hours"] = totals["gp"] * totals["toi_per_game"].fillna(0.0) / 3600.0
+    births = None
+    if aging:
+        players = pd.read_parquet(paths.FEATURES_DIR / "players.parquet", columns=["player_id", "birth_date"])
+        births = dict(zip(players["player_id"].astype(int), players["birth_date"]))
     out = []
     for season, rows in frame.groupby("season"):
+        curves = aging_curves(totals, births, season) if aging else None
         parts = []
         for weight, past in zip(HISTORY_WEIGHTS, previous_seasons(season, len(HISTORY_WEIGHTS))):
             # A traded player has one row per team; his season is their sum.
             year = totals[totals["season"] == past].groupby("player_id").agg(
                 gp=("gp", "sum"), hours=("hours", "sum"), team_games=("team_games", "max"),
                 **{c: (c, "sum") for c in CATEGORIES})
+            year["toi_hours"] = year["hours"]
+            if aging:
+                ages = season_ages(pd.Series(past, index=year.index), year.index.to_series(), births)
+                known = ages >= 0
+                then = np.clip(ages, 0, len(AGES) - 1)
+                now = np.clip(ages + int(season[:4]) - int(past[:4]), 0, len(AGES) - 1)
+                for factor, curve in curves.items():
+                    change = np.where(known, np.exp(curve[now] - curve[then]), 1.0)
+                    column = "toi_hours" if factor == "toi" else factor
+                    year[column] = year[column] * change
             parts.append(year * weight)
         history = pd.concat(parts).groupby(level=0).sum(min_count=1)
         hist = pd.DataFrame(index=history.index)
         hist["hist_availability"] = (history["gp"] / history["team_games"]).clip(0, 1)
         hist["hist_evidence_attempts"] = history["team_games"]
-        hist["hist_toi_per_game"] = history["hours"] * 3600.0 / history["gp"].where(history["gp"] > 0)
+        hist["hist_toi_per_game"] = history["toi_hours"] * 3600.0 / history["gp"].where(history["gp"] > 0)
         hist["hist_evidence_games"] = history["gp"]
         for category in CATEGORIES:
             hist[f"hist_{category}_p60"] = history[category] / history["hours"].where(history["hours"] > 0)
         hist["hist_evidence_minutes"] = history["hours"]
-        out.append(rows.join(hist, on="player_id"))
+        career = totals[totals["season"] < season].groupby("player_id")["gp"].sum().rename("career_gp")
+        out.append(rows.join(hist, on="player_id").join(career, on="player_id"))
     frame = pd.concat(out).loc[frame.index]
+    frame["career_gp"] = frame["career_gp"].fillna(0.0)
     for column in [c for c in frame.columns if c.startswith("hist_evidence_")]:
         frame[column] = frame[column].fillna(0.0)
     return frame
+
+
+def league_equivalents(careers, totals, before) -> dict:
+    """{league: (goals factor, assists factor, pairs)}: what a goal or an assist per game in that
+    league is worth per NHL game, from players who played at least EQUIVALENT_MIN_GP games there
+    in a regular season and as many in the NHL the season after, both ending before `before`
+    (the season being projected). Ratio of sums: the moves' NHL goals per game over their league
+    goals per game, each pair weighted by its smaller games count."""
+    league = careers[(careers["game_type"] == 2) & (careers["league"] != "NHL")
+                     & (careers["season"] < before)]
+    league = league.groupby(["player_id", "season", "league"], as_index=False)[
+        ["gp", "goals", "assists"]].sum()
+    league = league[league["gp"] >= EQUIVALENT_MIN_GP]
+    nhl = totals.groupby(["player_id", "season"], as_index=False)[["gp", "goals", "assists"]].sum()
+    nhl = nhl[(nhl["gp"] >= EQUIVALENT_MIN_GP) & (nhl["season"] < before)]
+    nhl["prior_season"] = [previous_seasons(s, 1)[0] for s in nhl["season"]]
+    pairs = league.merge(nhl, left_on=["player_id", "season"], right_on=["player_id", "prior_season"],
+                         suffixes=("", "_nhl"))
+    out = {}
+    for name, rows in pairs.groupby("league"):
+        if len(rows) < EQUIVALENT_MIN_PAIRS:
+            continue
+        weight = np.minimum(rows["gp"], rows["gp_nhl"])
+        factors = []
+        for stat in ("goals", "assists"):
+            there = (weight * rows[stat] / rows["gp"]).sum()
+            here = (weight * rows[f"{stat}_nhl"] / rows["gp_nhl"]).sum()
+            factors.append(here / there if there > 0 else np.nan)
+        out[name] = (factors[0], factors[1], len(rows))
+    return out
+
+
+def add_prospects(frame, careers=None, drafts=None, totals=None):
+    """Each row's player before the NHL: his last two seasons' scoring in other leagues (regular
+    season, leagues with an equivalent), translated per NHL game and weighted 1 / 0.6 --
+    `pre_goals_pg`, `pre_assists_pg`, `pre_points_pg` -- with the games behind it (`pre_gp`) and how
+    many such leagues (`pre_leagues`); his draft pick (`draft_pick`, NaN with `undrafted` 1) and
+    `years_since_draft`. The equivalents are fitted on seasons before the one projected
+    (league_equivalents), from ModelFeatures' player_careers.parquet, so a row never sees its own
+    season's moves up. Features for the model: they say most about a player with little NHL
+    history, which the shrinkage alone sends to his position's average."""
+    if careers is None:
+        careers = pd.read_parquet(paths.FEATURES_DIR / "player_careers.parquet")
+    if drafts is None:
+        drafts = pd.read_parquet(paths.FEATURES_DIR / "player_drafts.parquet")
+    if totals is None:
+        totals = pd.read_parquet(paths.FEATURES_DIR / "season_totals.parquet")
+    totals = totals[~totals["is_goalie"].astype(bool)]
+    picks = drafts.drop_duplicates("player_id").set_index("player_id")
+    out = []
+    for season, rows in frame.groupby("season"):
+        equivalents = league_equivalents(careers, totals, season)
+        parts = []
+        for weight, past in zip(PROSPECT_WEIGHTS, previous_seasons(season, len(PROSPECT_WEIGHTS))):
+            year = careers[(careers["season"] == past) & (careers["game_type"] == 2)
+                           & careers["league"].isin(list(equivalents))].copy()
+            if not len(year):
+                continue
+            year["goals_nhl"] = year["goals"] * year["league"].map(lambda l: equivalents[l][0])
+            year["assists_nhl"] = year["assists"] * year["league"].map(lambda l: equivalents[l][1])
+            parts.append(year.groupby("player_id").agg(
+                gp=("gp", "sum"), goals_nhl=("goals_nhl", "sum"), assists_nhl=("assists_nhl", "sum"),
+                leagues=("league", "nunique")) * weight)
+        pre = pd.DataFrame(columns=["gp", "goals_nhl", "assists_nhl", "leagues"])
+        if parts:
+            pre = pd.concat(parts).groupby(level=0).sum(min_count=1)
+        feats = pd.DataFrame(index=pre.index)
+        games = pre["gp"].where(pre["gp"] > 0)
+        feats["pre_goals_pg"] = pre["goals_nhl"] / games
+        feats["pre_assists_pg"] = pre["assists_nhl"] / games
+        feats["pre_points_pg"] = (pre["goals_nhl"] + pre["assists_nhl"]) / games
+        feats["pre_gp"] = pre["gp"]
+        feats["pre_leagues"] = pre["leagues"]
+        rows = rows.join(feats, on="player_id")
+        rows["draft_pick"] = rows["player_id"].map(picks["overall_pick"])
+        rows["undrafted"] = rows["draft_pick"].isna().astype("float64")
+        rows["years_since_draft"] = int(season[:4]) - rows["player_id"].map(picks["draft_year"])
+        out.append(rows)
+    frame = pd.concat(out).loc[frame.index]
+    frame["pre_gp"] = frame["pre_gp"].fillna(0.0)
+    frame["pre_leagues"] = frame["pre_leagues"].fillna(0.0)
+    return frame
+
+
+def is_rookie(frame):
+    """Rows the rookie build projects: few NHL games in his career (needs add_history)."""
+    return frame["career_gp"].fillna(0.0) <= ROOKIE_MAX_NHL_GAMES
 
 
 def thin(frame, days):
@@ -191,7 +365,7 @@ def thin(frame, days):
     return frame.loc[~frame.assign(bucket=bucket).duplicated(["player_id", "bucket"])]
 
 
-def fit_prior(frame, factor, mode="position"):
+def fit_prior(frame, factor, mode="position", aging=False):
     """The positional prior: what a forward or defenceman does, from the training rows. With
     mode `history` the prior is the player's own (add_history), shrunk toward that by `k_hist`,
     which fit_k sets."""
@@ -200,7 +374,7 @@ def fit_prior(frame, factor, mode="position"):
     overall = float(rows[target].mean())
     by_position = rows.groupby(rows["position"].astype(str))[target].mean().to_dict()
     return {"overall": overall, "by_position": {k: float(v) for k, v in by_position.items()},
-            "mode": mode, "factor": factor, "k_hist": None}
+            "mode": mode, "factor": factor, "k_hist": None, "aging": bool(aging)}
 
 
 def prior_values(frame, prior):
@@ -350,14 +524,14 @@ def run(args):
     test = load(args.test, args.horizon)
     train, test = add_asof(train), add_asof(test)
     if args.prior == "history":
-        train, test = add_history(train), add_history(test)
+        train, test = add_history(train, aging=args.aging), add_history(test, aging=args.aging)
     train, test = thin(train, args.thin_days), thin(test, args.thin_days)
     log.info("train %d rows (%s), test %d rows (%s), thinned to one row per player per %dd",
              len(train), ", ".join(args.train), len(test), args.test, args.thin_days)
 
     fitted = {}
     for factor in FACTORS:
-        prior = fit_prior(train, factor, args.prior)
+        prior = fit_prior(train, factor, args.prior, args.aging)
         k = fit_k(train, factor, prior, args.loss)
         fitted[factor] = {"prior": prior, "k": k}
         fitted[factor]["recency"] = fit_recency(train, fitted, factor, args.loss)

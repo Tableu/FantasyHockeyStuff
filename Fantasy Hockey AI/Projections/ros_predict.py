@@ -63,11 +63,16 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_fit(horizon, season):
-    """The boosters and the shrinkage they were trained alongside, for this horizon, from the
-    folder of the season being projected (models/<season>/ros_<horizon>/)."""
+def build_dir(horizon, season, tag=None):
     prefix = ros_train.model_prefix(horizon)
-    sidecar = paths.models_dir(season, prefix) / f"{prefix}_fit.json"
+    return paths.models_dir(season, f"{prefix}_{tag}" if tag else prefix)
+
+
+def load_fit(horizon, season, tag=None):
+    """The boosters and the shrinkage they were trained alongside, for this horizon, from the
+    folder of the season being projected (models/<season>/ros_<horizon>[_<tag>]/)."""
+    prefix = ros_train.model_prefix(horizon)
+    sidecar = build_dir(horizon, season, tag) / f"{prefix}_fit.json"
     if not sidecar.exists():
         raise FileNotFoundError(
             f"{sidecar} is missing -- run ros_train.py --horizon {horizon} --save")
@@ -78,12 +83,12 @@ def load_fit(horizon, season):
     return payload, fitted
 
 
-def load_boosters(horizon, season):
+def load_boosters(horizon, season, tag=None):
     import lightgbm as lgb
     prefix = ros_train.model_prefix(horizon)
     boosters = {}
     for factor in baselines.FACTORS:
-        path = paths.models_dir(season, prefix) / f"{prefix}_{factor}.txt"
+        path = build_dir(horizon, season, tag) / f"{prefix}_{factor}.txt"
         if not path.exists():
             raise FileNotFoundError(
                 f"{path} is missing -- run ros_train.py --horizon {horizon} --save")
@@ -153,7 +158,17 @@ def run(args):
     table = baselines.add_asof(table)
     # A build trained on the player's own multi-season prior needs his history beside each row.
     if any(entry["prior"].get("mode") == "history" for entry in fitted.values()):
-        table = baselines.add_history(table)
+        table = baselines.add_history(
+            table, aging=any(entry["prior"].get("aging") for entry in fitted.values()))
+    # The rookie build (ros_baselines.ROOKIE_TAG), when there is one, projects the players with
+    # little NHL history; it was trained with the prospect features, which then sit beside each row.
+    rookie = None
+    if not args.baseline and (build_dir(args.horizon, args.season, baselines.ROOKIE_TAG)
+                              / f"{ros_train.model_prefix(args.horizon)}_fit.json").exists():
+        rookie = load_fit(args.horizon, args.season, baselines.ROOKIE_TAG)
+    if any(c in payload["feature_columns"] for c in baselines.PROSPECT_COLUMNS) or (
+            rookie is not None and any(c in rookie[0]["feature_columns"] for c in baselines.PROSPECT_COLUMNS)):
+        table = baselines.add_prospects(table)
     state = state_as_of(table, as_of)
     state = ros_train.add_shrunk(state, fitted)
 
@@ -182,6 +197,21 @@ def run(args):
         for factor, booster in boosters.items():
             factors[factor] = np.clip(booster.predict(design), 0, None)
         factors["availability"] = factors["availability"].clip(0, 1)
+        build = pd.Series("main", index=state.index)
+        if rookie is not None and "career_gp" in state:
+            rookie_payload, rookie_fitted = rookie
+            rows = baselines.is_rookie(state)
+            rookie_state = ros_train.add_shrunk(state.copy(), rookie_fitted)
+            for column in rookie_payload["feature_columns"]:
+                if column not in rookie_state.columns:
+                    rookie_state[column] = np.nan
+            design = ros_train.matrix(rookie_state, rookie_payload["feature_columns"])
+            for factor, booster in load_boosters(args.horizon, args.season, baselines.ROOKIE_TAG).items():
+                factors.loc[rows, factor] = np.clip(booster.predict(design[rows.to_numpy()]), 0, None)
+            factors["availability"] = factors["availability"].clip(0, 1)
+            build[rows] = "rookie"
+            log.info("rookie build: %d of %d players (at most %d NHL games in their career)",
+                     int(rows.sum()), len(state), baselines.ROOKIE_MAX_NHL_GAMES)
 
     totals = baselines.to_totals(state, factors)
     out = state[[c for c in ("season_id", "player_id", "team_id", "position", "game_date",
@@ -189,6 +219,8 @@ def run(args):
                  if c in state.columns]].copy()
     out = out.rename(columns={"game_date": "state_from_game"})
     out["as_of"] = as_of
+    if not args.baseline:
+        out["build"] = build.to_numpy()
     for factor in baselines.FACTORS:
         out[f"proj_{factor}"] = factors[factor].to_numpy()
     for category in ["games"] + baselines.CATEGORIES:

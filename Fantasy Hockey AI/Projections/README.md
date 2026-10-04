@@ -183,6 +183,35 @@ and 2025-26 holdouts and the 2026-27 deployment build are built with it, and the
 moves on it (Live/live.py `skater_ros`). The position-prior builds are kept as
 `ros_predictions_season_<season>_position.parquet` and `models/<season>/ros_season_position`.
 
+### Aging, and a rookie build (2026-10-03)
+
+**Aging** (`--aging`, on by default; `--no-aging` off): each of a player's last three seasons is
+moved to his age now before the 5/4/3 weighting, along curves fitted by the delta method on
+consecutive seasons of the same player that end before the projected season
+(`ros_baselines.aging_curves`, per-60 rates and ice time). Goals per 60 move about +3% a year at 20,
+-3% at 26, -6% at 29 and -10% at 35. Shrinkage baseline: MAE 27.93 -> 27.03 (2024-25), 27.98 ->
+27.14 (2025-26), bias +7.7% -> +5.7%; the model 25.62 -> 25.17 and 25.31 -> 24.96.
+
+**The rookie build** (`--prospects --tag rookie`, `models/<season>/ros_season_rookie`): the model
+with prospect features -- a player's last two seasons outside the NHL translated per NHL game by
+league (`league_equivalents`: the AHL x0.46 goals / x0.45 assists, the CHL about x0.28, the NCAA
+about x0.35, Sweden and the KHL x0.5-0.85, from players who moved up the next season), his games
+there, his draft pick and the years since. It projects players with at most 120 NHL games in their
+career (`is_rookie`); the main build everyone else -- trained with them, the prospect features cut
+rookies' error but cost established players. `ros_predict.py` routes live; `ros_combine.py
+--season <s>` does the same to a scored season's predictions, which the backtests read.
+
+| mean error, rest-of-season points (every row) | 2024-25 all / rookies / veterans | 2025-26 all / rookies / veterans |
+|---|---|---|
+| history prior | 24.73 / 23.52 / 25.31 | 24.56 / 21.50 / 25.29 |
+| + aging | 24.30 / 23.41 / 24.78 | 24.20 / 21.39 / 24.84 |
+| **+ aging, rookie build** | **24.23 / 22.51 / 24.78** | **24.16 / 20.68 / 24.84** |
+
+Rookies: 0 NHL games in the previous three seasons; veterans: over 120. The inputs come from the
+players' NHL landing pages (pipeline `backfill_player_careers.py`, kept current by the daily
+fetches) through ModelFeatures `build_season_history.py`: `player_careers.parquet` and
+`player_drafts.parquet`. Earlier builds are kept as `_history` (no aging) and `_position`.
+
 ### The deployment build, and why the round budget is the regularizer
 
 ```bash
