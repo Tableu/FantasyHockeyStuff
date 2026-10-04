@@ -1053,7 +1053,7 @@ def render(plan: dict) -> str:
             a = plan["week_plans"][0]
             lines += [f"Plan A, above: {a['week_gain']:+.1f} lineup points this week, expected "
                       f"{a['expected']:+.1f}. The fallbacks when a team is picked over: each plan leaves out "
-                      f"every earlier plan's opening team (in the plan window, click a plan for its slots "
+                      f"every earlier plan's first team (in the plan window, click a plan for its slots "
                       f"and a slot for its players):", "",
                       "| Plan | Schedule | Without | Moves | Games | Week | Exp. | vs A | Thinnest slot |",
                       "|---|---|---|---|---|---|---|---|---|"]

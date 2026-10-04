@@ -555,8 +555,8 @@ class TeamPlans:
     standing in for it on the plan's roster (a later move can drop that stand-in, as rentals
     chain). Plan A keeps today's moves as made (WeekPlanner.plan) and adds no other move today. B,
     C, ... are the fallbacks when a whole team is picked over: each opens on the best slot left and
-    leaves out every earlier plan's opening team for the whole week -- B is the week without A's
-    opening team, C without A's and B's, and so on. (Banning an opening team only at its position
+    leaves out every earlier plan's first team (the team of its earliest move) for the whole week --
+    B is the week without A's first team, C without A's and B's, and so on. (Banning an opening team only at its position
     left the plans the same after their first move.) Display only: nothing here changes what is
     made."""
 
@@ -691,7 +691,7 @@ class TeamPlans:
 
     def plans(self, plan, alternatives) -> list:
         """Plan A (today's moves as made, the rest of the week by slot), then up to `alternatives`
-        others, each opened by the best slot left and without any earlier plan's opening team,
+        others, each opened by the best slot left and without any earlier plan's first team,
         best first. Each plan says which teams it leaves out (`without`)."""
         p = self.p
         room = p.view.roster_room()
@@ -703,15 +703,18 @@ class TeamPlans:
                     if priced is not None]
         openings.sort(key=lambda o: -o[0])
         others = []
-        for value, trial, cost, into_open, day in openings:
-            if len(others) >= alternatives:
+        # Each plan bans its FIRST move's team, as A does -- the fallback for "the first pickup is
+        # taken". Banning the opening slot's instead (the plan's most valuable move, often late in
+        # the week) left early-week teams in every plan: 12090 week 2 (2026-10-04), NSH opened
+        # B-D and was never banned. An opening slot can open several plans, each without more teams.
+        while len(others) < alternatives:
+            opening = next((o for o in openings if o[1][-1]["team"] not in banned), None)
+            if opening is None:
                 break
-            first = trial[-1]
-            if first["team"] in banned:
-                continue
+            _, trial, cost, into_open, day = opening
             moves = self.build(trial, {day: cost}, room - into_open, banned=frozenset(banned))
-            others.append((moves, first, tuple(banned)))
-            banned.append(first["team"])
+            others.append((moves, moves[0], tuple(banned)))
+            banned.append(moves[0]["team"])
         return ([self.summary(*o) for o in out]
                 + sorted((self.summary(*o) for o in others), key=lambda s: -s["expected"]))
 

@@ -38,7 +38,7 @@ on the platform yourself.
                  ("Tue NYR RW -> Thu CGY C ..."), what it adds this week, its expected edge (each
                  slot's options discounted by the chance each is taken first) and its thinnest slot.
                  Plan A is the one made (today's slots are the Moves); B, C, ... each leave out every
-                 earlier plan's opening team -- the fallbacks when a team is picked over. Click a
+                 earlier plan's first team -- the fallbacks when a team is picked over. Click a
                  plan for its slots, a slot for its options, ranked by edge; the later slots are
                  planned again on every run. On the week's last day (Sunday) a switch shows next
                  week's plans instead: planned from its first day on the roster today's moves leave,
