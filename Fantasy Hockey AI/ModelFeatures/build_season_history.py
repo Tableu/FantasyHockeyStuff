@@ -14,12 +14,20 @@ Three files under data/features/:
 - `team_games.parquet`: regular-season games per team per season (`Reference.Schedule`,
   GameType 2), so games played can be read as a share of the games there were -- 48 in 2012-13,
   56 in 2020-21, 68-71 in 2019-20.
+- `player_drafts.parquet`: each player's NHL draft -- year, round, overall pick, team -- from his
+  archived landing page (`Ingestion.RawPlayerResponses`, `draftDetails`); undrafted players have
+  no row.
+- `player_careers.parquet`: every season line on his landing page (`seasonTotals`, archived by
+  pipeline/ingest/player_bio.py since 2026-10-03, backfilled by backfill_player_careers.py): one
+  row per season, team, league and game type (2 regular season, 3 playoffs) with games, goals,
+  assists, points and PIM -- the AHL, junior, college and European seasons the rookie prior reads.
 
 Birth dates come from players.parquet (build_players.py).
 
     python build_season_history.py
 """
 
+import json
 import logging
 
 import pandas as pd
@@ -79,12 +87,48 @@ def main():
         JOIN Reference.Seasons se ON se.SeasonID = t.SeasonID
         GROUP BY se.DisplayName, t.team_id""", REGULAR_SEASON, REGULAR_SEASON)
 
+    drafts, careers = landing_history(cursor)
+
     out = paths.ensure(paths.FEATURES_DIR)
+    drafts.to_parquet(out / "player_drafts.parquet", index=False)
+    careers.to_parquet(out / "player_careers.parquet", index=False)
+    log.info("player_drafts %d players, player_careers %d lines for %d players in %d leagues",
+             len(drafts), len(careers), careers["player_id"].nunique() if len(careers) else 0,
+             careers["league"].nunique() if len(careers) else 0)
     totals.to_parquet(out / "season_totals.parquet", index=False)
     injury.reset_index().to_parquet(out / "injury_seasons.parquet", index=False)
     team_games.to_parquet(out / "team_games.parquet", index=False)
     log.info("season_totals %d rows (%d seasons), injury_seasons %d, team_games %d -> %s",
              len(totals), totals["season"].nunique(), len(injury), len(team_games), out)
+
+
+def landing_history(cursor) -> tuple:
+    """(drafts, careers) from the archived landing pages, keyed by our PlayerID."""
+    cursor.execute("""
+        SELECT p.PlayerID, r.RawJSON
+        FROM Ingestion.RawPlayerResponses r
+        JOIN Reference.Players p ON p.NHLPlayerID = r.NHLPlayerID
+        WHERE r.EndpointType = 'PLAYER_LANDING'""")
+    drafts, careers = [], []
+    for player_id, raw in cursor.fetchall():
+        page = json.loads(raw)
+        draft = page.get("draftDetails")
+        if draft and draft.get("overallPick"):
+            drafts.append({"player_id": int(player_id), "draft_year": draft.get("year"),
+                           "draft_round": draft.get("round"), "overall_pick": draft.get("overallPick"),
+                           "draft_team": draft.get("teamAbbrev")})
+        for line in page.get("seasonTotals") or []:
+            season = str(line.get("season") or "")
+            if len(season) != 8:
+                continue
+            careers.append({"player_id": int(player_id),
+                            "season": f"{season[:4]}-{season[6:]}",
+                            "sequence": line.get("sequence"), "league": line.get("leagueAbbrev"),
+                            "game_type": line.get("gameTypeId"), "team": line.get("teamName"),
+                            "gp": line.get("gamesPlayed") or 0, "goals": line.get("goals") or 0,
+                            "assists": line.get("assists") or 0, "points": line.get("points") or 0,
+                            "pim": line.get("pim") or 0})
+    return pd.DataFrame(drafts), pd.DataFrame(careers)
 
 
 if __name__ == "__main__":

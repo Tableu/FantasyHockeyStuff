@@ -2,8 +2,9 @@
 player landing endpoint, archiving what was read.
 
 The raw payload goes to Ingestion.RawPlayerResponses rather than Ingestion.RawApiResponses,
-which is keyed by game -- a bio belongs to no game. Only the bio and draft keys are archived
-(field_map.PLAYER_LANDING_KEYS); the rest of the ~30 KB payload is career stats.
+which is keyed by game -- a bio belongs to no game. Only the bio, draft and career-line keys are
+archived (field_map.PLAYER_LANDING_KEYS), the career lines trimmed to their counting stats
+(field_map.career_rows); the rest of the ~30 KB payload is awards and NHL detail.
 
 Writes are UPDATEs of existing rows and set only fields the payload actually has, so a known
 value is never overwritten with null and no player row is ever created here.
@@ -42,7 +43,7 @@ def players_to_fetch(cursor, refetch: bool = False, played_only: bool = False) -
 
 
 def fetch_landing(cursor, player_id: int, nhl_player_id: int) -> dict | None:
-    """Fetch one player's landing payload and archive its bio, draft and team keys
+    """Fetch one player's landing payload and archive its bio, draft, team and career-line keys
     (field_map.PLAYER_LANDING_KEYS). Returns those keys, or None when the endpoint has no such
     player (404). Shared with ingest.player_teams, which reads the same page for his team."""
     try:
@@ -53,6 +54,8 @@ def fetch_landing(cursor, player_id: int, nhl_player_id: int) -> dict | None:
             return None
         raise
     kept = {k: payload[k] for k in field_map.PLAYER_LANDING_KEYS if k in payload}
+    if "seasonTotals" in kept:
+        kept["seasonTotals"] = field_map.career_rows(kept["seasonTotals"])
     db.upsert(cursor, "Ingestion.RawPlayerResponses",
               {"NHLPlayerID": nhl_player_id, "EndpointType": ENDPOINT},
               {"RawJSON": json.dumps(kept), "RetrievedAt": datetime.now(timezone.utc)})

@@ -300,12 +300,29 @@ def player_search_result_fields(result: dict) -> dict:
 # Player landing: api-web.nhle.com/v1/player/{playerId}/landing -> { ... }
 # ---------------------------------------------------------------------------
 
-# The bio and draft keys worth keeping from a ~30 KB payload that is mostly career stats and
-# awards. ingest/player_bio.py archives exactly these, so the bio columns -- and the draft
-# details, which nothing stores yet -- can be re-derived without another API call.
+# The keys worth keeping from a ~30 KB payload that is mostly career stats and awards.
+# ingest/player_bio.py archives exactly these, so the bio columns, the draft details and the
+# career lines can be re-derived without another API call. `seasonTotals` -- every season in
+# every league (AHL, CHL, NCAA, Europe, the NHL), regular season and playoffs -- is the rookie
+# prior's input (a player with little NHL history has a minor-league one); it is kept trimmed to
+# CAREER_KEYS by career_rows.
 PLAYER_LANDING_KEYS = ("playerId", "isActive", "firstName", "lastName", "position",
                        "birthDate", "birthCity", "birthCountry", "heightInInches",
-                       "weightInPounds", "shootsCatches", "draftDetails", "currentTeamAbbrev")
+                       "weightInPounds", "shootsCatches", "draftDetails", "currentTeamAbbrev",
+                       "seasonTotals")
+CAREER_KEYS = ("season", "sequence", "leagueAbbrev", "gameTypeId", "gamesPlayed", "goals",
+               "assists", "points", "pim")
+
+
+def career_rows(season_totals) -> list:
+    """A landing payload's seasonTotals, one row per (season, team, league, game type) with only
+    CAREER_KEYS and the team's name -- the per-league counting stats every league reports."""
+    rows = []
+    for row in season_totals or []:
+        kept = {k: row[k] for k in CAREER_KEYS if k in row}
+        kept["teamName"] = (row.get("teamName") or {}).get("default")
+        rows.append(kept)
+    return rows
 
 
 def player_bio_fields(payload: dict) -> dict:
