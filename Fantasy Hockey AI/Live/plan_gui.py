@@ -40,7 +40,9 @@ on the platform yourself.
                  Plan A is the one made (today's slots are the Moves); B, C, ... each leave out every
                  earlier plan's opening team -- the fallbacks when a team is picked over. Click a
                  plan for its slots, a slot for its options, ranked by edge; the later slots are
-                 planned again on every run
+                 planned again on every run. On the week's last day (Sunday) a switch shows next
+                 week's plans instead: planned from its first day on the roster today's moves leave,
+                 with a fresh move limit -- a preview, planned again once that week starts
     Roster       every player you hold now: status, rate, rest-of-season points, Periph % (the share
                  of his projected points from hits, blocks, shots and PIM: high = steady, low = a
                  volatile scorer), games left this week and his stats (sortable); injured players
@@ -258,11 +260,11 @@ class PlanWindow:
                                                ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
                                                ("drop_games", "Games", 60), ("gain", "Gain", 70),
                                                ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 150)])
-        # Plans and slots opened on the Week tab: ("plan", label) and ("slot", label, index). Plan A
-        # starts open.
-        self.week_open = {("plan", "A")}
+        # Plans and slots opened on the Week tab, this week's and next week's apart: ("plan", label)
+        # and ("slot", label, index). Plan A starts open.
+        self.week_open = {"this": {("plan", "A")}, "next": {("plan", "A")}}
         self.week_rows = []                # Week tab row -> its plan's or slot's key (None: an option)
-        self.week = self._table("Week", [("plan", "Plan", 70), ("day", "Day", 110),
+        self.week = sheets.Table(self._build_week_bar(), [("plan", "Plan", 70), ("day", "Day", 110),
                                          ("until", "Dropped", 70), ("team", "Team", 50),
                                          ("pos", "Pos", 60), ("kind", "Move", 90), ("add", "Add", 300),
                                          ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
@@ -271,7 +273,7 @@ class PlanWindow:
                                          ("drop_games", "Games", 60), ("gain", "Gain", 70),
                                          ("bar", "Bar", 60), ("edge", "Edge", 60),
                                          ("expected", "Exp.", 60), ("depth", "Options", 65)],
-                                on_row_click=self._toggle_week_plan)
+                                 ROW_STYLES, on_row_click=self._toggle_week_plan)
         player_columns = [("player", "Player", 240), ("positions", "Pos", 80), ("status", "Status", 70),
                           ("rate", "Rate (pts/g)", 90), ("ros_points", "ROS pts", 70),
                           ("peripheral", "Periph %", 70),
@@ -316,6 +318,22 @@ class PlanWindow:
         self.tabs.add(frame, text=title)
         on_sort = None if sort_as is None else (lambda key: self._sort(sort_as, key))
         return sheets.Table(frame, columns, ROW_STYLES, on_sort=on_sort, on_row_click=on_row_click)
+
+    def _build_week_bar(self):
+        """The Week tab: a this week / next week switch, shown only when the plan has next week's
+        plans (the week's last day), above the plans table. Returns the table's frame."""
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text="Week")
+        self.week_bar = bar = ttk.Frame(frame, padding=(0, 6, 0, 4))
+        self.week_which = tk.StringVar(value="this")
+        self.week_choices = []
+        for value in ("this", "next"):
+            button = ttk.Radiobutton(bar, value=value, variable=self.week_which, command=self._fill_week)
+            button.pack(side="left", padx=6)
+            self.week_choices.append(button)
+        self.week_table_frame = ttk.Frame(frame)
+        self.week_table_frame.pack(fill="both", expand=True)
+        return self.week_table_frame
 
     def _build_matchup(self):
         frame = ttk.Frame(self.tabs, padding=8)
@@ -952,12 +970,27 @@ class PlanWindow:
         players on that team who fit it, ranked by edge -- any of them buys the same nights. Plan A
         is the one made; only its moves today are the Moves, and they are highlighted."""
         p = self.plan
-        plans = p.get("week_plans") or [{"label": "A", "first": None, "week_gain": None,
-                                         "moves": p.get("week_plan", [])}]
+        # Next week's plans exist on the week's last day only; any other day the switch is hidden
+        # and this week shows.
+        has_next = bool(p.get("next_week_plans"))
+        if has_next:
+            self.week_choices[0].configure(text=f"This week (week {p['week']})")
+            self.week_choices[1].configure(text=f"Next week (week {p['next_week']})")
+            self.week_bar.pack(fill="x", before=self.week_table_frame)
+        else:
+            self.week_bar.pack_forget()
+            self.week_which.set("this")
+        which = self.week_which.get()
+        if which == "next":
+            plans = p["next_week_plans"]
+        else:
+            plans = p.get("week_plans") or [{"label": "A", "first": None, "week_gain": None,
+                                             "moves": p.get("week_plan", [])}]
+        opened = self.week_open[which]
         rows, self.week_rows = [], []
         blank = lambda x, f="": "" if x is None else format(x, f)
         weekday = lambda d: pd.Timestamp(d).strftime("%a %b %d").replace(" 0", " ")
-        arrow = lambda key: "\u25be" if key in self.week_open else "\u25b8"
+        arrow = lambda key: "\u25be" if key in opened else "\u25b8"
 
         for plan in plans:
             if not plan["moves"]:
@@ -973,10 +1006,10 @@ class PlanWindow:
                           blank(plan["week_gain"], "+.1f"), "", blank(plan.get("week_edge"), "+.1f"),
                           blank(plan.get("expected"), "+.1f"), blank(plan.get("thinnest"))), ()))
             self.week_rows.append(key)
-            if key not in self.week_open:
+            if key not in opened:
                 continue
             for index, w in enumerate(moves):
-                made = label == "A" and w["today"]
+                made = which == "this" and label == "A" and w["today"]
                 slot_key = ("slot", label, index)
                 options = w.get("options") or []
                 day = weekday(w["day"])
@@ -992,7 +1025,7 @@ class PlanWindow:
                               blank(w.get("expected"), "+.1f"), len(options) or ""),
                              ("plan",) if made else ()))
                 self.week_rows.append(slot_key if options else None)
-                if slot_key not in self.week_open:
+                if slot_key not in opened:
                     continue
                 for rank, o in enumerate(options, 1):
                     start = "" if o["from"] == w["from"] else f" (from {pd.Timestamp(o['from']).strftime('%a')})"
@@ -1003,8 +1036,8 @@ class PlanWindow:
                                   "", ""),
                                  (o["status"],) if o.get("status") in STATUS_COLOURS else ()))
                     self.week_rows.append(None)
-        empty = ("No rentals worth a move this week." if p.get("stream_mode") == "week"
-                 else "Streaming decides a day at a time (strategy mode 'daily').")
+        empty = ("Streaming decides a day at a time (strategy mode 'daily')." if p.get("stream_mode") != "week"
+                 else f"No rentals worth a move {'next' if which == 'next' else 'this'} week.")
         self.week.set_rows(rows or [(("", "", "", "", "", "", empty) + ("",) * 11, ("empty",))])
 
     def _toggle_week_plan(self, index):
@@ -1012,7 +1045,7 @@ class PlanWindow:
         options."""
         if not self.plan or index >= len(self.week_rows) or self.week_rows[index] is None:
             return
-        self.week_open.symmetric_difference_update({self.week_rows[index]})
+        self.week_open[self.week_which.get()].symmetric_difference_update({self.week_rows[index]})
         self._fill_week()
 
     def _fill_players(self, table, players, where=False, **sort):

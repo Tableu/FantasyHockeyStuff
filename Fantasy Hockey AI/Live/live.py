@@ -54,6 +54,7 @@ from decisionlayer import load_strategy
 from decisionlayer import managers as managers_module
 from decisionlayer import slots as slots_module
 from decisionlayer import valuation as valuation_module
+from decisionlayer import weekplan as weekplan_module
 
 log = logging.getLogger("live")
 
@@ -437,8 +438,8 @@ class LiveRunner:
                     and clears != clears.normalize() and clears > at):
                 closed_tonight.add(int(p))
 
-        def view(state=state):
-            v = view_module.SlateView(
+        def view(state=state, **changes):
+            fields = dict(
                 day=day, week=week, config=self.config, calendar=self.calendar,
                 projections=skaters[[c for c in skaters.columns if not c.startswith(("target_", "label_"))]],
                 goalie_projections=goalie_projections, unavailable=unavailable, injured=injured,
@@ -451,6 +452,7 @@ class LiveRunner:
                 week_weight_mode=self.strategy.playoff_week_weight,
                 rate_estimate=rate_estimate, ros_estimate=ros_estimate, returns=returns,
                 closed_tonight=closed_tonight)
+            v = view_module.SlateView(**{**fields, **changes})
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
             return v
 
@@ -461,6 +463,7 @@ class LiveRunner:
         manager = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
         manager.plan.week_alternatives = WEEK_ALTERNATIVES
         manager.transactions(view())
+        next_week, next_plans = self._next_week_plans(manager, state, week, view, skaters, goalie_projections)
         problems = [ros_note] if ros_note else []
         try:
             state.assert_ir_resolved(snapshot.me, injured)
@@ -475,7 +478,38 @@ class LiveRunner:
         options = adddrop_module.price(view(state_now), manager_now.params, manager_now.slot_order,
                                        manager_now.accepts, manager_now._fieldable, shortlist=OPTIONS_PRICED)
         return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
-                              state_now, lineup_now, options)
+                              state_now, lineup_now, options, next_week, next_plans)
+
+    def _next_week_plans(self, manager, state, week, view, skaters, goalie_projections) -> tuple:
+        """On the matchup week's last day, next week's streaming plans as well (the Week tab's next
+        week): weekplan's team-slot plans from next week's first day, on the roster today's moves
+        leave, with next week's move limit and no tonight -- every night priced on the players'
+        rates, as this week's later nights are. Shown only: it runs on a copy of the league, and
+        it is planned again from scratch once that week starts. Returns (next week, its plans), or
+        (None, []) on any other day."""
+        if (week is None or self.strategy.streaming.mode != "week" or week >= self.calendar.last_week
+                or pd.Timestamp(self.day) != self.calendar.weeks[week - 1].end):
+            return None, []
+        coming = self.calendar.weeks[week]
+        ahead = copy.deepcopy(state)
+        ahead.week, ahead.free_moves = coming.number, False
+        mine = ahead.teams[manager.team_index]
+        # Fleaflicker prorates its weekly limit by the week's days (_week_cap); a full week is
+        # the league's limit.
+        days = (coming.end - coming.start).days + 1
+        mine.moves_used = 0
+        mine.week_cap = max(1, round(self.config.moves_per_week * days / 7))
+        v = view(ahead, day=coming.start, week=coming.number,
+                 projections=skaters.iloc[0:0], goalie_projections=goalie_projections.iloc[0:0],
+                 unavailable=set(), playing_tonight=set(), decision_points={}, closed_tonight=set(),
+                 opponent_index=None, my_week_points=0.0, opponent_week_points=0.0,
+                 phase="playoffs" if coming.number > self.regular_weeks else "regular")
+        v.p_start_column = manager.p_start_column
+        _, plans = weekplan_module.run(
+            v, manager.plan.stream_params, manager.params.horizon_weeks, manager.params.rate_source,
+            manager.slot_order, manager.accepts, manager._fieldable, z=0.0,
+            alternatives=WEEK_ALTERNATIVES)
+        return coming.number, plans
 
     def expected_returns(self, injured, status, nhl_team) -> dict:
         """{injured player: expected return date}: his reported body part's injury type group and
@@ -691,7 +725,7 @@ class LiveRunner:
     # ---------- the plan ----------
 
     def _describe(self, snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
-                  state_now, lineup_now, options) -> dict:
+                  state_now, lineup_now, options, next_week=None, next_plans=()) -> dict:
         me = state.teams[snapshot.me]
         names = pd.read_parquet(paths.players()).set_index("player_id")["name"]
         teams = pd.read_parquet(paths.teams()).set_index("team_id")["team"]
@@ -848,10 +882,9 @@ class LiveRunner:
             return rows
         week_plan = week_rows(manager.plan.week_plan)
         # The plan made (A) and the alternatives (B, C, ...), each opening on a different team.
-        week_plans = []
-        for i, w in enumerate(manager.plan.week_plans):
+        def team_plan(i, w):
             slot_list = week_rows(w["moves"])
-            week_plans.append({
+            return {
                 "label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
                 "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
                 "expected": None if w.get("expected") is None else round(w["expected"], 1),
@@ -861,7 +894,8 @@ class LiveRunner:
                 # position; the slot rows show the pick's).
                 "schedule": [f"{pd.Timestamp(m['day']).strftime('%a')} {m['team'] or '?'}"
                              for m in slot_list],
-                "moves": slot_list})
+                "moves": slot_list}
+        week_plans = [team_plan(i, w) for i, w in enumerate(manager.plan.week_plans)]
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]
@@ -920,6 +954,8 @@ class LiveRunner:
             "opponent": snapshot.teams[snapshot.opponent]["name"] if snapshot.opponent is not None else None,
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "options": choices, "week_plan": week_plan, "week_plans": week_plans,
+            # On the week's last day, next week's plans too (_next_week_plans); else none.
+            "next_week": next_week, "next_week_plans": [team_plan(i, w) for i, w in enumerate(next_plans)],
             "stream_mode": self.strategy.streaming.mode, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
             "shortlist": self.strategy.adddrop.shortlist,
             "lineup": slots, "bench": bench, "watch": watch,
