@@ -24,6 +24,7 @@ after each injury or line-chart snapshot, so that file follows the reports.
 """
 
 import logging
+import os
 
 import pandas as pd
 
@@ -37,6 +38,15 @@ log = logging.getLogger("players")
 def fetch(cursor, sql) -> pd.DataFrame:
     cursor.execute(sql)
     return pd.DataFrame.from_records(cursor.fetchall(), columns=[d[0] for d in cursor.description])
+
+
+def write(frame, name):
+    """Write then swap in, so the plan server's live views (Server/games.py), which read these
+    while a refresh rebuilds them, never see a half-written file."""
+    path = paths.FEATURES_DIR / name
+    tmp = path.with_name(path.name + ".tmp")
+    frame.to_parquet(tmp, index=False)
+    os.replace(tmp, path)
 
 
 def main():
@@ -83,12 +93,12 @@ def main():
         if frame[key].duplicated().any():
             raise SystemExit(f"duplicate {key} in the reference table")
     paths.ensure(paths.FEATURES_DIR)
-    players.to_parquet(paths.FEATURES_DIR / "players.parquet", index=False)
-    teams.to_parquet(paths.FEATURES_DIR / "teams.parquet", index=False)
-    ids.to_parquet(paths.FEATURES_DIR / "platform_ids.parquet", index=False)
-    risk.to_parquet(paths.FEATURES_DIR / "injury_risk.parquet", index=False)
-    status.to_parquet(paths.FEATURES_DIR / "injury_status.parquet", index=False)
-    teams_now.to_parquet(paths.FEATURES_DIR / "player_teams.parquet", index=False)
+    write(players, "players.parquet")
+    write(teams, "teams.parquet")
+    write(ids, "platform_ids.parquet")
+    write(risk, "injury_risk.parquet")
+    write(status, "injury_status.parquet")
+    write(teams_now, "player_teams.parquet")
     log.info("%d players, %d teams, %d platform ids, %d injury-risk rows, %d injury statuses "
              "(%d not active), %d current player teams -> %s", len(players), len(teams), len(ids),
              len(risk), len(status), (status["status"] != "ACTIVE").sum(), len(teams_now),
