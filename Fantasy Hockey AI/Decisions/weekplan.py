@@ -108,6 +108,8 @@ class WeekPlanner:
         self.eligibility = self.state.eligibility
         self.next_weight = params.next_week
         self.today = view.day
+        # After a daily lock (the live plan's `moves_from`, ESPN) today's moves take effect then.
+        self.moves_from = getattr(view, "moves_from", None)
         self.nights = [d for d in view.calendar.days_in(view.week) if d >= self.today]
         # A move can be made today (a day with no games included -- before the first week) or on
         # any night ahead.
@@ -173,6 +175,13 @@ class WeekPlanner:
 
     # ---------- inputs ----------
 
+    def effective_on(self, day):
+        """When a move made on `day` takes effect: that day, or for today's after a daily lock the
+        day after (`moves_from`) -- both sides: the drop still plays tonight."""
+        if day == self.today and self.moves_from is not None:
+            return max(day, self.moves_from)
+        return day
+
     def nights_of(self, player_id) -> list:
         """His team's nights from today to the end of this week -- without tonight for a player
         not on this roster who could not play tonight if acquired now (`view.closed_tonight`: his
@@ -212,21 +221,22 @@ class WeekPlanner:
         out = []
         for day in self.move_days:
             ahead = self.next_weight if day == self.today and self.late else 0.0
-            worth = {p: rate[p] * (sum(1 for n in self.nights_of(p) if n >= day)
+            start = self.effective_on(day)
+            worth = {p: rate[p] * (sum(1 for n in self.nights_of(p) if n >= start)
                                    + ahead * len(self.next_nights_of(p)))
                         # a goalie tonight at tonight's P(start), not his usual share
-                        + (self.tonight[p] - rate[p] if day == self.today and p in self.tonight
+                        + (self.tonight[p] - rate[p] if start == self.today and p in self.tonight
                            and self.today in self.nights_of(p) else 0.0)
                      for p in self.addable}
             best = sorted((p for p in worth if worth[p] > 0.0), key=lambda p: (-worth[p], p))[:k]
-            out += [(p, day, day) for p in best if day == self.today or day in self.nights_of(p)]
-        claims = {p: view.waiver_clears(p) for p in self.claimable}
+            out += [(p, day, start) for p in best if day == self.today or day in self.nights_of(p)]
+        claims = {p: max(view.waiver_clears(p), self.effective_on(self.today)) for p in self.claimable}
         ahead = self.next_weight if self.late else 0.0
         worth = {p: rate[p] * (sum(1 for n in self.nights_of(p) if n >= claims[p])
                                + ahead * len(self.next_nights_of(p)))
                  for p in self.claimable}
         best = sorted((p for p in worth if worth[p] > 0.0), key=lambda p: (-worth[p], p))[:k]
-        out += [(p, self.today, max(claims[p], self.today)) for p in best]
+        out += [(p, self.today, claims[p]) for p in best]
         return out
 
     def drop_cost(self, player_id) -> float:
@@ -574,15 +584,15 @@ class TeamPlans:
                 continue
             groups = [group_of(positions)]
             if q in p.claimable:
-                days = [(today, max(view.waiver_clears(q), today))]
+                days = [(today, max(view.waiver_clears(q), p.effective_on(today)))]
             else:
-                days = [(d, d) for d in p.move_days if d == today or d in p.nights_of(q)]
+                days = [(d, p.effective_on(d)) for d in p.move_days if d == today or d in p.nights_of(q)]
             for day, effective in days:
                 # WeekPlanner._shortlist's worth: rate x games from the move (a goalie tonight at
                 # tonight's line), next week's too for a late move bought for next week.
                 ahead = p.next_weight * len(p.next_nights_of(q)) if day == today and p.late else 0.0
                 worth = p.pool_rate[q] * (sum(1 for n in p.nights_of(q) if n >= effective) + ahead)
-                if day == today and q in p.tonight and today in p.nights_of(q):
+                if effective == today and q in p.tonight and today in p.nights_of(q):
                     worth += p.tonight[q] - p.pool_rate[q]
                 if worth > 0.0:
                     for g in groups:

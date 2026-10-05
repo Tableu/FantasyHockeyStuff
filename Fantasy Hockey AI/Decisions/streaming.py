@@ -178,6 +178,8 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
     """
     if params.spots <= 0:
         return []
+    if getattr(view, "moves_from", None) is not None:
+        return []                       # after a daily lock (ESPN): no rental plays tonight
     state = view._state
     eligibility = state.eligibility
     # The flat arm tests whether letting the bar fall as moves expire is doing anything.

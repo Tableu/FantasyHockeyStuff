@@ -995,6 +995,9 @@ class PlanWindow:
         rows += [(("IR: activate", name, "", "", "", ""), ()) for name in p["ir_off"]]
         for m in p["moves"]:
             note = f"reported {m['add_status']}" if m.get("add_status") not in (None, "ACTIVE") else ""
+            if p.get("moves_from"):           # made after the daily lock: both sides from tomorrow
+                start = pd.Timestamp(p["moves_from"]).strftime("%a")
+                note = "; ".join(x for x in (f"roster locked today: counts from {start}", note) if x)
             rows.append(((m["kind"].capitalize(), m["add"], _num(m["add_rate"]), m["drop"] or "",
                           _num(m["drop_rate"]), note), ()))
         rows += [(("Waiver claim", c["claim"], "", c["drop"] or "", "", c.get("note") or ""), ())

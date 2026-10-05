@@ -120,6 +120,9 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
         # forced drop when the injured player returns is priced then, by manage_ir.
         drops = [None] + drops
 
+    # After a daily lock (the live plan's `moves_from`, ESPN) a move takes effect then, for both
+    # sides. Never set in a backtest.
+    moves_from = getattr(view, "moves_from", None)
     tails = {}
 
     def tail(p):
@@ -140,7 +143,9 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
             # A claim is awarded when the player clears waivers, so it pays only from then --
             # the streaming rule's pricing. Before 2026-09-26 it was priced from today.
             clears = view.waiver_clears(incoming) if view.on_waivers(incoming) else None
-            gain = nights.swap_gain(incoming, outgoing, from_day=clears)
+            start = (clears if moves_from is None else moves_from if clears is None
+                     else max(clears, moves_from))
+            gain = nights.swap_gain(incoming, outgoing, from_day=start)
             bar = params.margin * nights.swap_sd(incoming, outgoing)
             if clears is not None:
                 bar += params.claim_premium
