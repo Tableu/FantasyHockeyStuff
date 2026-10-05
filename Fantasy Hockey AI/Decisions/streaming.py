@@ -75,7 +75,8 @@ class StreamParams:
     min_gain: float             # week mode: points a move made TODAY must clear its bar by (0 = any
                                 # gain over the bar; the model review's #4: +0.03 rentals were made)
     prune: bool                 # week mode: after the greedy build, drop planned moves a later one
-                                # made worthless, then refill (WeekPlanner._prune; review #8)
+                                # made worthless, then refill (WeekPlanner._prune; review #8); on
+                                # since 2026-10-05 (2024-25 +1.21, 2025-26 -0.18; Settings/README)
 
     def __post_init__(self):
         if self.mode not in MODES:
