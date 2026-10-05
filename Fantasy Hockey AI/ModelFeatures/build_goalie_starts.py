@@ -157,7 +157,7 @@ def main():
         table = derive(fetch(cursor, [season_ids[season]]))
         verify(table, season)
         out = paths.FEATURES_DIR / f"goalie_starts_{season}.parquet"
-        table.to_parquet(out, index=False)
+        paths.write_parquet(table, out)
         log.info("%s -> %s", season, out)
 
 

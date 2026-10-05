@@ -55,14 +55,14 @@ def main():
     files = output_paths(game_date)
     if not out:
         # No games: still today's injury report, which the day's IR moves and pickups read.
-        tonight.status_frame(tonight.player_status(cursor, at), tonight.injury_parts(cursor, at)).to_parquet(
-            files["status"], index=False)
+        status = tonight.status_frame(tonight.player_status(cursor, at), tonight.injury_parts(cursor, at))
+        paths.write_parquet(status, files["status"])
         log.info("no games: wrote %s only", files["status"].name)
         return
-    out["skaters"].to_parquet(files["skaters"], index=False)
-    out["goalies"].to_parquet(files["goalies"], index=False)
-    out["context"].assign(built_at=at).to_parquet(files["context"], index=False)
-    out["status"].to_parquet(files["status"], index=False)
+    paths.write_parquet(out["skaters"], files["skaters"])
+    paths.write_parquet(out["goalies"], files["goalies"])
+    paths.write_parquet(out["context"].assign(built_at=at), files["context"])
+    paths.write_parquet(out["status"], files["status"])
     files["questionable"].write_text(json.dumps({str(k): v for k, v in out["questionable"].items()}),
                                      encoding="utf-8")
     log.info("wrote %s", ", ".join(p.name for p in files.values()))

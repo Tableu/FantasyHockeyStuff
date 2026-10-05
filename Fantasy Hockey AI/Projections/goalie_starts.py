@@ -401,7 +401,7 @@ def predict(season: str, models_dir=None) -> pd.DataFrame:
                  "p_start_raw", "injured_at_lockout"]].copy()
     path = paths.REPORTS_DIR / f"goalie_pstart_{season}.parquet"
     paths.ensure(paths.REPORTS_DIR)
-    out.to_parquet(path, index=False)
+    paths.write_parquet(out, path)
     log.info("%s: %d rows, mean p_start %.4f -> %s", season, len(out), out["p_start"].mean(), path)
     return out
 

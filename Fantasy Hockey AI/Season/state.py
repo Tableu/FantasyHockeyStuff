@@ -57,9 +57,19 @@ class Team:
         # prorates its weekly limit by the week's days (12090: "Week: 7", yet 6 in the 6-day week 1,
         # 2026-10-01); only the live runner sets it, for the week it plans in.
         self.week_cap = None
+        # Roster spots held by players the plan cannot see (the live runner: a rostered player with
+        # no PlayerID or no eligibility). Still full: `spots` is what the team can fill. Always 0
+        # in a backtest.
+        self.unseen = 0
         self.waiver_priority = team
         self.weekly_points = defaultdict(float)
         self.matchup_wins = 0.0
+
+    @property
+    def spots(self) -> int:
+        """Roster spots this team's own players can occupy: the league's, less those held by
+        players the plan cannot see (`unseen`)."""
+        return self.config.roster_size - self.unseen
 
     @property
     def moves_left(self) -> int:
@@ -76,9 +86,9 @@ class Team:
         return player_id in self.roster or player_id in self.ir
 
     def assert_legal(self) -> None:
-        if len(self.roster) > self.config.roster_size:
+        if len(self.roster) > self.spots:
             raise IllegalMove(f"team {self.team} holds {len(self.roster)} of "
-                              f"{self.config.roster_size} roster spots")
+                              f"{self.spots} roster spots")
         if len(self.ir) > self.config.ir:
             raise IllegalMove(f"team {self.team} holds {len(self.ir)} of {self.config.ir} IR")
         if self.moves_used > self.week_limit:
@@ -178,7 +188,7 @@ class LeagueState:
         team = self.teams[team_index]
         if drop is not None:
             self.drop(team_index, drop, today, charge=False)     # its cost is inside `cost`
-        if len(team.roster) >= self.config.roster_size:
+        if len(team.roster) >= team.spots:
             raise IllegalMove(f"team {team_index} must drop before adding")
 
         self.pool.discard(player_id)
@@ -254,7 +264,7 @@ class LeagueState:
                 raise IllegalMove(f"team {team_index} cannot stash {stash}: not on its roster")
             if ir_eligible is None or stash not in ir_eligible:
                 raise IllegalMove(f"{stash} is not IR-eligible today")
-        elif drop is None and len(team.roster) >= self.config.roster_size:
+        elif drop is None and len(team.roster) >= team.spots:
             raise IllegalMove(f"team {team_index} must drop before activating {player_id}")
 
         team.moves_used += cost
@@ -359,7 +369,7 @@ class LeagueState:
                 self.claim_drops.pop((team_index, player_id), None)
                 return "the chosen drop had left the roster and no replacement drop was chosen"
             self.claim_drops[(team_index, player_id)] = drop
-        if drop is None and len(team.roster) >= self.config.roster_size:
+        if drop is None and len(team.roster) >= team.spots:
             return "a full roster and no drop"
         return None
 

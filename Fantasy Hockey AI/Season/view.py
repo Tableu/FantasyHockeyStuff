@@ -190,7 +190,7 @@ class SlateView:
 
     def roster_room(self) -> int:
         """Open roster spots (IR excluded): what an activation or a drop-less add can use."""
-        return self.config.roster_size - len(self.roster)
+        return self._state.teams[self.team_index].spots - len(self.roster)
 
     def opponent_roster(self) -> list:
         """The opposing manager's holdings.

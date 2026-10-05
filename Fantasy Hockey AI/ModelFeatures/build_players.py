@@ -24,7 +24,6 @@ after each injury or line-chart snapshot, so that file follows the reports.
 """
 
 import logging
-import os
 
 import pandas as pd
 
@@ -41,12 +40,7 @@ def fetch(cursor, sql) -> pd.DataFrame:
 
 
 def write(frame, name):
-    """Write then swap in, so the plan server's live views (Server/games.py), which read these
-    while a refresh rebuilds them, never see a half-written file."""
-    path = paths.FEATURES_DIR / name
-    tmp = path.with_name(path.name + ".tmp")
-    frame.to_parquet(tmp, index=False)
-    os.replace(tmp, path)
+    paths.write_parquet(frame, paths.FEATURES_DIR / name)
 
 
 def main():

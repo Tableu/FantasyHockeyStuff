@@ -13,6 +13,7 @@ for next season -- in models/2026-27/. Inside a season, one folder per model fam
 `Settings/scoring/` folder, whose files `weights.py` can load by name.
 """
 
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -26,6 +27,16 @@ SCORESETS_DIR = PROJECT_ROOT.parent / "Settings" / "scoring"
 def ensure(directory: Path) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     return directory
+
+
+def write_parquet(frame, path) -> None:
+    """Write then swap in: the plan server reads these files while the nightly job and its own
+    refreshes rebuild them, and a reader caught mid-write gets a half file ("Parquet magic bytes
+    not found", the Goals tab 2026-10-03). os.replace is atomic on one filesystem."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    frame.to_parquet(tmp, index=False)
+    os.replace(tmp, path)
 
 
 def next_season(season: str) -> str:

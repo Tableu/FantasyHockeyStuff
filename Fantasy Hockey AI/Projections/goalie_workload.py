@@ -252,7 +252,7 @@ def build(season: str, date: str | None) -> None:
         if out.exists():
             kept = pd.read_parquet(out)
             table = pd.concat([kept[kept["game_date"] != day], table], ignore_index=True)
-    table.sort_values(["game_date", "player_id"]).to_parquet(out, index=False)
+    paths.write_parquet(table.sort_values(["game_date", "player_id"]), out)
     log.info("%s: %d rows over %d day(s), %d goalies -> %s", season, len(table),
              table["game_date"].nunique(), table["player_id"].nunique(), out.name)
 

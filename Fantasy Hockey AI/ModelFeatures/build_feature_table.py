@@ -116,7 +116,7 @@ def main():
 
         skaters, goalies = base_module.build_base(cursor, [season_id], candidates)
         base_path = paths.FEATURES_DIR / f"base_{season}.parquet"
-        skaters.to_parquet(base_path, index=False)
+        paths.write_parquet(skaters, base_path)
         # The goalie rolling table feeds the opposing-goalie features in `assemble` below, in
         # memory; nothing reads it from disk, so it is no longer written out.
         log.info("base: %d rows x %d columns -> %s", len(skaters), skaters.shape[1], base_path.name)
@@ -124,7 +124,7 @@ def main():
         lineup = variant_a if args.variant == "A" else lineup_parquet(season, "B", args.copies)
         table = assemble_module.assemble(skaters, goalies, lineup)
         out_path = paths.FEATURES_DIR / f"skaters_{args.variant}_{season}.parquet"
-        table.to_parquet(out_path, index=False)
+        paths.write_parquet(table, out_path)
         log.info("variant %s: %d rows x %d columns -> %s", args.variant, len(table), table.shape[1], out_path.name)
 
         if in_progress(season):

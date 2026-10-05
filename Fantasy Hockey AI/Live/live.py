@@ -79,6 +79,9 @@ PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the pla
 # player's game tonight is over, and the plan window says so. Fleaflicker takes the add at once; the
 # player counts from his next game (closed_tonight).
 ADDS_LOCK_AT_FIRST_PUCK = {"espn"}
+# The local hour by which the nightly job (pipeline/run_nightly_ingest.cmd, 4:00) has written today's
+# rest-of-season projections; a plan after it on older ones says so (LiveRunner.freshness).
+NIGHTLY_DONE_HOUR = 6
 
 
 def season_of(day: dt.date) -> str:
@@ -96,7 +99,8 @@ def _note(x):
 @dataclasses.dataclass
 class LeagueSnapshot:
     """The real league at one moment, in our player ids. `teams[i]` = {"name", "roster", "ir",
-    "moves_used"}; `lineup` = my current {slot label: [player ids]} (what Fleaflicker shows now, for
+    "moves_used", "unmatched"} -- `unmatched` the rostered (not IR) platform ids with no PlayerID,
+    whose roster spots are full though the plan cannot see who holds them; `lineup` = my current {slot label: [player ids]} (what Fleaflicker shows now, for
     the per-game lock); `waivers` = {player id: date he clears}."""
     teams: list
     me: int
@@ -118,7 +122,8 @@ class LeagueSnapshot:
     def load(cls, path: Path) -> "LeagueSnapshot":
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         teams = [{"name": t["name"], "roster": [int(p) for p in t["roster"]],
-                  "ir": [int(p) for p in t.get("ir", [])], "moves_used": int(t.get("moves_used", 0))}
+                  "ir": [int(p) for p in t.get("ir", [])], "moves_used": int(t.get("moves_used", 0)),
+                  "unmatched": list(t.get("unmatched", []))}
                  for t in raw["teams"]]
         return cls(teams=teams, me=int(raw["me"]), opponent=raw.get("opponent"),
                    my_week_points=float(raw.get("my_week_points", 0.0)),
@@ -153,7 +158,8 @@ class LeagueSnapshot:
                 lineup = {label: ids.resolve(players)[0] for label, players in team.lineup.items()
                           if label not in ("BN", "IR")}
             teams.append({"name": team.name, "team_id": team.team_id, "roster": roster, "ir": ir,
-                          "moves_used": adapter.moves_used(team.team_id, day, when=when)})
+                          "moves_used": adapter.moves_used(team.team_id, day, when=when),
+                          "unmatched": missing})
         if me is None:
             raise SystemExit(f"team {my_team_id} is not in this league's rosters")
         if unmatched:
@@ -480,7 +486,13 @@ class LiveRunner:
         manager.plan.week_alternatives = WEEK_ALTERNATIVES
         manager.transactions(view())
         next_week, next_plans = self._next_week_plans(manager, state, week, view, skaters, goalie_projections)
-        problems = [ros_note] if ros_note else []
+        problems = ([ros_note] if ros_note else []) + self.freshness()
+        hidden = (list(snapshot.teams[snapshot.me].get("unmatched", []))
+                  + [p for p in snapshot.teams[snapshot.me]["roster"] if p not in self.eligibility])
+        if hidden:
+            problems.append(f"{len(hidden)} rostered player(s) the plan cannot see ({', '.join(map(str, hidden))}: "
+                            "no player id or no eligibility) -- their spots count as full, but the "
+                            "plan never moves or starts them; check the platform id map")
         try:
             state.assert_ir_resolved(snapshot.me, injured)
         except state_module.IllegalMove as error:
@@ -631,6 +643,33 @@ class LiveRunner:
                  len(model), files[-1].name, scale)
         return {**{p: v * scale for p, v in self.ros_seed.items()}, **model}, None
 
+    def freshness(self) -> list:
+        """What today's plan was built on that is older than it should be, for its problems line:
+        the newest game loaded (the nightly ingest's goalie starts) behind the last game day before
+        today, or the newest rest-of-season projections older than today once the 4:00 nightly job
+        should have run (NIGHTLY_DONE_HOUR). On 2026-10-04 the PC slept through 4:00 and the plan
+        ran on Oct 2's games and Oct 3's projections without a word. A rehearsal of a past date
+        is old on purpose: only today's plan is checked."""
+        if self.day != dt.date.today():
+            return []
+        out = []
+        played = [d for d in self.game_days if d < self.day]
+        if played:
+            last = max(played)
+            path = paths.goalie_starts(self.season)
+            loaded = (pd.to_datetime(pd.read_parquet(path, columns=["game_date"])["game_date"]).max().date()
+                      if path.exists() else None)
+            if loaded is None or loaded < last:
+                out.append(f"stale data: games through {last} are not loaded (newest {loaded or 'none'})"
+                           " -- the nightly ingest has not run (pipeline/run_nightly_ingest.cmd)")
+        files = sorted(paths.PROJECTIONS_REPORTS.glob(f"ros_projections_{self.season}_*.parquet"))
+        newest = files[-1].stem.rsplit("_", 1)[-1] if files else None
+        if (newest is not None and newest < self.day.isoformat()
+                and dt.datetime.now().hour >= NIGHTLY_DONE_HOUR):
+            out.append(f"stale data: rest-of-season projections are from {newest}, not today"
+                       " -- the nightly job has not run (pipeline/run_nightly_ingest.cmd)")
+        return out
+
     def goalie_ros(self) -> dict:
         """{goalie: rest-of-season points per team game} from today's (or the latest earlier)
         goalie workload rows (Projections/goalie_workload.py, built by planpass.tonight): his
@@ -662,6 +701,10 @@ class LiveRunner:
             holder.roster = [p for p in team["roster"] if p in self.eligibility]
             holder.ir = [p for p in team["ir"] if p in self.eligibility]
             holder.moves_used = team["moves_used"]
+            # Roster spots held by players the plan cannot see -- no PlayerID, or no eligibility --
+            # are still full (view.roster_room): one left out once read as an open spot.
+            holder.unseen = (len(team.get("unmatched", []))
+                             + sum(1 for p in team["roster"] if p not in self.eligibility))
             holder.week_cap = week_cap
             for p in holder.roster + holder.ir:
                 state.owner[p] = index

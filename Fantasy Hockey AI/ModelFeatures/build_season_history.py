@@ -90,14 +90,14 @@ def main():
     drafts, careers = landing_history(cursor)
 
     out = paths.ensure(paths.FEATURES_DIR)
-    drafts.to_parquet(out / "player_drafts.parquet", index=False)
-    careers.to_parquet(out / "player_careers.parquet", index=False)
+    paths.write_parquet(drafts, out / "player_drafts.parquet")
+    paths.write_parquet(careers, out / "player_careers.parquet")
     log.info("player_drafts %d players, player_careers %d lines for %d players in %d leagues",
              len(drafts), len(careers), careers["player_id"].nunique() if len(careers) else 0,
              careers["league"].nunique() if len(careers) else 0)
-    totals.to_parquet(out / "season_totals.parquet", index=False)
-    injury.reset_index().to_parquet(out / "injury_seasons.parquet", index=False)
-    team_games.to_parquet(out / "team_games.parquet", index=False)
+    paths.write_parquet(totals, out / "season_totals.parquet")
+    paths.write_parquet(injury.reset_index(), out / "injury_seasons.parquet")
+    paths.write_parquet(team_games, out / "team_games.parquet")
     log.info("season_totals %d rows (%d seasons), injury_seasons %d, team_games %d -> %s",
              len(totals), totals["season"].nunique(), len(injury), len(team_games), out)
 

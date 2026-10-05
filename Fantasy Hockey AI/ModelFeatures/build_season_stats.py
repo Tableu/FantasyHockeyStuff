@@ -46,7 +46,7 @@ def main():
     season_id = extract.season_ids_for(cursor, [args.season])[args.season]
     table = fetch(cursor, season_id)
     out = paths.ensure(paths.FEATURES_DIR) / f"season_stats_{args.season}.parquet"
-    table.to_parquet(out, index=False)
+    paths.write_parquet(table, out)
     log.info("%s: %d skaters -> %s", args.season, len(table), out)
 
 

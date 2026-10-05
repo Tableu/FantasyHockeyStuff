@@ -230,7 +230,7 @@ def run(args):
 
     destination = (args.out or paths.ensure(paths.REPORTS_DIR)
                    / f"ros_projections_{args.season}_{as_of.date()}.parquet")
-    out.to_parquet(destination, index=False)
+    paths.write_parquet(out, destination)
     log.info("wrote %s: %d players x %d columns", destination, len(out), out.shape[1])
     print_preview(out, args)
     return out

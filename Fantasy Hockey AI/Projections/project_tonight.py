@@ -162,7 +162,7 @@ def main():
                     on=["game_id", "team_id"], how="left")
     paths.ensure(OUT_DIR)
     path = OUT_DIR / f"{stem}.parquet"
-    out.to_parquet(path, index=False)
+    paths.write_parquet(out, path)
     log.info("%s: %d skaters (%d capped), %d goalies (%d adjusted) -> %s", game_date, len(skater_out),
              int(skater_out["note"].notna().sum()), len(goalie_out), int(goalie_out["note"].notna().sum()), path)
 
