@@ -46,12 +46,15 @@ taken first, with alternative plans that leave out whole teams. It changes nothi
 """
 
 import logging
+import operator
 
 import slots as slots_module
 import streaming
 import valuation
 
 log = logging.getLogger("weekplan")
+
+EFFECTIVE = operator.itemgetter("effective")
 
 def long_absence(view, player_id, nights) -> bool:
     """Whether an injured player is out for most of a window (`nights`, his team's nights in it):
@@ -252,13 +255,22 @@ class WeekPlanner:
     # ---------- the roster a plan holds ----------
 
     @staticmethod
-    def roster_at(base, moves, night) -> set:
+    def roster_at(base, moves, night, ordered=False) -> set:
+        """The roster a plan holds on `night`: its moves applied in the order they take effect
+        (stable, so moves on one day keep the plan's order). `ordered`: the moves are already in
+        that order (`ordered()`), so a caller asking about several nights sorts them once."""
         held = set(base)
-        for m in sorted(moves, key=lambda m: m["effective"]):
-            if m["effective"] <= night:
-                held.discard(m["outgoing"])
-                held.add(m["incoming"])
+        for m in (moves if ordered else sorted(moves, key=EFFECTIVE)):
+            if m["effective"] > night:
+                break
+            held.discard(m["outgoing"])
+            held.add(m["incoming"])
         return held
+
+    @staticmethod
+    def ordered(moves) -> list:
+        """A plan's moves in the order they take effect, for `roster_at(..., ordered=True)`."""
+        return sorted(moves, key=EFFECTIVE)
 
     def plays_on(self, player_id) -> set:
         """The nights he plays that a plan prices (this week's, next week's when priced), and is
@@ -422,14 +434,21 @@ class WeekPlanner:
                          if n >= effective})
         cache = self._base[1] if self._base is not None and old is self._base[0] else None
         total = 0.0
+        # Each plan sorted once for all its nights (roster_at re-sorted it per night, ~8M times a
+        # season), and the old side only when a night misses the cache.
+        old_order, new_order = None, self.ordered(new)
         for night in nights:
             before = cache.get(night) if cache is not None else None
             if before is None:
-                before = self.night_value(night, self.roster_at(self.roster, old, night))
+                if old_order is None:
+                    old_order = self.ordered(old)
+                before = self.night_value(night, self.roster_at(self.roster, old_order, night,
+                                                                ordered=True))
                 if cache is not None:
                     cache[night] = before
             total += self.weight(night, late) * (
-                self.night_value(night, self.roster_at(self.roster, new, night)) - before)
+                self.night_value(night, self.roster_at(self.roster, new_order, night,
+                                                       ordered=True)) - before)
         return total
 
     def execute(self, plan) -> list:
