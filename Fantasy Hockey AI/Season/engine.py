@@ -166,6 +166,7 @@ class Season:
         # decide and phase 3 will sample to resolve, and if those two ever share a stream the
         # manager is choosing the players who are about to score. Keeping them apart from the
         # start costs nothing; discovering it later invalidates every number.
+        self.branch = None              # Season/branch.py's per-week hook
         self.decision_sims = int(decision_sims)
         self.simulator = None
         self.goalie_fit = None
@@ -642,59 +643,68 @@ class Season:
                 if seen:
                     history = estimators_module.naive_history(
                         actuals[actuals["game_date"].isin(seen)], prior_rate, self.scoreset)
+                # Season/branch.py: a copy of the league plays this week with another manager in
+                # one seat. Unset in every ordinary run.
+                if self.branch is not None and week <= self.regular_weeks:
+                    self.branch(self, week, schedule, history)
 
-            opponents = self._opponents_for(schedule.get(week, []))
-            self.latest_ros.update(self.ros_by_day.get(pd.Timestamp(day), {}))
-            self.latest_team.update(self.nhl_team_by_day.get(day, {}))
-            goalie_projections = self._goalie_projections(day, history)
-            # Tonight's lockout report updates the players it lists; everyone else keeps his last.
-            self.injured_status.update(self.status_by_day.get(day, {}))
-            self.injured = {p for p, hurt in self.injured_status.items() if hurt}
-            self.returns = self._expected_returns(day)
-
-            # A claim whose drop has left the roster asks its manager again, with today's view.
-            def redrop(team_index, player_id, _day=day, _week=week):
-                view = self._view_for(team_index, _day, _week, opponents.get(team_index),
-                                      history, goalie_projections)
-                return self.field[team_index].claim_drop(view, player_id)
-
-            self.state.process_waivers(day, redrop=redrop)
-            for manager in self._daily_order(day):
-                v = self._view_for(manager.team_index, day, week,
-                                   opponents.get(manager.team_index), history,
-                                   goalie_projections)
-                manager.manage_ir(v)
-                if self._transacts(v):
-                    if v.weighted and v.alive and not v.on_bye and hasattr(manager, "p_win"):
-                        v.p_advance = manager.p_win(v)
-                    manager.transactions(v)
-                elif hasattr(manager, "manage_ir_step"):
-                    manager.manage_ir_step(v)          # the orchestrator runs IR inside its plan
-                # The league's rule, not a strategy: a healthy player may not sit on IR. An
-                # activation on a full roster forces a drop, and a manager has to make it today.
-                self.state.assert_ir_resolved(manager.team_index, self.injured)
-            self.state.assert_legal()
-
-            # Every lineup is set before any is scored. Scoring each as it was set banked an
-            # earlier seat's points for tonight while a later seat was still choosing -- so the
-            # later seat read its opponent's REALIZED night before its own lock, and its matchup
-            # projection counted that night twice (paired forecasts of one matchup summed to 0.77).
-            lineups = []
-            for manager in self.field:
-                v = self._view_for(manager.team_index, day, week,
-                                   opponents.get(manager.team_index), history,
-                                   goalie_projections)
-                lineups.append((manager, manager.set_lineup(v), v))
-            for manager, lineup, v in lineups:
-                self._resolve(manager.team_index, day, week, lineup, v)
-
-            self._track_goalie_starts(day)
-            self._carry_rates(day, goalie_projections)
+            self._play_day(day, week, schedule, history)
             seen.append(day)
 
         if current_week is not None:
             self._settle(current_week, schedule)
         return self._report()
+
+    def _play_day(self, day, week, schedule, history) -> None:
+        """One day: the reports, waivers, every manager's moves, the lineups, the scores. The body
+        of `run`'s day loop, a method so a copy of the league (Season/branch.py) can play days."""
+        opponents = self._opponents_for(schedule.get(week, []))
+        self.latest_ros.update(self.ros_by_day.get(pd.Timestamp(day), {}))
+        self.latest_team.update(self.nhl_team_by_day.get(day, {}))
+        goalie_projections = self._goalie_projections(day, history)
+        # Tonight's lockout report updates the players it lists; everyone else keeps his last.
+        self.injured_status.update(self.status_by_day.get(day, {}))
+        self.injured = {p for p, hurt in self.injured_status.items() if hurt}
+        self.returns = self._expected_returns(day)
+
+        # A claim whose drop has left the roster asks its manager again, with today's view.
+        def redrop(team_index, player_id, _day=day, _week=week):
+            view = self._view_for(team_index, _day, _week, opponents.get(team_index),
+                                  history, goalie_projections)
+            return self.field[team_index].claim_drop(view, player_id)
+
+        self.state.process_waivers(day, redrop=redrop)
+        for manager in self._daily_order(day):
+            v = self._view_for(manager.team_index, day, week,
+                               opponents.get(manager.team_index), history,
+                               goalie_projections)
+            manager.manage_ir(v)
+            if self._transacts(v):
+                if v.weighted and v.alive and not v.on_bye and hasattr(manager, "p_win"):
+                    v.p_advance = manager.p_win(v)
+                manager.transactions(v)
+            elif hasattr(manager, "manage_ir_step"):
+                manager.manage_ir_step(v)          # the orchestrator runs IR inside its plan
+            # The league's rule, not a strategy: a healthy player may not sit on IR. An
+            # activation on a full roster forces a drop, and a manager has to make it today.
+            self.state.assert_ir_resolved(manager.team_index, self.injured)
+        self.state.assert_legal()
+
+        # Every lineup is set before any is scored. Scoring each as it was set banked an
+        # earlier seat's points for tonight while a later seat was still choosing -- so the
+        # later seat read its opponent's REALIZED night before its own lock, and its matchup
+        # projection counted that night twice (paired forecasts of one matchup summed to 0.77).
+        lineups = []
+        for manager in self.field:
+            v = self._view_for(manager.team_index, day, week,
+                               opponents.get(manager.team_index), history,
+                               goalie_projections)
+            lineups.append((manager, manager.set_lineup(v), v))
+        for manager, lineup, v in lineups:
+            self._resolve(manager.team_index, day, week, lineup, v)
+
+        self._track_goalie_starts(day)
+        self._carry_rates(day, goalie_projections)
 
     # ---------- the playoffs ----------
 

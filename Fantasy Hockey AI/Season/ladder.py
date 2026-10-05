@@ -250,7 +250,7 @@ def opponent_board(data, scoreset, config, eligibility, replication, seat) -> pd
 
 
 def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, verbose_weeks,
-            decision_sims, strategy, candidate=None):
+            decision_sims, strategy, candidate=None, branch=None):
     from decisionlayer import managers as managers_module
 
     field = managers_module.build_field(config, scoreset, strategy, rungs=rungs,
@@ -277,6 +277,7 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
     season = engine_module.Season(config, calendar, data, eligibility, scoreset, field,
                                  replication=replication, log_every_week=verbose_weeks,
                                  decision_sims=sims)
+    season.branch = branch                # Season/branch.py's per-week hook, else None
     board, rate, forward = data["prior"][scoreset.name]
     vor = data.get("vor", {}).get(scoreset.name)
     boards = {m.team_index: vor for m in field if m.draft_board == "vor"}

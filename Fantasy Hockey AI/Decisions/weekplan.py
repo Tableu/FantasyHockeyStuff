@@ -346,12 +346,13 @@ class WeekPlanner:
             return self._plan_lazy()
         moves, spent = [], {}
         open_spots = self.view.roster_room()
+        pruned = set()                    # (incoming, day) the removal pass took out: never re-added
         while True:
             best = None
             held = self.held(moves)
             self._base = (moves, {})
             for incoming, day, effective in self.candidates:
-                if incoming in held[0] or incoming in held[1]:
+                if incoming in held[0] or incoming in held[1] or (incoming, day) in pruned:
                     continue
                 for outgoing, cost, trial in self.trials(moves, held, spent, open_spots,
                                                          incoming, day, effective):
@@ -360,6 +361,10 @@ class WeekPlanner:
                     edge = self.params.survival ** (day - self.today).days * (gain - bar)
                     if best is None or edge > best[0]:
                         best = (edge, trial, cost, outgoing is None, day)
+            if best is None and self.params.prune:
+                moves, spent, open_spots, pruned = self._prune(moves, pruned)
+                if spent is not None:
+                    continue
             if best is None:
                 return sorted(moves, key=lambda m: (m["day"], m["effective"]))
             _, moves, cost, into_open, day = best
@@ -378,12 +383,14 @@ class WeekPlanner:
         moves, spent = [], {}
         open_spots = self.view.roster_room()
         ceilings = None                   # candidate index -> best edge when last priced
+        pruned = set()                    # (incoming, day) the removal pass took out: never re-added
         while True:
             best = None
             held = self.held(moves)
             self._base = (moves, {})
-            live = [i for i, (incoming, _, _) in enumerate(self.candidates)
-                    if incoming not in held[0] and incoming not in held[1]]
+            live = [i for i, (incoming, day, _) in enumerate(self.candidates)
+                    if incoming not in held[0] and incoming not in held[1]
+                    and (incoming, day) not in pruned]
             if ceilings is not None:
                 live.sort(key=lambda i: (-ceilings.get(i, -math.inf), i))
             priced = {}
@@ -401,11 +408,44 @@ class WeekPlanner:
                         best = (edge, trial, cost, outgoing is None, day, i)
                 priced[i] = top
             ceilings = {**(ceilings or {}), **priced}
+            if best is None and self.params.prune:
+                moves, spent, open_spots, pruned = self._prune(moves, pruned)
+                if spent is not None:
+                    ceilings = None                   # the plan changed: price every candidate again
+                    continue
             if best is None:
                 return sorted(moves, key=lambda m: (m["day"], m["effective"]))
             _, moves, cost, into_open, day, _ = best
             spent[day] = spent.get(day, 0) + cost
             open_spots -= into_open
+
+    def _prune(self, moves, pruned):
+        """The removal pass (strategy streaming.prune): greedy insertion never revisits a move, so
+        a pickup a later one made worthless stays in. Each planned move no later move depends on
+        (its pickup is nobody's drop) is tried out of the plan; if the week's lineup points without
+        it are within its bar of the points with it, it comes out, and the build resumes with the
+        freed budget. Returns (moves, spent, open spots, pruned) -- spent is None when nothing came
+        out, and the build ends."""
+        def week_points(plan):
+            ordered = self.ordered(plan)
+            return sum(self.weight(n) * self.night_value(n, self.roster_at(self.roster, ordered, n,
+                                                                            ordered=True))
+                       for n in self.nights)
+        dropped = {m["outgoing"] for m in moves if m["outgoing"] is not None}
+        whole = week_points(moves)
+        for m in sorted(moves, key=lambda m: (m["day"], m["effective"]), reverse=True):
+            if m["incoming"] in dropped:
+                continue
+            rest = [x for x in moves if x is not m]
+            if whole - week_points(rest) <= m["bar"]:
+                pruned = pruned | {(m["incoming"], m["day"])}
+                spent = {}
+                for x in rest:
+                    spent[x["day"]] = spent.get(x["day"], 0) + self.move_cost(x["day"], x["kind"],
+                                                                              x["outgoing"])
+                open_spots = self.view.roster_room() - sum(1 for x in rest if x["outgoing"] is None)
+                return rest, spent, open_spots, pruned
+        return moves, None, None, pruned
 
     @staticmethod
     def held(moves) -> tuple:
@@ -446,7 +486,10 @@ class WeekPlanner:
                                                            sorted(before)):
                 continue
             trial = self._with(moves, incoming, outgoing, day, effective, kind, later)
-            if trial[-1]["gain"] > trial[-1]["bar"]:
+            # A move made today clears its bar by `min_gain` (strategy streaming.min_gain): the
+            # moves made are the only ones that cost anything; later ones are planned again.
+            margin = self.params.min_gain if day == self.today else 0.0
+            if trial[-1]["gain"] > trial[-1]["bar"] and trial[-1]["gain"] - trial[-1]["bar"] >= margin:
                 yield outgoing, cost, trial
 
     def _with(self, moves, incoming, outgoing, day, effective, kind, later) -> list:

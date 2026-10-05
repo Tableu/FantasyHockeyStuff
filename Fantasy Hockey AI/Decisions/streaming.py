@@ -72,6 +72,10 @@ class StreamParams:
     lazy: bool                  # week mode: lazy greedy -- re-price candidates from the top, last
                                 # round's best edges as ceilings (weekplan.WeekPlanner._plan_lazy);
                                 # on since 2026-10-05 for speed, neutral both seasons (Settings/README)
+    min_gain: float             # week mode: points a move made TODAY must clear its bar by (0 = any
+                                # gain over the bar; the model review's #4: +0.03 rentals were made)
+    prune: bool                 # week mode: after the greedy build, drop planned moves a later one
+                                # made worthless, then refill (WeekPlanner._prune; review #8)
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -85,7 +89,9 @@ class StreamParams:
                 f"{f' nw={self.next_week:g}' if self.mode == 'week' and self.next_week else ''}"
                 f"{' goalies' if self.mode == 'week' and self.goalies else ''}"
                 f"{f' tol={self.spot_tolerance:g}' if self.spot_tolerance else ''}"
-                f"{' lazy' if self.mode == 'week' and self.lazy else ''}")
+                f"{' lazy' if self.mode == 'week' and self.lazy else ''}"
+                f"{f' mg={self.min_gain:g}' if self.mode == 'week' and self.min_gain else ''}"
+                f"{' prune' if self.mode == 'week' and self.prune else ''}")
 
 
 # How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
