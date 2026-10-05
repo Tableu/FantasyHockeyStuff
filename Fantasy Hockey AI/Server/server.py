@@ -22,6 +22,9 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /games/{id}?after=n   one game: line score, team stats, box score with fantasy points, plays
                                after sortOrder n
     GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
+    GET  /droppable            the players you marked OK to drop: {league, player_ids} ([]: the
+                               model chooses its own drops)
+    PUT  /droppable {player_ids}   replaces that list ([] clears it); the next refresh plans on it
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
 read, plan and saved plan files in a child process that exits after -- so the server's memory does
@@ -50,6 +53,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import seasonlayer  # noqa: E402,F401 -- puts Season/ on sys.path; see seasonlayer.py
+import droppable  # noqa: E402
 import games as live_games  # noqa: E402
 import leagues  # noqa: E402
 import paths  # noqa: E402
@@ -187,6 +191,10 @@ class Refresh(BaseModel):
     mode: str = "quick"
 
 
+class Droppable(BaseModel):
+    player_ids: list[int] = []
+
+
 def make_app(worker: Worker) -> FastAPI:
     app = FastAPI(title="Fantasy hockey plan server")
     store = live_games.FeedStore(LIVE / "reports" / "goals")
@@ -228,6 +236,16 @@ def make_app(worker: Worker) -> FastAPI:
         return {"league": chosen.name, "file": path.name,
                 "saved_at": iso(dt.datetime.fromtimestamp(path.stat().st_mtime)),
                 "plan": json.loads(path.read_text(encoding="utf-8"))}
+
+    @app.get("/droppable")
+    def get_droppable(league: str | None = None):
+        chosen = worker.league(league)
+        return {"league": chosen.name, "player_ids": sorted(droppable.load(chosen.name) or [])}
+
+    @app.put("/droppable")
+    def put_droppable(body: Droppable, league: str | None = None):
+        chosen = worker.league(league)
+        return {"league": chosen.name, "player_ids": droppable.save(chosen.name, body.player_ids)}
 
     @app.post("/refresh")
     def refresh(body: Refresh):

@@ -128,8 +128,9 @@ class WeekPlanner:
         pool = self.addable + self.claimable
         self.spots = streaming.spots(view, params, horizon, source, pool, eligibility,
                                      goalies=self.goalies)
-        if self.goalies:
-            # A starter is never rented away, even when a free agent projects as well: a goalie
+        if self.goalies and getattr(view, "droppable", None) is None:
+            # A starter is never rented away (unless the user marked him OK to drop: spots),
+            # even when a free agent projects as well: a goalie
             # projected to start `starter_share` of his team's remaining games (his rest-of-season
             # rate over the league-average line; Projections/goalie_workload.py) keeps his spot.
             lines = view.goalie_projections["expected_line"]

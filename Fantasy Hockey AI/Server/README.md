@@ -26,6 +26,8 @@ the first league served; plan_gui.py sends its own `--league`.
 | GET /goals | Every goal today, newest first, with the fantasy points it earned either side |
 | GET /games/{id}?after=n | One game: line score, team stats, box score with fantasy points, plays after sortOrder n |
 | GET /games/{id}/lines | Each team's lines, pairs and power-play / penalty-kill units as used |
+| GET /droppable | The players you marked OK to drop: {league, player_ids}; [] = the model chooses its own drops |
+| PUT /droppable {"player_ids": [...]} | Replaces that list ([] clears it); the next refresh plans on it (Live/droppable.py) |
 
 The live games calls are games.py's: the NHL's public feeds held in memory (nothing goes to the
 database), one shared copy per feed for every league, fetched again only once the NHL's cache says it expired (about

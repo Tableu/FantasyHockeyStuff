@@ -49,6 +49,11 @@ def league_reports(league: str) -> Path:
     return REPORTS_DIR / league
 
 
+def droppable(league: str) -> Path:
+    """The players the user marked OK to drop in that league (droppable.py)."""
+    return league_reports(league) / "droppable.json"
+
+
 def draft_board(season: str, league: str, scoring: str, suffix: str) -> Path:
     return league_reports(league) / f"draft_board_{season}_{scoring}.{suffix}"
 

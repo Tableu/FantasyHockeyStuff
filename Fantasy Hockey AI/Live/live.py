@@ -39,6 +39,7 @@ import pandas as pd
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import livepaths
 import draft_board
+import droppable as droppable_module
 import engine as engine_module
 import inputs
 import league as league_module
@@ -422,6 +423,8 @@ class LiveRunner:
         decision_points = self._draws(skaters, goalies)
 
         state = self._state(snapshot, day)
+        # Who the user marked OK to drop (Live/droppable.py), or None: the model chooses.
+        self.droppable = droppable_module.load(self.league.name)
         week = self.calendar.week_from(day)
         phase = "playoffs" if week and week > self.regular_weeks else "regular"
 
@@ -454,6 +457,7 @@ class LiveRunner:
                 closed_tonight=closed_tonight)
             v = view_module.SlateView(**{**fields, **changes})
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
+            v.droppable = self.droppable              # adddrop, streaming.spots, weekplan
             return v
 
         before = copy.deepcopy(state.teams[snapshot.me].__dict__)
@@ -955,6 +959,9 @@ class LiveRunner:
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "options": choices, "week_plan": week_plan, "week_plans": week_plans,
             # On the week's last day, next week's plans too (_next_week_plans); else none.
+            # The players the user marked OK to drop, the plan's only drops but its own rentals
+            # (Live/droppable.py); None: the model chose.
+            "droppable": None if self.droppable is None else sorted(self.droppable),
             "next_week": next_week, "next_week_plans": [team_plan(i, w) for i, w in enumerate(next_plans)],
             "stream_mode": self.strategy.streaming.mode, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
             "shortlist": self.strategy.adddrop.shortlist,

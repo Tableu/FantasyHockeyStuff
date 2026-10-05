@@ -46,7 +46,12 @@ on the platform yourself.
     Roster       every player you hold now: status, rate, rest-of-season points, Periph % (the share
                  of his projected points from hits, blocks, shots and PIM: high = steady, low = a
                  volatile scorer), games left this week and his stats (sortable); injured players
-                 coloured by status
+                 coloured by status. Click a player to mark him OK to drop (click again to unmark):
+                 while any are marked, the plan's upgrades and rentals drop only them -- or a rental
+                 the week plan picks up itself -- goalies and starters included; none marked, the
+                 model chooses. Saved on the server for the league (Live/droppable.py); the next
+                 refresh plans on it. Forced drops (an IR activation into a full roster) stay the
+                 model's
     Free agents  the best available now by rate, with rest-of-season points (rate x his team's games
                  left in the fantasy season; sortable); injured players coloured by status
 
@@ -134,10 +139,10 @@ class Server:
     def __init__(self, url, league):
         self.url, self.league = url.rstrip("/"), league
 
-    def _call(self, path, body=None):
+    def _call(self, path, body=None, method=None):
         data = None if body is None else json.dumps(body).encode("utf-8")
         path += ("&" if "?" in path else "?") + "league=" + urllib.parse.quote(self.league)
-        request = urllib.request.Request(self.url + path, data=data,
+        request = urllib.request.Request(self.url + path, data=data, method=method,
                                          headers={"Content-Type": "application/json"} if data else {})
         with urllib.request.urlopen(request, timeout=SERVER_TIMEOUT_S) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -159,6 +164,13 @@ class Server:
 
     def job(self, job_id, after=0):
         return self._call(f"/jobs/{job_id}?after={after}")
+
+    def droppable(self):
+        """The ids of the players marked OK to drop ([]: the model chooses)."""
+        return self._call("/droppable")["player_ids"]
+
+    def set_droppable(self, player_ids):
+        return self._call("/droppable", {"player_ids": sorted(player_ids)}, method="PUT")["player_ids"]
 
     def games(self):
         return self._call("/games")
@@ -229,6 +241,9 @@ class PlanWindow:
         # Sortable tables: name -> [column key, descending]. The roster keeps the plan's order until
         # a header is clicked; the free agents start best rate first.
         self.sorts = {"roster": [None, False], "free_agents": ["rate", True]}
+        # The players marked OK to drop (the Roster tab; the server keeps the list), and the
+        # Roster table's rows' player ids, in their shown order, for a click.
+        self.droppable, self.roster_ids = set(), []
 
         root.title(f"Plan -- {self.league.name}: {self.league.team_name or 'my team'}"
                    + f" (server {self.server.url})")
@@ -281,8 +296,9 @@ class PlanWindow:
                           ("plays_tonight", "Plays tonight", 95), ("games_left", "Games left", 80),
                           ("where", "", 90), ("plan", "Recommended", 110)]
         # The roster you hold: no tonight columns, no lineup/bench/IR column, no recommended action.
-        self.roster = self._table("Roster", [c for c in player_columns + stat_columns
-                                             if c[0] not in ROSTER_HIDDEN], sort_as="roster")
+        self.roster = self._build_roster([("drop_ok", "OK to drop", 80)]
+                                         + [c for c in player_columns + stat_columns
+                                            if c[0] not in ROSTER_HIDDEN])
         self.free_agents = self._table("Free agents", [c for c in player_columns + stat_columns
                                                        if c[0] not in FREE_AGENTS_HIDDEN],
                                        sort_as="free_agents")
@@ -318,6 +334,50 @@ class PlanWindow:
         self.tabs.add(frame, text=title)
         on_sort = None if sort_as is None else (lambda key: self._sort(sort_as, key))
         return sheets.Table(frame, columns, ROW_STYLES, on_sort=on_sort, on_row_click=on_row_click)
+
+    def _build_roster(self, columns):
+        """The Roster tab: who is marked OK to drop and a button to clear them, above the table; a
+        click on a player marks or unmarks him."""
+        frame = ttk.Frame(self.tabs)
+        self.tabs.add(frame, text="Roster")
+        bar = ttk.Frame(frame, padding=(0, 6, 0, 4))
+        bar.pack(fill="x")
+        self.droppable_var = tk.StringVar()
+        ttk.Label(bar, textvariable=self.droppable_var).pack(side="left", padx=6)
+        self.droppable_clear = ttk.Button(bar, text="Clear (let the model choose)",
+                                          command=lambda: self._save_droppable(set()))
+        self.droppable_clear.pack(side="left", padx=6)
+        table = ttk.Frame(frame)
+        table.pack(fill="both", expand=True)
+        self._show_droppable()
+        return sheets.Table(table, columns, ROW_STYLES, on_sort=lambda key: self._sort("roster", key),
+                            on_row_click=self._toggle_droppable)
+
+    def _show_droppable(self):
+        marked = len(self.droppable)
+        self.droppable_var.set(
+            "Click a player to mark him OK to drop. None marked: the plan chooses its own drops."
+            if not marked else
+            f"{marked} marked OK to drop: the plan drops only from these (and rentals it picks up itself). "
+            "Refresh to re-plan.")
+        self.droppable_clear.state(["!disabled"] if marked else ["disabled"])
+
+    def _toggle_droppable(self, index):
+        if index >= len(self.roster_ids):
+            return
+        self._save_droppable(self.droppable ^ {self.roster_ids[index]})
+
+    def _save_droppable(self, marked):
+        """Show the change at once, save it on the server behind; the server's answer is the list."""
+        self.droppable = set(marked)
+        self._show_droppable()
+        self._fill_sorted("roster")
+        def work():
+            try:
+                self.messages.put(("droppable", self.server.set_droppable(marked)))
+            except Exception as error:  # noqa: BLE001 -- show it, keep the window
+                self.messages.put(("error", f"saving who is OK to drop: {type(error).__name__}: {error}"))
+        threading.Thread(target=work, daemon=True).start()
 
     def _build_week_bar(self):
         """The Week tab: a this week / next week switch, shown only when the plan has next week's
@@ -521,6 +581,10 @@ class PlanWindow:
                     self.quick_button.state(["disabled"])
                     self.status_var.set(f"Server refresh running ({payload['by']})...")
                     threading.Thread(target=self._follow, args=(payload["id"],), daemon=True).start()
+            elif kind == "droppable":             # the server's list of who is OK to drop
+                self.droppable = set(payload)
+                self._show_droppable()
+                self._fill_sorted("roster")
             elif kind == "live":
                 self._show_live(payload)
             elif kind == "start":
@@ -552,6 +616,7 @@ class PlanWindow:
                     detail = json.loads(error.read().decode("utf-8") or "{}").get("detail", "")
                     raise RuntimeError(f"{detail}: open the window with --league and one of those") from None
                 self.messages.put(("status", status))
+                self.messages.put(("droppable", self.server.droppable()))
                 body = self.server.plan()
                 if body is not None:
                     self.messages.put(("served", (body, "saved")))
@@ -1055,7 +1120,8 @@ class PlanWindow:
                     ("on waivers" if r["on_waivers"] else "")
             # Only injury colours: what the plan does with a player is on the Moves tab.
             tags = (r["status"],) if r["status"] in STATUS_COLOURS else ()
-            cells = {"player": r["player"], "positions": r["positions"], "status": r["status"] or "",
+            cells = {"drop_ok": "\u2713" if r.get("player_id") in self.droppable else "",
+                     "player": r["player"], "positions": r["positions"], "status": r["status"] or "",
                      "rate": _num(r["rate"]), "ros_points": _num(r.get("ros_points"), 1),
                      "peripheral": _pct(r.get("peripheral")),
                      "per_game": _num(r["per_game"]),
@@ -1092,14 +1158,18 @@ class PlanWindow:
         table, players = getattr(self, name), self.plan[name]
         key, descending = self.sorts[name]
         if key is not None:
-            text = key in ("player", "positions", "status", "plan", "where")
+            text = key in ("player", "positions", "status", "plan", "where", "drop_ok")
             value = ((lambda r: (r.get("stats") or {}).get(key)) if key in self.stat_keys
+                     else (lambda r: "\u2713" if r.get("player_id") in self.droppable else " ")
+                     if key == "drop_ok"
                      else (lambda r: r[key]) if key != "where" else (lambda r: r["player"]))
             # Blanks last either way: a goalie has no hits, a player with no games no line.
             present = [r for r in players if value(r) is not None]
             players = (sorted(present, key=(lambda r: value(r) or "") if text else value,
                               reverse=descending)
                        + [r for r in players if value(r) is None])
+        if name == "roster":
+            self.roster_ids = [r.get("player_id") for r in players]
         self._fill_players(table, players, where=name == "roster", sort_key=key,
                            descending=descending)
 
