@@ -26,6 +26,15 @@ def load(league: str) -> set | None:
     return ids or None
 
 
+def saved_on(league: str):
+    """The date the league's list was last saved (a datetime.date), or None with no file."""
+    path = livepaths.droppable(league)
+    if not path.exists():
+        return None
+    stamp = json.loads(path.read_text(encoding="utf-8")).get("updated_at")
+    return dt.datetime.fromisoformat(stamp).date() if stamp else None
+
+
 def save(league: str, player_ids) -> list:
     """Replace the league's list (written then swapped in, as the plan server reads it while a
     refresh plans); an empty list clears it. Returns the ids saved, sorted."""

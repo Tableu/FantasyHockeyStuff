@@ -487,6 +487,15 @@ class LiveRunner:
         manager.transactions(view())
         next_week, next_plans = self._next_week_plans(manager, state, week, view, skaters, goalie_projections)
         problems = ([ros_note] if ros_note else []) + self.freshness()
+        # A drop list carried into a new matchup week is easy to forget (it overrides who may be
+        # dropped until cleared): say when it was set.
+        if self.droppable is not None:
+            set_on = droppable_module.saved_on(self.league.name)
+            set_week = self.calendar.week_from(pd.Timestamp(set_on)) if set_on else None
+            if week is not None and set_week is not None and set_week < week:
+                problems.append(f"the OK-to-drop list ({len(self.droppable)} player(s)) was set on "
+                                f"{set_on:%a %b %d} in week {set_week} and is still active -- the "
+                                "plan drops only them; clear or change it on the Roster tab")
         hidden = (list(snapshot.teams[snapshot.me].get("unmatched", []))
                   + [p for p in snapshot.teams[snapshot.me]["roster"] if p not in self.eligibility])
         if hidden:

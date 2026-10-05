@@ -961,7 +961,10 @@ class PlanWindow:
                           + (" · today's moves are free" if p.get("free_moves") else "")
                           + (f" · {len(p['week_plan'])} rental(s) planned this week"
                              if p.get("stream_mode") == "week" else "")
-                          + ("" if p.get("games_today", True) else " · no NHL games today"))
+                          + ("" if p.get("games_today", True) else " · no NHL games today")
+                          # The drop list overrides the model's drops until cleared: always visible.
+                          + (f" · drops limited to {len(p['droppable'])} marked player(s)"
+                             if p.get("droppable") else ""))
 
         rows = []
         for s in p["lineup_now"]:
