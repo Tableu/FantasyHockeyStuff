@@ -47,6 +47,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -192,13 +193,45 @@ class Context:
                    "replications": replications, "code": self.code, "ros": self.ros_build}
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
+    def draft_key(self, rungs, candidate, tag="") -> str:
+        """One draft's identity, without the number of drafts: what `seats` caches each draft
+        under. The seat layout (`rungs`) and the caller's `tag` (oneseat: the opponents and their
+        field) are part of it, as are the code and the rest-of-season build (`key`)."""
+        payload = {"rungs": repr(rungs), "tag": tag,
+                   "candidate": None if candidate is None else params_of(candidate),
+                   "shipped": params_of(self.shipped), "season": self.season,
+                   "league": self.league_name, "scoring": self.scoring,
+                   "field": self.field.describe(), "code": self.code, "ros": self.ros_build}
+        return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+    def seats(self, rungs, candidate, replications, tag="") -> pd.DataFrame:
+        """`_seats` for drafts 0..replications-1, each draft cached on its own and only the
+        missing ones played: a 56-draft decision after a 28-draft screen plays 28 new drafts, not
+        56, and a run that died keeps the drafts it finished. A draft's result depends on its own
+        index alone (the seat rotation is replication // teams), so a cached draft is the same
+        rows a full run would make."""
+        folder = paths.ensure(self.cache / "drafts" / self.draft_key(rungs, candidate, tag))
+        files = {r: folder / f"r{r:03d}.parquet" for r in range(replications)}
+        missing = [r for r, path in files.items() if not path.exists()]
+        if missing:
+            log.info("%d of %d drafts cached; playing %d", replications - len(missing),
+                     replications, len(missing))
+            table = self._seats(rungs, candidate, missing)
+            for r in missing:
+                tmp = files[r].with_name(files[r].name + ".tmp")
+                table.loc[[r]].to_parquet(tmp)
+                os.replace(tmp, files[r])
+        return pd.concat([pd.read_parquet(files[r]) for r in range(replications)])
+
     def _seats(self, rungs, candidate, replications) -> pd.DataFrame:
-        args = SimpleNamespace(replications=replications, workers=self.workers,
+        """Play the drafts -- `replications` of them, or that list of draft indices -- uncached."""
+        indices = list(range(replications)) if isinstance(replications, int) else list(replications)
+        args = SimpleNamespace(replications=len(indices), workers=self.workers,
                                verbose_weeks=False, decision_sims=200)
         runs = ladder.run_replications(args, self.config, self.calendar, self.data,
                                        self.eligibility, self.scoreset, rungs, self.shipped,
-                                       candidate)
-        _, teams = ladder.summarize(runs, self.scoreset.name)
+                                       candidate, indices=indices)
+        _, teams = ladder.summarize(runs, self.scoreset.name, indices=indices)
         return (teams.assign(pts=teams["points"] / teams["weeks"],
                              win=teams["matchup_wins"] / teams["weeks"],
                              playoff=teams["made_playoffs"].astype(float))
@@ -206,13 +239,8 @@ class Context:
                 [["rung", "pts", "win", "playoff", "moves_spent", "rentals", "move_hit_rate"]])
 
     def base(self, replications) -> pd.DataFrame:
-        """The shipped league at this many drafts, played once and cached."""
-        path = self.cache / f"base_{self.key(self.shipped, replications)}.parquet"
-        if path.exists():
-            return pd.read_parquet(path)
-        table = self._seats(BASE_FIELD, None, replications)
-        table.to_parquet(path)
-        return table
+        """The shipped league at this many drafts, each draft played once and cached (`seats`)."""
+        return self.seats(BASE_FIELD, None, replications)
 
     def run(self, candidate, replications) -> dict:
         """Per-draft gaps of the candidate over the shipped system in the same seats, cached."""
@@ -229,7 +257,7 @@ class Context:
                       "rentals": float(mine["rentals"].mean()),
                       "hit_rate": float(mine["move_hit_rate"].mean())}
         else:
-            alt = self._seats(CAND_FIELD, candidate, replications)
+            alt = self.seats(CAND_FIELD, candidate, replications)
             mine = alt.index[alt["rung"] == CAND]
             if not (base.loc[mine, "rung"] == SHIPPED).all():
                 raise AssertionError("the candidate's seats are not rung 17's in the shipped run")

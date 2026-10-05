@@ -325,12 +325,15 @@ def default_workers(replications) -> int:
 
 
 def run_replications(args, config, calendar, data, eligibility, scoreset, rungs, strategy,
-                     candidate=None):
-    workers = args.workers or default_workers(args.replications)
-    if workers <= 1 or args.replications <= 1:
+                     candidate=None, indices=None):
+    """Replications 0..args.replications-1, or just `indices` (tune.Context.seats runs only the
+    drafts it has not cached): a draft's result depends on its own index alone."""
+    indices = list(range(args.replications)) if indices is None else list(indices)
+    workers = args.workers or default_workers(len(indices))
+    if workers <= 1 or len(indices) <= 1:
         return [run_one(config, calendar, data, eligibility, scoreset, rungs, r,
                         args.verbose_weeks, args.decision_sims, strategy, candidate)
-                for r in range(args.replications)]
+                for r in indices]
     import sys
     from concurrent.futures import ProcessPoolExecutor
 
@@ -344,15 +347,17 @@ def run_replications(args, config, calendar, data, eligibility, scoreset, rungs,
                "scoreset": scoreset, "rungs": rungs, "verbose_weeks": args.verbose_weeks,
                "decision_sims": args.decision_sims, "strategy": strategy,
                "candidate": candidate}
-    log.info("running %d replications in %d processes", args.replications, workers)
+    log.info("running %d replications in %d processes", len(indices), workers)
     with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker,
                              initargs=(payload,)) as pool:
-        return list(pool.map(_run_replication, range(args.replications)))
+        return list(pool.map(_run_replication, indices))
 
 
-def summarize(per_replication, scoreset_name):
-    """Collapse seats into rungs. Three clones a rung, so a rung's number is their mean."""
-    teams = pd.concat([r["teams"].assign(replication=i)
+def summarize(per_replication, scoreset_name, indices=None):
+    """Collapse seats into rungs. Three clones a rung, so a rung's number is their mean. `indices`
+    numbers the replications when they are not 0..n-1 (run_replications' `indices`)."""
+    numbers = list(range(len(per_replication))) if indices is None else list(indices)
+    teams = pd.concat([r["teams"].assign(replication=numbers[i])
                        for i, r in enumerate(per_replication)], ignore_index=True)
     by_rung = (teams.groupby(["rung", "strategy"])
                .agg(seats=("seat", "count"),

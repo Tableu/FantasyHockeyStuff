@@ -105,8 +105,11 @@ def check_layouts(config, base, cand, replications):
     return positions
 
 
-def seat_table(ctx, layout, candidate, replications):
-    table = ctx._seats(layout, candidate, replications)
+def seat_table(ctx, layout, candidate, replications, tag=None):
+    """The seat table, each draft cached (tune.Context.seats) under `tag` -- or, with no tag (the
+    --verify check, which must play), uncached."""
+    table = (ctx._seats(layout, candidate, replications) if tag is None
+             else ctx.seats(layout, candidate, replications, tag=tag))
     seats = {r: layout.test_seat(ctx.config, r) for r in range(replications)}
     table["test"] = [seats[r] == s for r, s in table.index]
     return table
@@ -208,6 +211,26 @@ def parse_args():
     return p.parse_args()
 
 
+def setup(args):
+    """The run's context, both strategies, both seat layouts, and the cache tag for the opponents
+    (their rungs and, for rung 8, their field and noise)."""
+    shipped = load_strategy(args.strategy)
+    candidate = load_strategy(args.candidate) if args.candidate else shipped
+    candidate = with_settings(candidate, args.set)
+    opponents = tuple(int(r) for r in args.opponents.split(","))
+    base_layout, cand_layout = layouts(opponents)
+    ctx = tune.Context(args.season, args.prior_season or tune.previous(args.season), args.league,
+                       args.weights, shipped, args.workers, ros_tag=args.ros_tag)
+    if 8 in opponents:
+        import opponents as opponents_module
+
+        ctx.data["opponent_field"] = opponents_module.field(
+            ctx.config, opponents_module.SD if args.opponent_sd is None else args.opponent_sd)
+    tag = (f"{'-'.join(map(str, opponents))}_"
+           f"{ctx.data['opponent_field'].describe() if ctx.data.get('opponent_field') else 'na'}")
+    return ctx, shipped, candidate, base_layout, cand_layout, tag
+
+
 def main():
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s",
@@ -216,19 +239,8 @@ def main():
         logging.getLogger(noisy).setLevel(logging.WARNING)
     if args.season == tune.FINAL_SEASON:
         log.warning("%s is the confirmation season: decide on another one first", args.season)
-    shipped = load_strategy(args.strategy)
-    candidate = load_strategy(args.candidate) if args.candidate else shipped
-    candidate = with_settings(candidate, args.set)
+    ctx, shipped, candidate, base_layout, cand_layout, tag = setup(args)
     opponents = tuple(int(r) for r in args.opponents.split(","))
-    base_layout, cand_layout = layouts(opponents)
-
-    ctx = tune.Context(args.season, args.prior_season or tune.previous(args.season), args.league,
-                       args.weights, shipped, args.workers, ros_tag=args.ros_tag)
-    if 8 in opponents:
-        import opponents as opponents_module
-
-        ctx.data["opponent_field"] = opponents_module.field(
-            ctx.config, opponents_module.SD if args.opponent_sd is None else args.opponent_sd)
     replications = 2 if args.verify else args.replications
     if not args.verify and replications % ctx.config.teams:
         log.warning("%d drafts is not a multiple of the league's %d teams: the test seat's draft "
@@ -255,17 +267,11 @@ def main():
         raise SystemExit("the candidate equals the shipped system; use --verify for that check")
     log.info("shipped: %s", tune.label(shipped))
     log.info("candidate: %s", tune.label(candidate))
-    # The shipped run is the same for every candidate: cached by the shipped parameters, the
-    # opponents and their noise, the season, the format and the code (tune.Context.key).
-    cache = paths.ensure(paths.REPORTS_DIR / "oneseat") / (
-        f"base_{ctx.key(shipped, replications)}_{'-'.join(map(str, opponents))}"
-        f"_{(ctx.data['opponent_field'].describe() if ctx.data.get('opponent_field') else 'na')}.parquet")
-    if cache.exists():
-        base = pd.read_parquet(cache)
-    else:
-        base = seat_table(ctx, base_layout, None, replications)
-        base.to_parquet(cache)
-    alt = seat_table(ctx, cand_layout, candidate, replications)
+    # Both halves are cached a draft at a time (tune.Context.seats), keyed on the parameters,
+    # the seat layout, the opponents and their noise (`tag`), the season, the format and the
+    # code: the shipped half is shared by every candidate, and going from 28 drafts to 56 plays 28.
+    base = seat_table(ctx, base_layout, None, replications, tag=tag)
+    alt = seat_table(ctx, cand_layout, candidate, replications, tag=tag)
     result = compare(base, alt, replications)
     result.update({"season": args.season, "league": args.league, "weights": args.weights,
                    "opponents": list(opponents), "shipped": tune.label(shipped),
