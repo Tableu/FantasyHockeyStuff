@@ -8,6 +8,12 @@
 #                               season totals, then the live injury spells
 #   FantasyHockey-PlayerTeams   05:00 daily               import_player_teams.py: new signings, then
 #                               each projected / league-pool player's NHL team (~12 min)
+#   FantasyHockey-CatchUp       on wake from sleep and at logon (2 min later): catch_up.ps1 runs any
+#                               of the three above whose last scheduled time passed while the PC
+#                               slept -- Task Scheduler's own catch-up did not fire after a wake
+#                               (2026-10-04). Re-registering a task here clears its last run time,
+#                               so the next catch-up re-runs it once (harmless: each job only adds
+#                               what is missing).
 #
 # The line-chart and starting-goalie snapshots are not scheduled: the plan server takes them
 # (Fantasy Hockey AI/Server/server.py, via planpass.py) on each refresh, with an injury
@@ -21,7 +27,7 @@ param([switch]$Remove)
 
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $names = "FantasyHockey-LiveInjuries", "FantasyHockey-LiveLines", "FantasyHockey-LiveGoalies",
-    "FantasyHockey-NightlyIngest", "FantasyHockey-PlayerTeams"
+    "FantasyHockey-NightlyIngest", "FantasyHockey-PlayerTeams", "FantasyHockey-CatchUp"
 
 foreach ($name in $names) {
     if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
@@ -58,3 +64,23 @@ Register-ScheduledTask -TaskName "FantasyHockey-PlayerTeams" -Action $teams `
     -Trigger (New-ScheduledTaskTrigger -Daily -At 05:00) -Settings $teamsSettings `
     -Description "Fantasy Hockey AI player teams: pipeline\import_player_teams.py" | Out-Null
 Write-Output "Registered FantasyHockey-PlayerTeams"
+
+# Catch-up: on every wake from sleep (System log, Power-Troubleshooter event 1 -- "The system has
+# returned from a low power state") and at logon, two minutes later for the network.
+$catchUp = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $here 'catch_up.ps1')`"" `
+    -WorkingDirectory $here
+$wake = Get-CimClass -ClassName MSFT_TaskEventTrigger -Namespace Root/Microsoft/Windows/TaskScheduler |
+    New-CimInstance -ClientOnly
+$wake.Enabled = $true
+$wake.Delay = "PT2M"
+$wake.Subscription = '<QueryList><Query Id="0" Path="System"><Select Path="System">' +
+    "*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]" +
+    '</Select></Query></QueryList>'
+$logon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$logon.Delay = "PT2M"
+$catchUpSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 3) `
+    -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName "FantasyHockey-CatchUp" -Action $catchUp -Trigger @($wake, $logon) `
+    -Settings $catchUpSettings -Description "Fantasy Hockey AI: run missed daily tasks after a wake or logon (pipeline\catch_up.ps1)" | Out-Null
+Write-Output "Registered FantasyHockey-CatchUp"

@@ -79,8 +79,8 @@ PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the pla
 # player's game tonight is over, and the plan window says so. Fleaflicker takes the add at once; the
 # player counts from his next game (closed_tonight).
 ADDS_LOCK_AT_FIRST_PUCK = {"espn"}
-# The local hour by which the nightly job (pipeline/run_nightly_ingest.cmd, 4:00) has written today's
-# rest-of-season projections; a plan after it on older ones says so (LiveRunner.freshness).
+# The local hour by which the nightly job (pipeline/run_nightly_ingest.cmd, 4:00) has loaded last
+# night's games and projections; a plan after it on older ones says so (LiveRunner.freshness).
 NIGHTLY_DONE_HOUR = 6
 
 
@@ -644,30 +644,28 @@ class LiveRunner:
         return {**{p: v * scale for p, v in self.ros_seed.items()}, **model}, None
 
     def freshness(self) -> list:
-        """What today's plan was built on that is older than it should be, for its problems line:
-        the newest game loaded (the nightly ingest's goalie starts) behind the last game day before
-        today, or the newest rest-of-season projections older than today once the 4:00 nightly job
-        should have run (NIGHTLY_DONE_HOUR). On 2026-10-04 the PC slept through 4:00 and the plan
-        ran on Oct 2's games and Oct 3's projections without a word. A rehearsal of a past date
-        is old on purpose: only today's plan is checked."""
-        if self.day != dt.date.today():
-            return []
-        out = []
+        """What today's plan was built on that is older than it should be, for its problems line,
+        once the 4:00 nightly job should have run (NIGHTLY_DONE_HOUR): the newest game loaded (the
+        nightly ingest's goalie starts) or the newest rest-of-season projections behind the last
+        game day before today. ros_predict.py dates its file by the newest game it saw, so a fresh
+        run on Oct 5 writes Oct 4's file. On 2026-10-04 the PC slept through 4:00 and the plan ran
+        on Oct 2's games without a word. A rehearsal of a past date is old on purpose: only today's
+        plan is checked."""
         played = [d for d in self.game_days if d < self.day]
-        if played:
-            last = max(played)
-            path = paths.goalie_starts(self.season)
-            loaded = (pd.to_datetime(pd.read_parquet(path, columns=["game_date"])["game_date"]).max().date()
-                      if path.exists() else None)
-            if loaded is None or loaded < last:
-                out.append(f"stale data: games through {last} are not loaded (newest {loaded or 'none'})"
-                           " -- the nightly ingest has not run (pipeline/run_nightly_ingest.cmd)")
+        if self.day != dt.date.today() or not played or dt.datetime.now().hour < NIGHTLY_DONE_HOUR:
+            return []
+        out, last = [], max(played)
+        path = paths.goalie_starts(self.season)
+        loaded = (pd.to_datetime(pd.read_parquet(path, columns=["game_date"])["game_date"]).max().date()
+                  if path.exists() else None)
+        if loaded is None or loaded < last:
+            out.append(f"stale data: games through {last} are not loaded (newest {loaded or 'none'})"
+                       " -- the nightly ingest has not run (pipeline/run_nightly_ingest.cmd)")
         files = sorted(paths.PROJECTIONS_REPORTS.glob(f"ros_projections_{self.season}_*.parquet"))
         newest = files[-1].stem.rsplit("_", 1)[-1] if files else None
-        if (newest is not None and newest < self.day.isoformat()
-                and dt.datetime.now().hour >= NIGHTLY_DONE_HOUR):
-            out.append(f"stale data: rest-of-season projections are from {newest}, not today"
-                       " -- the nightly job has not run (pipeline/run_nightly_ingest.cmd)")
+        if newest is not None and newest < last.isoformat():
+            out.append(f"stale data: rest-of-season projections are as of {newest}, before the last "
+                       f"game day {last} -- the nightly job has not run (pipeline/run_nightly_ingest.cmd)")
         return out
 
     def goalie_ros(self) -> dict:
