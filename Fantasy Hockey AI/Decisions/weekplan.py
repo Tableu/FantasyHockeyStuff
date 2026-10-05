@@ -108,7 +108,8 @@ class WeekPlanner:
         self.eligibility = self.state.eligibility
         self.next_weight = params.next_week
         self.today = view.day
-        # After a daily lock (the live plan's `moves_from`, ESPN) today's moves take effect then.
+        # After the day's first puck on ESPN (the live plan's `moves_from`) today's adds take
+        # effect then.
         self.moves_from = getattr(view, "moves_from", None)
         self.nights = [d for d in view.calendar.days_in(view.week) if d >= self.today]
         # A move can be made today (a day with no games included -- before the first week) or on
@@ -176,8 +177,8 @@ class WeekPlanner:
     # ---------- inputs ----------
 
     def effective_on(self, day):
-        """When a move made on `day` takes effect: that day, or for today's after a daily lock the
-        day after (`moves_from`) -- both sides: the drop still plays tonight."""
+        """When a move made on `day` takes effect: that day, or for today's after the first puck on ESPN
+        the day after (`moves_from`) -- both sides: the drop waits for his game tonight."""
         if day == self.today and self.moves_from is not None:
             return max(day, self.moves_from)
         return day

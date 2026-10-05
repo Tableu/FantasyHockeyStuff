@@ -120,8 +120,8 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
         # forced drop when the injured player returns is priced then, by manage_ir.
         drops = [None] + drops
 
-    # After a daily lock (the live plan's `moves_from`, ESPN) a move takes effect then, for both
-    # sides. Never set in a backtest.
+    # After the day's first puck on ESPN (the live plan's `moves_from`) an add takes effect then;
+    # both sides are priced from then (the drop waits for his game tonight). Never set in a backtest.
     moves_from = getattr(view, "moves_from", None)
     tails = {}
 

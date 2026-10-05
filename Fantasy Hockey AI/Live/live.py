@@ -73,11 +73,12 @@ WEEK_ALTERNATIVES = 9
 MOVE_KINDS = {"repair": "Repair", "add": "Upgrade", "claim": "Claim", "rental": "Rental",
               "rental claim": "Rental claim"}
 PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
-# Platforms whose rosters lock for the day at its first puck (ESPN -- the user, 2026-10-04; its
-# settings say INDIVIDUAL_GAME): a move made after it still goes through, but takes effect the next
-# day for both sides -- the add plays from tomorrow, the drop still counts tonight -- and tonight's
-# lineup is the one set. Fleaflicker locks each player at his own game (closed_tonight).
-LOCKS_DAILY = {"espn"}
+# Platforms where a free-agent add made after the day's first puck counts from the next day (ESPN --
+# the user, 2026-10-04). Lineups still lock per game, as on Fleaflicker. Such a move is priced from
+# tomorrow for both sides: the add cannot play tonight, so its drop is best made once the dropped
+# player's game tonight is over, and the plan window says so. Fleaflicker takes the add at once; the
+# player counts from his next game (closed_tonight).
+ADDS_LOCK_AT_FIRST_PUCK = {"espn"}
 
 
 def season_of(day: dt.date) -> str:
@@ -446,10 +447,10 @@ class LiveRunner:
                     and clears != clears.normalize() and clears > at):
                 closed_tonight.add(int(p))
 
-        # After a daily lock (LOCKS_DAILY), today's moves take effect tomorrow.
+        # After the day's first puck (ADDS_LOCK_AT_FIRST_PUCK), today's adds take effect tomorrow.
         moves_from = (day + pd.Timedelta(days=1)
-                      if self.league.platform in LOCKS_DAILY and started else None)
-        self.daily_locked = moves_from is not None
+                      if self.league.platform in ADDS_LOCK_AT_FIRST_PUCK and started else None)
+        self.adds_locked = moves_from is not None
 
         def view(state=state, **changes):
             fields = dict(
@@ -485,7 +486,9 @@ class LiveRunner:
         except state_module.IllegalMove as error:
             problems.append(str(error))
         v = view()
-        lineup, z = self._lineup(manager, v, snapshot, rows, now)
+        # After the first puck on ESPN today's adds play from tomorrow, and their drops wait for
+        # tonight's games: tonight's lineup is solved on the roster as it stands.
+        lineup, z = self._lineup(manager, view(state_now) if self.adds_locked else v, snapshot, rows, now)
         # After the plan's own lineup, so the plan is what it would be without this extra solve.
         manager_now = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
         lineup_now, _ = self._lineup(manager_now, view(state_now), snapshot, rows, now)
@@ -709,17 +712,14 @@ class LiveRunner:
         return out
 
     def _lineup(self, manager, v, snapshot, rows, now):
-        """The manager's lineup, re-solved around players whose game has already started -- or,
-        after a daily lock (LOCKS_DAILY), the lineup as set, every player in it (a player the plan
-        drops still plays tonight: the drop takes effect tomorrow)."""
+        """The manager's lineup, re-solved around players whose game has already started."""
         started_teams = set(rows.loc[pd.to_datetime(rows["start_time_utc"]) <= pd.Timestamp(now), "team_id"].astype(int))
-        daily = getattr(self, "daily_locked", False)
         locked = {}                                     # slot index -> player, from the current lineup
-        if (started_teams or daily) and snapshot.lineup:
+        if started_teams and snapshot.lineup:
             free_slots = list(range(len(self.slot_order)))
             for label, players in snapshot.lineup.items():
                 for p in players:
-                    if daily or (v.nhl_team.get(p) in started_teams and p in v.roster):
+                    if v.nhl_team.get(p) in started_teams and p in v.roster:
                         index = next((i for i in free_slots if self.slot_order[i] == label), None)
                         if index is not None:
                             locked[index] = p
@@ -731,8 +731,8 @@ class LiveRunner:
         # Re-solve over the open slots with the manager's own values (mean - z * sd^2 / 2s).
         moments = v.moments(self.scoreset, v.roster)
         started = {p for p in v.roster if v.nhl_team.get(p) in started_teams}
-        values = {} if daily else {p: manager.lineup_value(mu, sd) for p, (mu, sd) in moments.items()
-                                   if p in v.roster and v.available(p) and p not in started}
+        values = {p: manager.lineup_value(mu, sd) for p, (mu, sd) in moments.items()
+                  if p in v.roster and v.available(p) and p not in started}
         open_slots = [i for i in range(len(self.slot_order)) if i not in locked]
         partial = slots_module.assign([self.slot_order[i] for i in open_slots], values, self.eligibility,
                                       self.config.accepts)
@@ -977,8 +977,9 @@ class LiveRunner:
             # The players the user marked OK to drop, the plan's only drops but its own rentals
             # (Live/droppable.py); None: the model chose.
             "droppable": None if self.droppable is None else sorted(self.droppable),
-            # After a daily lock (LOCKS_DAILY): the day today's moves take effect; else None.
-            "moves_from": (self.day + dt.timedelta(days=1)).isoformat() if self.daily_locked else None,
+            # After the day's first puck (ADDS_LOCK_AT_FIRST_PUCK): the day today's adds take
+            # effect; else None.
+            "moves_from": (self.day + dt.timedelta(days=1)).isoformat() if self.adds_locked else None,
             "next_week": next_week, "next_week_plans": [team_plan(i, w) for i, w in enumerate(next_plans)],
             "stream_mode": self.strategy.streaming.mode, "horizon_weeks": self.strategy.adddrop.horizon_weeks,
             "shortlist": self.strategy.adddrop.shortlist,
