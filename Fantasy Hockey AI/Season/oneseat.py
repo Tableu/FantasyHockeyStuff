@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Realistic league mode, part 1 (T1): one test seat among thirteen opponents.
 
-    python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --replications 32
-    python oneseat.py --strategy strategy --candidate strategy-beagles --replications 32
+    python oneseat.py --strategy strategy-beagles --set streaming.spots=2 --replications 28
+    python oneseat.py --strategy strategy --candidate strategy-beagles --replications 56
     python oneseat.py --verify                 # the pairing checks, at 2 drafts
     python oneseat.py --opponents 2,5,6 ...    # the old passive field instead of rung 8
 
@@ -19,7 +19,10 @@ the shipped seat's, per draft. Opponents are identical draw for draw -- same run
 same draft boards; what they do in-season may differ only through the shared wire (the "spill").
 
 **The test seat rotates through draft positions**: each block of `teams` drafts gives it every
-draft position once, in a seeded order, on that replication's draft lottery.
+draft position once, in a seeded order, on that replication's draft lottery. So run a multiple of
+`teams` drafts (14-team: 28 to screen, 56 to decide; espn-la, 10 teams: 30 / 60): any other count
+over-weights the positions of its last, partial block, and its halves hold different position
+mixes -- the likely source of the halves' disagreement at 32 and 64 (the user's rule, 2026-10-04).
 
 **Opponents** default to rung 8 (T2): our orchestrator on a real 12088 manager's weekly move
 budget, calibrated to that league's strength (`opponents.py`, `Decisions/managers.Opponent`). Any
@@ -193,7 +196,8 @@ def parse_args():
                    help="Opponent rungs, comma-separated")
     p.add_argument("--opponent-sd", type=float, default=None,
                    help="Rung 8's error on the projections it reads (default opponents.SD)")
-    p.add_argument("--replications", type=int, default=32)
+    p.add_argument("--replications", type=int, default=28,
+                   help="Drafts: a multiple of the league's teams (28 / 56 for 14 teams)")
     p.add_argument("--workers", type=int, default=None)
     p.add_argument("--verify", action="store_true",
                    help="Check the pairing: layouts, and a candidate equal to the shipped system "
@@ -226,6 +230,11 @@ def main():
         ctx.data["opponent_field"] = opponents_module.field(
             ctx.config, opponents_module.SD if args.opponent_sd is None else args.opponent_sd)
     replications = 2 if args.verify else args.replications
+    if not args.verify and replications % ctx.config.teams:
+        log.warning("%d drafts is not a multiple of the league's %d teams: the test seat's draft "
+                    "positions are uneven (use %d or %d)", replications, ctx.config.teams,
+                    replications // ctx.config.teams * ctx.config.teams or ctx.config.teams,
+                    (replications // ctx.config.teams + 1) * ctx.config.teams)
     positions = check_layouts(ctx.config, base_layout, cand_layout, max(replications,
                                                                          ctx.config.teams))
     log.info("test seat's draft positions: %s", positions[:replications])

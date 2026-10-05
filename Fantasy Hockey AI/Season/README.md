@@ -404,10 +404,13 @@ a season barely move (155-165 against 160): these dials change which moves, not 
 Per-draft noise here is 4.7-9.3 points a week (the week-mode and spots comparisons are the noisy
 ones): 22-86 drafts for +/-1.0, 64 was the budget.
 
-**Screen at 32 drafts, decide at 64** (2026-09-30). A candidate runs 32 drafts first; only one that
-looks promising goes on to 64, and it is adopted (or not) on the 64, both halves reported. A clearly
-negative screen can stop at 32. Never decide on 16: drafts 1-16 and 17-32 have diverged by several
-of their own standard errors. Run time, 8 workers on the 6-core machine: about 23 minutes per 64
+**Screen at 28 drafts, decide at 56** (2026-10-04; 32 / 64 before). Drafts come in multiples of the
+league's teams -- 14 here, 10 for espn-la (30 / 60) -- because the test seat takes each draft
+position once per block of `teams` drafts: 32 or 64 left a partial block that over-weighted some
+positions, and halves that split blocks unevenly, the likely reason drafts 1-16 and 17-32 diverged
+by several of their own standard errors. A candidate runs 28 first; only one that looks promising
+goes on to 56, and it is adopted (or not) on the 56, both halves (28 + 28, two full blocks each)
+reported. A clearly negative screen can stop at 28. Never decide on 14. Run time, 8 workers on the 6-core machine: about 23 minutes per 64
 seasons, so a 64-draft A/B is about 45 minutes when the shipped half must run (its cache is keyed on
 the code, so any code change re-runs it) and about 23 cached; a 32-draft screen about half that. A
 season is ~114 s on one core, 94% of it the managers' transactions; caching roster fill checks and
