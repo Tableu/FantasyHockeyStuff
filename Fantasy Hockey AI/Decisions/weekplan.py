@@ -314,9 +314,17 @@ class WeekPlanner:
         so the plan shows the whole week.)"""
         if cost <= 0:
             return True
-        return all(sum(c for d, c in spent.items() if d <= later) + cost
-                   <= self.moves_left - self.reserve_on(later)
-                   for later in self.move_days if later >= day)
+        # One pass over the days in order with a running total of what the plan spends by each --
+        # the same integer comparisons as re-summing `spent` for every later day, without the
+        # O(days x moves) re-sum on ~3.8M calls a season.
+        spends, i, through = sorted(spent.items()), 0, 0
+        for later in self.move_days:
+            while i < len(spends) and spends[i][0] <= later:
+                through += spends[i][1]
+                i += 1
+            if later >= day and through + cost > self.moves_left - self.reserve_on(later):
+                return False
+        return True
 
     def plan(self) -> list:
         """Greedy insertion, from an empty plan: of every move on any night ahead, put in the one
