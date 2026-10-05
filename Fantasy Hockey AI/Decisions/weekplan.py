@@ -46,6 +46,7 @@ taken first, with alternative plans that leave out whole teams. It changes nothi
 """
 
 import logging
+import math
 import operator
 
 import slots as slots_module
@@ -341,6 +342,8 @@ class WeekPlanner:
     def plan(self) -> list:
         """Greedy insertion, from an empty plan: of every move on any night ahead, put in the one
         with the largest survival^days x (gain - bar), until none clears its bar."""
+        if self.params.lazy:
+            return self._plan_lazy()
         moves, spent = [], {}
         open_spots = self.view.roster_room()
         while True:
@@ -360,6 +363,47 @@ class WeekPlanner:
             if best is None:
                 return sorted(moves, key=lambda m: (m["day"], m["effective"]))
             _, moves, cost, into_open, day = best
+            spent[day] = spent.get(day, 0) + cost
+            open_spots -= into_open
+
+    def _plan_lazy(self) -> list:
+        """`plan` with lazy evaluation (strategy `streaming.lazy`): the first round prices every
+        candidate; after it, candidates are priced from the highest ceiling down -- a candidate's
+        ceiling is its best edge when last priced -- and a round stops once the best edge found
+        is at least the next ceiling. Not exact: a candidate's edge can rise between rounds (a
+        planned pickup makes another night worth filling, or a new drop becomes legal), and then
+        a different move is picked. Measured on drafts 0-2 (2026-10-05): a different move in 4.8%
+        of rounds, on 49.8% of the trial prices. Ties keep the candidates' list order, as in
+        `plan`."""
+        moves, spent = [], {}
+        open_spots = self.view.roster_room()
+        ceilings = None                   # candidate index -> best edge when last priced
+        while True:
+            best = None
+            held = self.held(moves)
+            self._base = (moves, {})
+            live = [i for i, (incoming, _, _) in enumerate(self.candidates)
+                    if incoming not in held[0] and incoming not in held[1]]
+            if ceilings is not None:
+                live.sort(key=lambda i: (-ceilings.get(i, -math.inf), i))
+            priced = {}
+            for i in live:
+                if ceilings is not None and best is not None and best[0] >= ceilings.get(i, -math.inf):
+                    break
+                incoming, day, effective = self.candidates[i]
+                top = -math.inf
+                for outgoing, cost, trial in self.trials(moves, held, spent, open_spots,
+                                                         incoming, day, effective):
+                    gain, bar = trial[-1]["gain"], trial[-1]["bar"]
+                    edge = self.params.survival ** (day - self.today).days * (gain - bar)
+                    top = max(top, edge)
+                    if best is None or edge > best[0] or (edge == best[0] and i < best[5]):
+                        best = (edge, trial, cost, outgoing is None, day, i)
+                priced[i] = top
+            ceilings = {**(ceilings or {}), **priced}
+            if best is None:
+                return sorted(moves, key=lambda m: (m["day"], m["effective"]))
+            _, moves, cost, into_open, day, _ = best
             spent[day] = spent.get(day, 0) + cost
             open_spots -= into_open
 

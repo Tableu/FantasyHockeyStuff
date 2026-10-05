@@ -27,7 +27,8 @@
     "starter_share": 0.5,
     "late_days": 1,
     "clear_win_z": 1.2816,
-    "chain_tie": 0.1
+    "chain_tie": 0.1,
+    "lazy": true
   },
   "rung3_streamer": {
     "horizon_weeks": 1

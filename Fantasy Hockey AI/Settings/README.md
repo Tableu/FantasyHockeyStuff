@@ -155,6 +155,7 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 | | `late_days` | 1 | week mode, `next_week`: the pickup for next week is priced only on the week's last this-many days... |
 | | `clear_win_z` | 1.2816 | ...and only with the matchup z at least this (1.2816 = P(win) 0.9; needs `gate`). Judgment call |
 | | `chain_tie` | 0.1 | week mode: team slots within this many expected points count as tied, and the one whose pick finishes playing sooner goes first. Judgment call |
+| | `lazy` | true | week mode: lazy greedy (`weekplan.WeekPlanner._plan_lazy`) -- after the first round, candidates are priced from the highest ceiling (best edge when last priced) down, and a round stops once the best edge found beats the next ceiling. Not exact: a different move in 4.8% of rounds on about half the trial prices (drafts 0-2, 2026-10-05). For speed, the user's call on neutral results: 2024-25, 56 drafts, +0.22 +/- 0.60 pts/wk, win -0.002 +/- 0.013 (28: +1.26 +/- 0.88); confirmed 2025-26, 56 drafts, -0.16 +/- 0.69, win +0.017 +/- 0.014; moves unchanged. The opponents run it too (strategy.json) |
 | `rung3_streamer` | `horizon_weeks` | 1 | how far ahead rung 3 prices a swap |
 | `rung4_full_system` | `horizon_weeks` | 1 | how far ahead rung 4 prices an acquisition (matched to rung 3) |
 | | `drop_horizon_weeks` | 3 | window a forced IR-activation drop is priced over (rungs 2-4) |
