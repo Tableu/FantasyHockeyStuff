@@ -33,6 +33,20 @@ import streaming
 # next H weeks (-0.81 +/- 0.99).
 ACTIVATION_DROPS = ("safe_window", "window")
 
+# Whether a move must keep the roster able to fill its lineup slots (managers.Manager._fieldable,
+# repair_roster):
+#   relative  a move may not leave the roster able to fill fewer slots than before, and a roster
+#             that cannot fill every slot spends a move repairing it first (since 2026-09-23: a
+#             goalie on IR froze teams for the season under the old absolute check)
+#   none      no check and no repair: an empty slot is priced as the points it loses, and the week
+#             plan streams into it on the nights it is worth filling (the user's argument,
+#             2026-10-04: you need not roster enough goalies or defencemen to fill every slot) --
+#             shipped in every strategy since 2026-10-04, the user's call on neutral results
+# Measured (beagles strategy, against relative): 2024-25, 64 drafts, +0.36 +/- 0.76 pts/wk, win
+# +0.017 +/- 0.014 (32: -0.19 +/- 1.04); confirmed on 2025-26, 64 drafts, +0.47 +/- 0.82, win
+# -0.006 +/- 0.014. Moves a season unchanged (158 / 158; 140 / 142).
+FILL_CHECKS = ("relative", "none")
+
 
 @dataclass(frozen=True)
 class Strategy:
@@ -56,6 +70,7 @@ class Strategy:
     undated_sources: str                      # "include" or "exclude" a source with no publish date
     repair_wait_days: int                     # repair waits for an IR player back within this many days
     activation_drop: str                      # how a forced IR-activation drop is chosen (ACTIVATION_DROPS)
+    fill_check: str                           # whether moves keep the roster's slots fillable (FILL_CHECKS)
     description: str = ""
 
 
@@ -131,9 +146,12 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
     if isinstance(min_sources, bool) or not isinstance(min_sources, int) or min_sources < 1:
         raise ValueError(f"strategy {name}: draft.min_sources {draft['min_sources']!r}")
     roster = payload["roster"]
-    if set(roster) != {"repair_wait_days", "activation_drop"}:
-        raise ValueError(f"strategy {name} roster: needs exactly repair_wait_days, activation_drop; "
-                         f"got {sorted(roster)}")
+    if set(roster) != {"repair_wait_days", "activation_drop", "fill_check"}:
+        raise ValueError(f"strategy {name} roster: needs exactly repair_wait_days, activation_drop, "
+                         f"fill_check; got {sorted(roster)}")
+    if roster["fill_check"] not in FILL_CHECKS:
+        raise ValueError(f"strategy {name}: roster.fill_check {roster['fill_check']!r}; "
+                         f"use one of {FILL_CHECKS}")
     if roster["activation_drop"] not in ACTIVATION_DROPS:
         raise ValueError(f"strategy {name}: roster.activation_drop {roster['activation_drop']!r}; "
                          f"use one of {ACTIVATION_DROPS}")
@@ -166,5 +184,6 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
         undated_sources=draft["undated_sources"],
         repair_wait_days=wait,
         activation_drop=roster["activation_drop"],
+        fill_check=roster["fill_check"],
         description=payload.get("description", ""),
     )

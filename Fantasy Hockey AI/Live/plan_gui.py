@@ -48,8 +48,10 @@ on the platform yourself.
                  volatile scorer), games left this week and his stats (sortable); injured players
                  coloured by status. Click a player to mark him OK to drop (click again to unmark):
                  while any are marked, the plan's upgrades and rentals drop only them -- or a rental
-                 the week plan picks up itself -- goalies and starters included; none marked, the
-                 model chooses. Saved on the server for the league (Live/droppable.py); the next
+                 the week plan picks up itself -- goalies and starters included, even when that
+                 leaves a lineup slot empty (Wolf for a skater: roster.fill_check = none);
+                 none marked, the model chooses. Saved on the server for the league
+                 (Live/droppable.py); the next
                  refresh plans on it. Forced drops (an IR activation into a full roster) stay the
                  model's
     Free agents  the best available now by rate, with rest-of-season points (rate x his team's games

@@ -183,6 +183,9 @@ class Manager:
         every swap whenever a goalie was on IR -- one goalie for two G slots -- so the team could
         make no move at all, including the one that would have fixed it (see `repair_roster`).
         """
+        # strategy roster.fill_check `none`: no check -- an empty slot is priced, not forbidden.
+        if getattr(self.strategy, "fill_check", "relative") == "none":
+            return True
         size = self._fillable(roster, eligibility)
         if before is None:
             return size >= len(self.slot_order)
@@ -202,6 +205,9 @@ class Manager:
         would fill the slot himself, it waits for him. A D on IR until Friday left a D slot empty
         on Wednesday, and the repair spent a move -- and dropped a player -- to cover two nights.
         """
+        # strategy roster.fill_check `none`: nothing to repair -- the week plan streams into a hole.
+        if getattr(self.strategy, "fill_check", "relative") == "none":
+            return []
         state = view._state
         eligibility = state.eligibility
         need = len(self.slot_order)
@@ -908,7 +914,7 @@ VOR_TWIN = 10
 # beside the incumbent rung 17 so the pair differ in those parameters and nothing else.
 CANDIDATE, CANDIDATE_OF = 27, 17
 # What a candidate may change: the two transaction blocks, and the repair wait (roster).
-TUNABLE = ("adddrop", "streaming", "repair_wait_days", "activation_drop")
+TUNABLE = ("adddrop", "streaming", "repair_wait_days", "activation_drop", "fill_check")
 
 
 def build_field(config, scoreset, strategy, rungs=(1, 2, 3, 4), clones=None, replication=0,

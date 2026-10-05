@@ -48,6 +48,7 @@ season-level result rather than as an error:
     python verify.py
 """
 
+import dataclasses
 import logging
 from pathlib import Path
 import random
@@ -570,7 +571,9 @@ def check_frozen_rosters() -> str:
     The bug: the fieldability test was absolute, so a goalie on IR made every swap illegal, and a
     forced activation drop could release the returning goalie -- after which the team made no move
     for the rest of the season with a G slot empty every night (banger, rung 7, seat 7: weeks
-    2-26). Replayed under banger scoring, where it surfaced.
+    2-26). Replayed under banger scoring, where it surfaced. Run with roster.fill_check =
+    `relative`, the mode that checks and repairs (`none`, shipped since 2026-10-04, leaves holes
+    to be streamed by design).
     """
     config = league_module.load()
     scoreset = simlayer.load_scoreset("banger-league")
@@ -582,7 +585,8 @@ def check_frozen_rosters() -> str:
     calendar = schedule_module.from_candidates(
         data["projections"][["game_id", "game_date", "team_id"]], config.week_starts_on,
         config.min_first_week_games)
-    field = managers_module.build_field(config, scoreset, _strategy(), rungs=(2, 5, 7))
+    strategy = dataclasses.replace(_strategy(), fill_check="relative")
+    field = managers_module.build_field(config, scoreset, strategy, rungs=(2, 5, 7))
     stuck, checked = [], [0]
     for manager in field:
         if manager.rung < 3:

@@ -4,8 +4,10 @@ server's /droppable): livepaths.droppable(league), {"player_ids": [...], "update
 When any are marked, they replace the model's own choice of drops -- the upgrades' (Decisions/
 adddrop.py) and the rentals' streaming spots (Decisions/streaming.py spots), goalies and players
 above replacement included -- except the players the week plan itself picks up and drops again
-within the plan, which it may still drop. A drop still pays its drop cost, and forced drops (an IR
-activation into a full roster) stay the model's. None marked, or no file: the model chooses.
+within the plan, which it may still drop. A drop may leave a lineup slot empty -- Wolf for a
+skater leaves a G slot open, priced at the points it loses -- as every move may under
+roster.fill_check = none (Decisions/strategy.py). A drop still pays its drop cost, and forced drops
+(an IR activation into a full roster) stay the model's. None marked, or no file: the model chooses.
 """
 
 import datetime as dt

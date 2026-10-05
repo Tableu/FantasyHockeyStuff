@@ -56,6 +56,7 @@
   },
   "roster": {
     "repair_wait_days": 7,
-    "activation_drop": "window"
+    "activation_drop": "window",
+    "fill_check": "none"
   }
 }
