@@ -329,7 +329,7 @@ def check_ros_provenance() -> str:
     raw.to_parquet(bad, index=False)
     original = paths.ros_predictions
     try:
-        paths.ros_predictions = lambda season, horizon="season": bad
+        paths.ros_predictions = lambda season, horizon="season", tag=None: bad
         inputs.load_ros(SEASON)
         raise AssertionError("a rest-of-season table trained on the replayed season was accepted")
     except inputs.ProvenanceError:
