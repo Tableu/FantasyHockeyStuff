@@ -162,16 +162,49 @@ def assign(slots: list, values: dict, eligibility: dict, accepts=None) -> Lineup
                   unfilled=[j for j in range(len(slots)) if j not in assigned])
 
 
+_FITS = {}                 # (slots, accepts key, sorted eligibility ids) -> all can be placed
+_ELIGIBLE_IDS = {}         # eligibility set -> small int, for those keys
+
+
+def _placeable(layout, ids, slots, accepts) -> bool:
+    """Whether players with these eligibility sets (`ids`, sorted) can all be placed at once."""
+    key = (layout, ids)
+    fits_all = _FITS.get(key)
+    if fits_all is None:
+        sets = {i: e for e, i in _ELIGIBLE_IDS.items()}
+        stand_ins = {n: sets[i] for n, i in enumerate(ids)}
+        fits_all = _FITS[key] = (assign(slots, {n: 1.0 for n in stand_ins}, stand_ins, accepts)
+                                 .filled == len(ids))
+    return fits_all
+
+
 def assign_value(slots: list, values: dict, eligibility: dict, accepts=None) -> float:
-    """`total_value(assign(...), values)` without building the Lineup: the same solve, and the
-    started players' values summed in the same order (the order `assign` inserts them), so the
-    result is the same float, bit for bit. The swap valuation needs only this number, hundreds
-    of thousands of times a season."""
+    """`total_value(assign(...), values)` without building the Lineup, and without a matrix solve.
+
+    A player's value does not depend on the slot he fills, so the legal lineups form a
+    (transversal) matroid, and the greedy is exact: take players by value, highest first, keeping
+    each one if everyone kept can still be placed. Taking every player in turn, negative values
+    included, gives the most valuable lineup among those filling the most slots -- what the
+    solve's FORBIDDEN cost makes `assign` choose. Whether a set can be placed depends only on its
+    multiset of eligibility sets, a few dozen kinds, so it is cached. The kept players' values are
+    summed in `values`' order, as `assign` inserts them. The week plan and the upgrade rule ask
+    for this number millions of times a season, mostly over about seven players, where every numpy
+    call is fixed overhead (2026-10-05)."""
     if not values or not slots:
         return 0.0
-    players, cost = _cost(slots, values, eligibility, accepts)
-    rows, columns = linear_sum_assignment(cost)
-    return float(sum(values[players[i]] for i, j in zip(rows, columns) if cost[i, j] < FORBIDDEN))
+    layout = (_slots_key(slots), _accepts_key(accepts))
+    empty = frozenset()
+    kept, ids = set(), []
+    for p in sorted(values, key=values.__getitem__, reverse=True):
+        eligible = eligibility.get(p, empty)
+        i = _ELIGIBLE_IDS.get(eligible)
+        if i is None:
+            i = _ELIGIBLE_IDS[eligible] = len(_ELIGIBLE_IDS)
+        trial = sorted(ids + [i])
+        if _placeable(layout, tuple(trial), slots, accepts):
+            ids = trial
+            kept.add(p)
+    return float(sum(values[p] for p in values if p in kept))
 
 
 def candidates_for(roster, playing_tonight: set, available: set) -> list:
