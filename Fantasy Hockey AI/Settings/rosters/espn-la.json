@@ -1,6 +1,6 @@
 {
   "name": "espn-la",
-  "description": "Generated from espn league 1747127466 (import_league_settings.py). Differs from the platform: lineup lock INDIVIDUAL_GAME (the harness locks daily); waivers WAIVERS_TRADITIONAL (the harness rolls them); 6 acquisitions a matchup week (the user, 2026-09-26; ESPN's mSettings reports acquisitionLimit -1); at most 4 goalies rostered (not enforced by the harness).",
+  "description": "Generated from espn league 1747127466 (import_league_settings.py). Differs from the platform: lineup lock INDIVIDUAL_GAME (the harness locks daily); waivers WAIVERS_TRADITIONAL (the harness rolls them); at most 4 goalies rostered (not enforced by the harness).",
   "teams": 10,
   "active_slots": {
     "F": 9,
@@ -10,7 +10,7 @@
   },
   "bench": 5,
   "ir": 1,
-  "moves_per_week": 6,
+  "moves_per_week": 7,
   "moves_carry_over": false,
   "waiver_days": 1,
   "ties": "split",

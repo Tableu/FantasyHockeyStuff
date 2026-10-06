@@ -544,7 +544,10 @@ class LiveRunner:
         # Fleaflicker prorates its weekly limit by the week's days (_week_cap); a full week is
         # the league's limit.
         days = (coming.end - coming.start).days + 1
-        mine.moves_used = 0
+        # After the first puck on ESPN a move takes effect tomorrow, so on the week's last day it
+        # counts toward next week -- and so does the platform's count (Espn.move_period), kept.
+        if not self.adds_locked:
+            mine.moves_used = 0
         mine.week_cap = max(1, round(self.config.moves_per_week * days / 7))
         v = view(ahead, day=coming.start, week=coming.number,
                  projections=skaters.iloc[0:0], goalie_projections=goalie_projections.iloc[0:0],

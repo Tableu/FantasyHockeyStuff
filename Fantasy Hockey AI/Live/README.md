@@ -58,9 +58,11 @@ the adapter reads the finished draft fine.
 **In season on ESPN** (`--league espn-la`) the runner reads rosters, IR, lineup slots and the
 matchup from ESPN, and who is on waivers until when (`Espn.waivers`, so an unrostered player on
 waivers is a claim, not an add), and moves used this week (each team's
-`transactionCounter.matchupAcquisitionTotals`). ESPN's settings can report no acquisition limit on
-a league that has one -- espn-la reports none and allows 6 a week -- so check the limit in
-`Settings/rosters/<league>.json` after `import_league_settings.py`.
+`transactionCounter.matchupAcquisitionTotals`) against this week's limit (`Espn.acquisitions`):
+`matchupAcquisitionLimit`, per day when `matchupLimitPerScoringPeriod` -- espn-la's 1 a day is 6 in
+its 6-day week 1 and 7 in a full week. `acquisitionLimit` is not it (-1 on espn-la). Both count
+in the week a move made now takes effect (`Espn.move_period`, from `transactionScoringPeriod`):
+after the day's first puck that is tomorrow, so a Sunday-night move counts toward next week.
 
 Plans run in the plan server (Server/server.py: when the window asks, and its auto window) or
 when you call run_live.py. Task Scheduler keeps the injury snapshots and the nightly ingest

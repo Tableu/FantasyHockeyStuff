@@ -23,10 +23,15 @@ A public league answers anyone; a private one needs the owner's `espn_s2` and `S
     transactions   mTransactions2 returned nothing for any scoring period, with or without an
                    x-fantasy-filter header -- not read. Moves used this week come from mTeam's
                    transactionCounter.matchupAcquisitionTotals instead ({matchup period: adds})
+    move limit     acquisitionSettings.matchupAcquisitionLimit, per day when
+                   matchupLimitPerScoringPeriod (`acquisitions`); acquisitionLimit is -1 on a
+                   league with a weekly limit
 """
 
+import collections
 import datetime as dt
 import json
+import zoneinfo
 
 import pandas as pd
 import requests
@@ -34,7 +39,9 @@ import requests
 import livepaths
 from platforms.base import Matchup, PlayerIds, TeamRoster
 
-API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fhl/seasons/{year}/segments/0/leagues/{league_id}"
+SEASON_API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fhl/seasons/{year}"
+API = SEASON_API + "/segments/0/leagues/{league_id}"
+EASTERN = zoneinfo.ZoneInfo("America/New_York")
 
 SLOT_LABELS = {0: "C", 1: "LW", 2: "RW", 3: "F", 4: "D", 5: "G", 6: "UTIL", 7: "BN", 8: "IR"}
 SLOT_POSITIONS = {"C": ["C"], "LW": ["LW"], "RW": ["RW"], "F": ["C", "LW", "RW"], "D": ["D"],
@@ -57,6 +64,15 @@ STAT_NAMES = {13: "G", 14: "A", 15: "+/-", 16: "PTS", 17: "PIM", 18: "PPG", 19: 
               21: "SHA", 23: "FOW", 24: "FOL", 29: "SOG", 31: "HIT", 32: "BLK", 38: "PPP", 39: "SHP",
               0: "GS", 1: "W", 2: "L", 3: "SA", 4: "GA", 6: "SV", 7: "SO", 9: "OTL"}
 GOALIE_KEYS = {"wins", "losses", "ot_losses", "shutouts", "saves", "goals_against"}
+
+
+def _weekly_limit(acquisition: dict) -> int | None:
+    """Adds a full (7-day) matchup week allows, None = unlimited: the matchup limit (per day when
+    matchupLimitPerScoringPeriod), else acquisitionLimit."""
+    per_matchup = acquisition.get("matchupAcquisitionLimit") or 0
+    if per_matchup > 0:
+        return int(round(per_matchup * (7 if acquisition.get("matchupLimitPerScoringPeriod") else 1)))
+    return None if acquisition["acquisitionLimit"] < 0 else acquisition["acquisitionLimit"]
 
 
 def espn_year(season: str) -> int:
@@ -108,7 +124,7 @@ class Espn:
                 "bench": counts.get("BN", 0), "ir": counts.get("IR", 0),
                 "max_goalies": s["rosterSettings"]["positionLimits"].get("5"),
                 "lineup_lock": s["rosterSettings"]["lineupLocktimeType"],
-                "acquisition_limit": None if acquisition["acquisitionLimit"] < 0 else acquisition["acquisitionLimit"],
+                "acquisition_limit": _weekly_limit(acquisition),
                 "waivers": acquisition["acquisitionType"], "waiver_hours": acquisition["waiverHours"],
                 "faab": acquisition["isUsingAcquisitionBudget"],
                 "regular_season_weeks": schedule["matchupPeriodCount"],
@@ -183,14 +199,64 @@ class Espn:
         return None
 
     def moves_used(self, team_id: int, day=None, when=None) -> int:
-        """Acquisitions this matchup period: the team's transactionCounter.matchupAcquisitionTotals,
-        keyed by matchup period. `day` and `when` are accepted for the interface; the period is
-        ESPN's current one. (mSettings can report no limit on a league that has one -- espn-la reports
-        acquisitionLimit -1 with a 6-a-week limit -- so the limit itself comes from the rules file.)"""
-        period = str(self._get("mMatchupScore")["status"]["currentMatchupPeriod"])
+        """Acquisitions in the matchup period a move made now counts toward (`move_period`): the
+        team's transactionCounter.matchupAcquisitionTotals, keyed by matchup period. `day` and
+        `when` are accepted for the interface."""
+        period = str(self.move_period()[0])
         team = next(t for t in self._get("mTeam")["teams"] if t["id"] == team_id)
         totals = (team.get("transactionCounter") or {}).get("matchupAcquisitionTotals") or {}
         return int(totals.get(period, 0))
+
+    def _scoring_day(self, scoring_period: int) -> dt.date:
+        """The Eastern date of a scoring period. ESPN numbers the season's days one apart (2026-27:
+        1 = Tue Sep 29), so the games' dates (proTeamSchedules_wl) anchor them all."""
+        if "day_one" not in self._cache:
+            r = requests.get(SEASON_API.format(year=self.season), params={"view": "proTeamSchedules_wl"},
+                             headers={"User-Agent": "python-requests"}, timeout=30)
+            r.raise_for_status()
+            offsets = collections.Counter(
+                dt.datetime.fromtimestamp(game["date"] / 1000, EASTERN).date() - dt.timedelta(days=int(sp))
+                for team in r.json()["settings"]["proTeams"]
+                for sp, games in (team.get("proGamesByScoringPeriod") or {}).items() for game in games)
+            self._cache["day_one"] = offsets.most_common(1)[0][0] + dt.timedelta(days=1)
+        return self._cache["day_one"] + dt.timedelta(days=scoring_period - 1)
+
+    def move_period(self):
+        """(matchup period, its first day, its last day) that a move made now counts toward: the
+        one holding status.transactionScoringPeriod, the day a move takes effect. After the day's
+        first puck that is tomorrow, so a Sunday-night move counts toward next week (the user,
+        2026-10-05). A period is the Monday-to-Sunday week holding its days, cut to the season's
+        first and last (espn-la 2026-27: week 1 is scoring periods 1-6, Tue-Sun, as its
+        pointsByScoringPeriod showed)."""
+        status = self._get("mStatus")["status"]
+        monday = lambda d: d - dt.timedelta(days=d.weekday())
+        now = monday(self._scoring_day(status["latestScoringPeriod"]))
+        start = monday(self._scoring_day(status.get("transactionScoringPeriod") or status["latestScoringPeriod"]))
+        period = status["currentMatchupPeriod"] + (start - now).days // 7
+        first = max(start, self._scoring_day(status["firstScoringPeriod"]))
+        last = min(start + dt.timedelta(days=6), self._scoring_day(status["finalScoringPeriod"]))
+        return period, first, last
+
+    def week_days(self, day=None, when=None) -> int | None:
+        """Days in the matchup period a move made now counts toward (`move_period`). `day` and
+        `when` are accepted for the interface."""
+        _, first, last = self.move_period()
+        return (last - first).days + 1
+
+    def acquisitions(self, team_id: int):
+        """(adds in the matchup period a move made now counts toward, its limit), or None when the
+        league sets no matchup limit.
+        The limit is acquisitionSettings.matchupAcquisitionLimit, per scoring period (a day) when
+        matchupLimitPerScoringPeriod: espn-la's 1.0 is 6 in its 6-day week 1 and 7 in a full week
+        (the user, 2026-10-05; its 5 adds in week 1 rule out 1 a week). acquisitionLimit (-1 there)
+        is not it."""
+        settings = self.settings()["acquisitionSettings"]
+        limit = settings.get("matchupAcquisitionLimit") or 0
+        if limit <= 0:
+            return None
+        if settings.get("matchupLimitPerScoringPeriod"):
+            limit *= self.week_days()
+        return self.moves_used(team_id), int(round(limit))
 
     # ---------- the draft ----------
 
