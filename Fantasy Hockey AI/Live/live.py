@@ -120,6 +120,10 @@ class LeagueSnapshot:
     # length in days for prorating the league's weekly limit; None when it cannot say.
     move_limit: int | None = None
     week_days: int | None = None
+    # The last day (ISO) of the platform's period that a move made now counts toward, where it can
+    # say (Fleaflicker): on Sunday night that is still the old week until 6:00 AM Eastern Monday,
+    # while the plan is for Monday (LiveRunner._state's rollover).
+    period_end: str | None = None
 
     @classmethod
     def load(cls, path: Path) -> "LeagueSnapshot":
@@ -134,6 +138,7 @@ class LeagueSnapshot:
                    lineup={k: [int(p) for p in v] for k, v in raw.get("lineup", {}).items()},
                    waivers={int(k): v for k, v in raw.get("waivers", {}).items()},
                    move_limit=raw.get("move_limit"), week_days=raw.get("week_days"),
+                   period_end=raw.get("period_end"),
                    source=raw.get("source", f"file {Path(path).name}"))
 
 
@@ -181,6 +186,8 @@ class LeagueSnapshot:
         moves_free = (adapter.before_first_period(when)
                       if when is not None and hasattr(adapter, "before_first_period") else None)
         week_days = adapter.week_days(day, when=when) if hasattr(adapter, "week_days") else None
+        period = adapter.period_at(when) if when is not None and hasattr(adapter, "period_at") else None
+        period_end = period[2].isoformat() if period is not None else None
         # The platform's own count for my team (Fleaflicker's team page), over ours from the
         # transaction list: on 2026-10-01 they agreed on 4 used, and the page alone knew the
         # limit was 6, not the rules page's 7.
@@ -193,7 +200,7 @@ class LeagueSnapshot:
                             "using %d", adapter.platform, used, teams[me]["moves_used"], used)
                 teams[me]["moves_used"] = used
         return cls(teams=teams, me=me, opponent=opponent, moves_free=moves_free,
-                   move_limit=move_limit, week_days=week_days,
+                   move_limit=move_limit, week_days=week_days, period_end=period_end,
                    my_week_points=matchup.points if matchup else 0.0,
                    opponent_week_points=matchup.opponent_points if matchup else 0.0,
                    lineup=lineup, waivers=waivers,
@@ -495,6 +502,16 @@ class LiveRunner:
         manager.transactions(view())
         next_week, next_plans = self._next_week_plans(manager, state, week, view, skaters, goalie_projections)
         problems = ([ros_note] if ros_note else []) + self.freshness()
+        if self.rollover:
+            left, cap = self.rollover["leftover"], self.rollover["new_cap"]
+            problems.append(
+                f"{self.league.platform.capitalize()}'s week turns over at 6:00 AM Eastern: a move made "
+                f"before then counts against last week's {left} leftover move(s), free for this week "
+                "-- make today's moves tonight, at most that many -- and later ones against this "
+                f"week's {cap}" if left else
+                f"{self.league.platform.capitalize()}'s week turns over at 6:00 AM Eastern and last week "
+                f"has no moves left: make today's moves after 6:00 AM Eastern (3:00 AM Pacific); they "
+                f"count against this week's {cap}")
         # A drop list carried into a new matchup week is easy to forget (it overrides who may be
         # dropped until cleared): say when it was set.
         if self.droppable is not None:
@@ -736,6 +753,26 @@ class LiveRunner:
         # week 1 -- Fleaflicker 2026-27: Tue Sep 29, 6:00 AM Eastern), else the calendar's.
         state.free_moves = (snapshot.moves_free if snapshot.moves_free is not None
                             else day < self.calendar.weeks[0].start)
+        # The rollover (Fleaflicker, 2026-10-05): after Sunday's last puck the plan is for Monday,
+        # but a move made now still counts toward the old week until 6:00 AM Eastern, and the
+        # snapshot's counts are that week's. Planning the new week on the old week's leftover moves
+        # under-budgets every later night. So: the new week's limit for everyone, nothing used; a
+        # move made tonight spends the old week's leftovers, which expire anyway -- free for this
+        # week while any are left (not capped at that count: the plan's problems line says it).
+        self.rollover = None
+        ended = pd.Timestamp(snapshot.period_end) if snapshot.period_end else None
+        week = state.week
+        if ended is not None and week is not None and day > ended:
+            old_cap = week_cap if week_cap is not None else self.config.moves_per_week
+            leftover = max(0, old_cap - snapshot.teams[snapshot.me]["moves_used"])
+            coming = self.calendar.weeks[week - 1]
+            new_cap = max(1, round(self.config.moves_per_week
+                                   * ((coming.end - coming.start).days + 1) / 7))
+            for holder in state.teams:
+                holder.moves_used, holder.week_cap = 0, new_cap
+            if leftover > 0:
+                state.free_moves = True
+            self.rollover = {"leftover": leftover, "new_cap": new_cap}
         return state
 
     def _week_cap(self, snapshot):
