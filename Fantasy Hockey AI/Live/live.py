@@ -82,6 +82,9 @@ ADDS_LOCK_AT_FIRST_PUCK = {"espn"}
 # The local hour by which the nightly job (pipeline/run_nightly_ingest.cmd, 4:00) has loaded last
 # night's games and projections; a plan after it on older ones says so (LiveRunner.freshness).
 NIGHTLY_DONE_HOUR = 6
+# Points a move recommended TODAY must clear its bar by, in the live plan alone (LiveRunner): a
+# move costs a person's effort and hands a player to the field, which no backtest charges for.
+LIVE_MIN_GAIN = 0.5
 
 
 def season_of(day: dt.date) -> str:
@@ -327,7 +330,12 @@ class LiveRunner:
         self.league = league
         self.plans_dir = livepaths.league_reports(league.name) / "plans"
         self.season = season_of(day)
-        self.strategy = load_strategy(league.strategy)
+        strategy = load_strategy(league.strategy)
+        # The live plan only: a move recommended today clears its bar by LIVE_MIN_GAIN. The
+        # strategy files are the backtests' too, where 0.5 measured neutral (branch screen, 2024-25:
+        # +0.12 +/- 0.27 pts/wk); live it spares the +0.03 rentals a person would make by hand.
+        self.strategy = dataclasses.replace(strategy, streaming=dataclasses.replace(
+            strategy.streaming, min_gain=max(strategy.streaming.min_gain, LIVE_MIN_GAIN)))
         self.scoreset = simlayer.load_scoreset(league.scoring)
         self.board, _, self.config, self.eligibility = draft_board.build(
             self.season, draft_board.previous(self.season), league.rules, league.scoring,
