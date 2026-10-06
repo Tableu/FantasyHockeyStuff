@@ -11,7 +11,8 @@ Settings/leagues/ (beagles, espn-la), one refresh at a time.
 
 Every call but the job's takes ?league=<name> (default: the first league served, beagles):
 
-    GET  /plan                 the league's newest plan today: {league, file, saved_at, plan}
+    GET  /plan                 the league's newest plan for the plan's day -- today, or tomorrow once
+                               every game today has started: {league, file, saved_at, plan}
     POST /refresh {mode}       'full' or 'quick' -- re-plans EVERY league; returns the job. A tap
                                while a refresh runs joins it
     GET  /jobs/{id}?after=n    the job's state and its progress lines after line n
@@ -30,7 +31,8 @@ A refresh is planpass.Planner's: the snapshots and tonight's projections once, t
 read, plan and saved plan files in a child process that exits after -- so the server's memory does
 not grow with the leagues it plans -- and one league's failure (its platform down) leaves the
 others' plans. The auto window runs here: a quick refresh about 30 minutes before each group of games, once
-per group, for every league. The live games' NHL feeds are fetched once for all leagues; each league
+per group, for every league, and one more once today's last game has started -- the plan is then
+tomorrow's (moves, lineup and projections), since tonight has no lineup left to set. The live games' NHL feeds are fetched once for all leagues; each league
 sees them with its own rosters and scoring. No login yet: it listens on this PC only until it has
 one.
 """
@@ -47,6 +49,7 @@ from pathlib import Path
 LIVE = Path(__file__).resolve().parents[1] / "Live"
 sys.path.insert(0, str(LIVE))
 
+import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
@@ -114,8 +117,16 @@ class Worker:
             raise HTTPException(404, f"this server plans {', '.join(self.leagues)}, not {name}")
         return self.leagues[name]
 
-    def day(self) -> dt.date:
+    def today(self) -> dt.date:
         return dt.date.fromisoformat(self.args.date) if self.args.date else dt.date.today()
+
+    def day(self) -> dt.date:
+        """The day the plan is for: today, or tomorrow once every game today has started -- no
+        lineup is left to set tonight, so the moves shown are tomorrow's (the user, 2026-10-05).
+        Today's puck times come from its tonight build, so before a refresh has made one, today."""
+        today = self.today()
+        pucks = planpass.puck_times(today)
+        return today + dt.timedelta(days=1) if pucks and pucks[-1] <= pd.Timestamp(self.now()) else today
 
     def now(self) -> dt.datetime:
         return dt.datetime.fromisoformat(self.args.now) if self.args.now else utc_now()
@@ -178,13 +189,25 @@ class Worker:
                 if window is not None and self.current is None and not self.planned_for(window):
                     self.windows_done.add(window)
                     self.start("quick", by=f"auto: games at {window:%H:%M} UTC")
+                # Once today's last game starts, tomorrow's plan, once (or on a restart before
+                # any plan for tomorrow was saved).
+                day = self.day()
+                if (day != self.today() and self.current is None and day not in self.windows_done
+                        and not all(planpass.saved_plans(league, day) for league in self.leagues.values())):
+                    self.windows_done.add(day)
+                    self.start("quick", by=f"auto: today's games have started, planning {day:%a}")
             except Exception as error:  # noqa: BLE001 -- a bad check must not end the loop
                 print(f"auto window check failed: {type(error).__name__}: {error}", file=sys.stderr)
             time.sleep(AUTO_CHECK_S)
 
     def newest_plan(self, league):
-        files = planpass.saved_plans(league, self.day())
-        return files[-1] if files else None
+        """The newest plan for the plan's day -- or, once it is tomorrow and none is saved yet,
+        today's."""
+        for day in dict.fromkeys((self.day(), self.today())):
+            files = planpass.saved_plans(league, day)
+            if files:
+                return files[-1]
+        return None
 
 
 class Refresh(BaseModel):

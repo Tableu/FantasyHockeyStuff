@@ -18,7 +18,7 @@ the first league served; plan_gui.py sends its own `--league`.
 
 | Call | Does |
 | --- | --- |
-| GET /plan | The league's newest saved plan today: {league, file, saved_at, plan} (404 before the first) |
+| GET /plan | The league's newest saved plan for the plan's day -- today, or tomorrow once every game today has started (today's until tomorrow's is saved): {league, file, saved_at, plan} (404 before the first) |
 | POST /refresh {"mode": "full" or "quick"} | Starts a refresh of every league and returns its job; a tap while one runs joins it |
 | GET /jobs/{id}?after=n | The job's state, each league's saved plan file, its progress lines after line n |
 | GET /status | The leagues served, the day, the running job, when each step last ran (with the league's own read), its newest plan |
@@ -38,8 +38,9 @@ the play-by-play's situation codes, which lag and misreport during a game. Fanta
 the newest plan and players.parquet's NHL ids.
 
 The refreshes are planpass.Planner's -- the same steps run_live.py takes -- and save the same plan files.
-The auto window (a quick refresh ~30 minutes before each group of games) runs in the server unless
---no-auto. No login yet, so it listens on this PC only (in the container: --host 0.0.0.0, which
+The auto window (a quick refresh ~30 minutes before each group of games, and one once today's last
+game has started) runs in the server unless --no-auto. From that last puck on, the plan is
+tomorrow's: its moves, lineup and projections, since tonight has no lineup left to set. No login yet, so it listens on this PC only (in the container: --host 0.0.0.0, which
 compose publishes to 127.0.0.1 alone).
 
 ## Running it

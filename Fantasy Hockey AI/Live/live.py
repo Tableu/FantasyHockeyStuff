@@ -670,9 +670,12 @@ class LiveRunner:
         game day before today. ros_predict.py dates its file by the newest game it saw, so a fresh
         run on Oct 5 writes Oct 4's file. On 2026-10-04 the PC slept through 4:00 and the plan ran
         on Oct 2's games without a word. A rehearsal of a past date is old on purpose: only today's
-        plan is checked."""
-        played = [d for d in self.game_days if d < self.day]
-        if self.day != dt.date.today() or not played or dt.datetime.now().hour < NIGHTLY_DONE_HOUR:
+        plan is checked, and tomorrow's (made once today's games have all started), which checks
+        the same days: tonight's games load at 4:00."""
+        today = dt.date.today()
+        played = [d for d in self.game_days if d < min(self.day, today)]
+        if (self.day not in (today, today + dt.timedelta(days=1)) or not played
+                or dt.datetime.now().hour < NIGHTLY_DONE_HOUR):
             return []
         out, last = [], max(played)
         path = paths.goalie_starts(self.season)
