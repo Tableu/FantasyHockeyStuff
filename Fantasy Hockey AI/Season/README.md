@@ -404,6 +404,23 @@ a season barely move (155-165 against 160): these dials change which moves, not 
 Per-draft noise here is 4.7-9.3 points a week (the week-mode and spots comparisons are the noisy
 ones): 22-86 drafts for +/-1.0, 64 was the budget.
 
+**Stopping rules, set before a run** (2026-10-05). A result read against a rule chosen after seeing it
+drifts toward yes, so these are fixed in advance. SE is the run's own standard error of the gap; the
+halves are its two halves.
+
+| Stage | Drafts | Reject | Go on | Adopt |
+| --- | --- | --- | --- | --- |
+| Branch screen (`branch.py`, week-local rules only) | 14 | gap <= 0 | gap > 0 but under +2 SE: extend to 28 branch drafts once, then judge the same way | gap >= +2 SE: go to the season screen |
+| Season screen (`oneseat.py`) | 28 | gap <= -2 SE | anything else: run to 56 | never at 28 |
+| Season decision | 56 | gap <= -2 SE | -- | gap >= +2 SE with both halves the same sign; inside +/-2 SE is **neutral**: adopt only for a stated reason other than points (speed, simplicity, the user's argument), recorded as such |
+| Confirmation (2025-26, the two-season rule) | 56 | gap <= -2 SE reverses the decision | -- | anything else passes; a neutral confirmation of a 2024-25 gain is recorded as "did not replicate" |
+
+Two more. **Don't extend a run because it ended near a line** -- extend only where the table says.
+**After every three neutral adoptions, run a baseline check**: the strategy from before them against
+today's, 112 drafts; a gap of 2 SE or more against today's sends each change to a single-revert A/B
+(2026-10-05: three neutral adoptions read +1.07 +/- 0.63 for the old strategy; the single reverts,
+re-run with `prune` on, kept all three).
+
 **Screen at 28 drafts, decide at 56** (2026-10-04; 32 / 64 before). Drafts come in multiples of the
 league's teams -- 14 here, 10 for espn-la (30 / 60) -- because the test seat takes each draft
 position once per block of `teams` drafts: 32 or 64 left a partial block that over-weighted some
