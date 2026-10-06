@@ -631,7 +631,7 @@ class WeekPlanner:
                 "for_next_week": m.get("for_next_week", False),
                 # A team slot's (TeamPlans): its team, position, expected edge and ranked options.
                 "team": m.get("team"), "group": m.get("group"), "expected": m.get("expected"),
-                "options": options}
+                "options": options, "near": m.get("near", [])}
 
 
 # ---------- the plan window's team-slot plans ----------
@@ -647,6 +647,10 @@ SURVIVAL_BY_DAYS = (1.0, 0.71, 0.59, 0.51, 0.44)
 # for a player the plan does not already hold.
 GROUPS = ("SKATER", "G")
 OPTIONS_PER_SLOT = 8        # the players on a slot's team priced as its options
+# Other teams' free agents shown under a slot (TeamPlans.near_ties): within this many of the week's
+# lineup points with the pick, at most NEAR_TIES_SHOWN of them. Display only.
+NEAR_TIE_POINTS = 1.0
+NEAR_TIES_SHOWN = 3
 
 
 def group_of(eligibility) -> str:
@@ -844,6 +848,36 @@ class TeamPlans:
         return ([self.summary(*o) for o in out]
                 + sorted((self.summary(*o) for o in others), key=lambda s: -s["expected"]))
 
+    def near_ties(self, moves, i) -> list:
+        """Other teams' free agents nearly as good as slot i's pick (the plan window, display only):
+        each shortlisted pickup of the slot's day on another team, tried in the pick's place -- a
+        later move that dropped the pick drops him instead -- and kept if the week's lineup points
+        come within NEAR_TIE_POINTS of the plan's. A slot's own options are its team's; these are
+        the ones a team slot hides (Robertson behind a WSH slot, 2026-10-04). Best first."""
+        p, m = self.p, moves[i]
+        def points(plan):
+            ordered = p.ordered(plan)
+            return sum(p.weight(n) * p.night_value(n, p.roster_at(p.roster, ordered, n, ordered=True))
+                       for n in p.nights)
+        whole = points(moves)
+        taken = {x["incoming"] for x in moves} | {x["outgoing"] for x in moves if x["outgoing"] is not None}
+        found = []
+        for incoming, day, effective in p.candidates:
+            if (day != m["day"] or incoming in taken
+                    or p.view.nhl_team.get(incoming) == m.get("team")):
+                continue
+            trial = [dict(x) for x in moves]
+            trial[i].update(incoming=incoming, effective=effective)
+            for j, x in enumerate(trial):
+                if j != i and x["outgoing"] == m["incoming"]:
+                    x["outgoing"] = incoming
+            delta = points(trial) - whole
+            if delta >= -NEAR_TIE_POINTS:
+                found.append({"incoming": incoming, "team": p.view.nhl_team.get(incoming),
+                              "delta": delta, "games": p._games(incoming, effective)})
+        found.sort(key=lambda f: (-f["delta"], f["incoming"]))
+        return found[:NEAR_TIES_SHOWN]
+
     def summary(self, moves, first, without=()) -> dict:
         """The plan for the window. A slot's options leave out the plan's other picks -- two VAN LW
         slots today are two different players, not each other's fallback -- and its expected edge
@@ -855,6 +889,8 @@ class TeamPlans:
             value = expected([o["gain"] - o["bar"] for o in options], survival((m["day"] - self.p.today).days))
             trimmed.append(dict(m, options=options, expected=value))
         moves = trimmed
+        for i, m in enumerate(moves):
+            m["near"] = self.near_ties(moves, i)
         out = self.p.summary(moves, first["incoming"] if first is not None else None)
         out.update(expected=sum(m["expected"] for m in moves),
                    games=sum(m["incoming_games"] for m in out["moves"]),

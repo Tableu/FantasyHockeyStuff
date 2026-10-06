@@ -961,7 +961,13 @@ class LiveRunner:
                              # The pick's own positions: a slot takes any skater (or a goalie).
                              "pos": "/".join(sorted(self.eligibility.get(p, ()))) or m.get("group"),
                              "expected": None if m.get("expected") is None else round(m["expected"], 1),
-                             "options": option_rows(m.get("options", []))})
+                             "options": option_rows(m.get("options", [])),
+                             # Other teams' near ties (TeamPlans.near_ties), display only.
+                             "near": [{"add": name(n["incoming"]),
+                                       "team": teams.get(n["team"]) if n.get("team") is not None else None,
+                                       "positions": "/".join(sorted(self.eligibility.get(n["incoming"], ()))),
+                                       "add_rate": priced(n["incoming"]), "add_games": n["games"],
+                                       "delta": round(n["delta"], 1)} for n in m.get("near", [])]})
             return rows
         week_plan = week_rows(manager.plan.week_plan)
         # The plan made (A) and the alternatives (B, C, ...), each opening on a different team.

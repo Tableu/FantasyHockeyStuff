@@ -1098,9 +1098,16 @@ class PlanWindow:
                               f"{w['gain']:+.1f}", f"{w['bar']:.1f}", f"{w['edge']:+.1f}",
                               blank(w.get("expected"), "+.1f"), len(options) or ""),
                              ("plan",) if made else ()))
-                self.week_rows.append(slot_key if options else None)
+                self.week_rows.append(slot_key if options or w.get("near") else None)
                 if slot_key not in opened:
                     continue
+                # Other teams' near ties: not this slot's options (those are its team's), but
+                # pickups that day the team slot hides, within a point of the pick.
+                for n in w.get("near") or []:
+                    rows.append((("", "", "", n.get("team") or "", n["positions"], "other team",
+                                  f"      \u2248 {n['add']}", _num(n["add_rate"]), "", n["add_games"],
+                                  "", "", "", "", "", f"{n['delta']:+.1f} vs pick", "", ""), ()))
+                    self.week_rows.append(None)
                 for rank, o in enumerate(options, 1):
                     start = "" if o["from"] == w["from"] else f" (from {pd.Timestamp(o['from']).strftime('%a')})"
                     status = f" [{o['status']}]" if o.get("status") not in (None, "ACTIVE") else ""
