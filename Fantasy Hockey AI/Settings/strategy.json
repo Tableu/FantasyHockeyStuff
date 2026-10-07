@@ -30,7 +30,8 @@
     "chain_tie": 0.1,
     "lazy": true,
     "min_gain": 0.0,
-    "prune": true
+    "prune": true,
+    "restarts": 0
   },
   "rung3_streamer": {
     "horizon_weeks": 1

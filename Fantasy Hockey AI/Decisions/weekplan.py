@@ -340,10 +340,16 @@ class WeekPlanner:
         return True
 
     def plan(self) -> list:
+        """The greedy build (`build`), then -- with `restarts` -- the restart pass (`_restart`)."""
+        moves = self.build()
+        return self._restart(moves) if self.params.restarts > 0 else moves
+
+    def build(self, banned=frozenset()) -> list:
         """Greedy insertion, from an empty plan: of every move on any night ahead, put in the one
-        with the largest survival^days x (gain - bar), until none clears its bar."""
+        with the largest survival^days x (gain - bar), until none clears its bar. Never a pickup
+        on a (team, day) in `banned` (the restart pass's)."""
         if self.params.lazy:
-            return self._plan_lazy()
+            return self._plan_lazy(banned)
         moves, spent = [], {}
         open_spots = self.view.roster_room()
         pruned = set()                    # (incoming, day) the removal pass took out: never re-added
@@ -352,7 +358,8 @@ class WeekPlanner:
             held = self.held(moves)
             self._base = (moves, {})
             for incoming, day, effective in self.candidates:
-                if incoming in held[0] or incoming in held[1] or (incoming, day) in pruned:
+                if (incoming in held[0] or incoming in held[1] or (incoming, day) in pruned
+                        or (self.view.nhl_team.get(incoming), day) in banned):
                     continue
                 for outgoing, cost, trial in self.trials(moves, held, spent, open_spots,
                                                          incoming, day, effective):
@@ -371,7 +378,7 @@ class WeekPlanner:
             spent[day] = spent.get(day, 0) + cost
             open_spots -= into_open
 
-    def _plan_lazy(self) -> list:
+    def _plan_lazy(self, banned=frozenset()) -> list:
         """`plan` with lazy evaluation (strategy `streaming.lazy`): the first round prices every
         candidate; after it, candidates are priced from the highest ceiling down -- a candidate's
         ceiling is its best edge when last priced -- and a round stops once the best edge found
@@ -390,7 +397,8 @@ class WeekPlanner:
             self._base = (moves, {})
             live = [i for i, (incoming, day, _) in enumerate(self.candidates)
                     if incoming not in held[0] and incoming not in held[1]
-                    and (incoming, day) not in pruned]
+                    and (incoming, day) not in pruned
+                    and (self.view.nhl_team.get(incoming), day) not in banned]
             if ceilings is not None:
                 live.sort(key=lambda i: (-ceilings.get(i, -math.inf), i))
             priced = {}
@@ -419,6 +427,52 @@ class WeekPlanner:
             spent[day] = spent.get(day, 0) + cost
             open_spots -= into_open
 
+    def week_points(self, plan) -> float:
+        """The week's lineup points (weighted nights) on the roster the plan leaves each night."""
+        ordered = self.ordered(plan)
+        return sum(self.weight(n) * self.night_value(n, self.roster_at(self.roster, ordered, n,
+                                                                        ordered=True))
+                   for n in self.nights)
+
+    def worth(self, plan) -> float:
+        """A whole plan's edge: its week's lineup points over the roster's, less every move's bar.
+        What the restart pass compares -- never lineup points alone: the swap pass judged on those
+        (review #8b, removed 2026-10-05) chased noise. Survival is 1.0 in every strategy, so a
+        later night's pickup is not discounted here."""
+        return self.week_points(plan) - self.week_points([]) - sum(m["bar"] for m in plan)
+
+    def _restart(self, moves) -> list:
+        """The restart pass (strategy streaming.restarts). Greedy insertion takes the best single
+        move first and never revisits it, so a pickup held to the week's end can strand the rest
+        of the budget: espn-la, 2026-10-07, Foerster (PHI, every PHI night) then York filled both
+        streaming spots and the plan ended at +5.5 with three moves unspent, while the week
+        without PHI chained five one-night rentals for +7.2. While the plan leaves moves unspent,
+        each of its held pickups (nobody's drop later) is banned in turn -- his team on his day,
+        so a teammate cannot stand in -- and the plan rebuilt; the first rebuild worth more
+        (`worth`) is kept and the pass goes on from it, at most `restarts` rebuilds in all."""
+        def unspent(plan):
+            spent = sum(self.move_cost(m["day"], m["kind"], m["outgoing"]) for m in plan)
+            return spent < self.moves_left
+        best, value, banned, left = moves, self.worth(moves), frozenset(), self.params.restarts
+        while left > 0 and unspent(best):
+            dropped = {m["outgoing"] for m in best if m["outgoing"] is not None}
+            held = [m for m in best if m["incoming"] not in dropped
+                    and (self.view.nhl_team.get(m["incoming"]), m["day"]) not in banned]
+            improved = False
+            for m in sorted(held, key=lambda m: (m["day"], m["effective"])):
+                if left <= 0:
+                    break
+                left -= 1
+                trial_banned = banned | {(self.view.nhl_team.get(m["incoming"]), m["day"])}
+                rebuilt = self.build(trial_banned)
+                trial = self.worth(rebuilt)
+                if trial > value + 1e-9:
+                    best, value, banned, improved = rebuilt, trial, trial_banned, True
+                    break
+            if not improved:
+                break
+        return best
+
     def _prune(self, moves, pruned):
         """The removal pass (strategy streaming.prune): greedy insertion never revisits a move, so
         a pickup a later one made worthless stays in. Each planned move no later move depends on
@@ -426,11 +480,7 @@ class WeekPlanner:
         it are within its bar of the points with it, it comes out, and the build resumes with the
         freed budget. Returns (moves, spent, open spots, pruned) -- spent is None when nothing came
         out, and the build ends."""
-        def week_points(plan):
-            ordered = self.ordered(plan)
-            return sum(self.weight(n) * self.night_value(n, self.roster_at(self.roster, ordered, n,
-                                                                            ordered=True))
-                       for n in self.nights)
+        week_points = self.week_points
         dropped = {m["outgoing"] for m in moves if m["outgoing"] is not None}
         whole = week_points(moves)
         for m in sorted(moves, key=lambda m: (m["day"], m["effective"]), reverse=True):

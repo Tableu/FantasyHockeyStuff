@@ -1392,7 +1392,7 @@ LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"
                 ("streaming", "spot_tolerance"), ("streaming", "starter_share"),
                 ("streaming", "late_days"), ("streaming", "clear_win_z"), ("streaming", "chain_tie"),
                 ("roster", "repair_wait_days"), ("adddrop", "goalie_absence"),
-                ("adddrop", "rate_source"))
+                ("adddrop", "rate_source"), ("streaming", "restarts"))
 
 
 def check_live_strategy() -> str:

@@ -77,6 +77,9 @@ class StreamParams:
     prune: bool                 # week mode: after the greedy build, drop planned moves a later one
                                 # made worthless, then refill (WeekPlanner._prune; review #8); on
                                 # since 2026-10-05 (2024-25 +1.21, 2025-26 -0.18; Settings/README)
+    restarts: int               # week mode: when the plan leaves moves unspent, rebuild it up to this
+                                # many times without one of its held pickups' team-days, keeping a
+                                # rebuild worth more (WeekPlanner._restart); 0 = off
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -92,7 +95,8 @@ class StreamParams:
                 f"{f' tol={self.spot_tolerance:g}' if self.spot_tolerance else ''}"
                 f"{' lazy' if self.mode == 'week' and self.lazy else ''}"
                 f"{f' mg={self.min_gain:g}' if self.mode == 'week' and self.min_gain else ''}"
-                f"{' prune' if self.mode == 'week' and self.prune else ''}")
+                f"{' prune' if self.mode == 'week' and self.prune else ''}"
+                f"{f' rs={self.restarts}' if self.mode == 'week' and self.restarts else ''}")
 
 
 # How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
