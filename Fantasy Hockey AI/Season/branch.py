@@ -44,7 +44,7 @@ log = logging.getLogger("branch")
 
 # Read-only for the whole season: shared by the copy, never deep-copied (the season's inputs).
 SHARED = ("config", "calendar", "data", "eligibility", "scoreset", "proj_by_day", "nhl_team_by_day",
-          "goalies_by_day", "unavailable_by_day", "status_by_day", "ros_by_day", "board_ros",
+          "goalies_by_day", "unavailable_by_day", "status_by_day", "ros_by_day", "ros_gp_by_day", "board_ros",
           "outcomes", "goalie_fit")
 
 

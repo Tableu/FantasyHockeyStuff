@@ -39,7 +39,7 @@ season-level result rather than as an error:
                     differs between paired runs, or who drafts past his goalie cap
     live strategy   a league without its own Settings/strategy-<league>.json, or one differing from
                     strategy.json in more than the league-level choices (LIVE_CHOICES: tail, streaming
-                    mode/gate/next_week/goalies/spots/spot_tolerance)
+                    mode/gate/next_week/goalies/spots/spot_tolerance, rate_source, ...)
     modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
     boom bust       boom/bust odds outside [0, 1], a par curve that rises, season draws or room
                     drafts that differ between two runs with one seed, or the saved-run reader
@@ -1391,7 +1391,8 @@ LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"
                 ("streaming", "next_week"), ("streaming", "goalies"), ("streaming", "spots"),
                 ("streaming", "spot_tolerance"), ("streaming", "starter_share"),
                 ("streaming", "late_days"), ("streaming", "clear_win_z"), ("streaming", "chain_tie"),
-                ("roster", "repair_wait_days"), ("adddrop", "goalie_absence"))
+                ("roster", "repair_wait_days"), ("adddrop", "goalie_absence"),
+                ("adddrop", "rate_source"))
 
 
 def check_live_strategy() -> str:

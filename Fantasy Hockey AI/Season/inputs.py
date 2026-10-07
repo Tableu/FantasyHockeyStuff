@@ -162,6 +162,13 @@ def load_ros(season: str, tag: str | None = None):
         raise ProvenanceError(f"{path} was trained on {sorted(trained_on)}, which includes "
                               f"{season}: in-sample on the season being replayed.")
     table["game_date"] = pd.to_datetime(table["game_date"])
+    # Games he had played this season before each row (rate source `blend`): the feature table's
+    # gp_std on the same player and date, 0 before his first.
+    played = pd.read_parquet(paths.base_table(season), columns=["player_id", "game_date", "gp_std"])
+    played["game_date"] = pd.to_datetime(played["game_date"])
+    table = table.merge(played.drop_duplicates(["player_id", "game_date"]),
+                        on=["player_id", "game_date"], how="left")
+    table["gp_std"] = table["gp_std"].fillna(0.0)
     out = table[[c for c in table.columns if not c.startswith("target_")]]
     log.info("rest-of-season: %d rows, %d players, trained on %s (%s)", len(out),
              out["player_id"].nunique(), sorted(trained_on), path.name)

@@ -486,7 +486,8 @@ class LiveRunner:
                 phase=phase, alive=True, on_bye=False,
                 week_weight_mode=self.strategy.playoff_week_weight,
                 rate_estimate=rate_estimate, ros_estimate=ros_estimate, returns=returns,
-                closed_tonight=closed_tonight)
+                closed_tonight=closed_tonight, board_estimate=self.ros_seed,
+                ros_games=self.ros_games, board_scale=self.board_scale)
             v = view_module.SlateView(**{**fields, **changes})
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
             v.droppable = self.droppable              # adddrop, streaming.spots, weekplan
@@ -666,6 +667,8 @@ class LiveRunner:
         With no projection file, the board alone, as before, and the plan says so."""
         files = sorted(paths.PROJECTIONS_REPORTS.glob(f"ros_projections_{self.season}_*.parquet"))
         files = [f for f in files if f.stem.rsplit("_", 1)[-1] <= self.day.isoformat()]
+        # Rate source `blend` (valuation.rate): games played behind each row, the model's level.
+        self.ros_games, self.board_scale = {}, 1.0
         if not files:
             return dict(self.ros_seed), ("no rest-of-season projections for this season yet "
                                          "(Projections/ros_predict.py): moves priced on the preseason board")
@@ -676,6 +679,8 @@ class LiveRunner:
         shared = [p for p in model if p in self.ros_seed]
         scale = (sum(model[p] for p in shared) / sum(self.ros_seed[p] for p in shared)
                  if shared and sum(self.ros_seed[p] for p in shared) > 0 else 1.0)
+        self.ros_games = {int(p): float(g) for p, g in zip(rows["player_id"], rows["gp_std"].fillna(0.0))}
+        self.board_scale = scale
         log.info("rest of season: %d skaters from %s, the rest from the board x %.3f",
                  len(model), files[-1].name, scale)
         return {**{p: v * scale for p, v in self.ros_seed.items()}, **model}, None

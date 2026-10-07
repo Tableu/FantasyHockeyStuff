@@ -641,7 +641,7 @@ class FullSystem(Manager):
         # drop: rung 4 cut the returning player 80% of the time (2026-09-28). The rest-of-season
         # rate does not collapse that way, so it stands when there is one.
         # `board` is live's rest-of-season rate (valuation.rate), so it stands the same way.
-        covered = (view.ros_rate(returning) is not None if source == "ros"
+        covered = (view.ros_rate(returning) is not None if source in ("ros", "blend")
                    else source == "board" and valuation.board_covers(view, returning))
         if not covered:
             healthy = view.healthy_rate(returning)

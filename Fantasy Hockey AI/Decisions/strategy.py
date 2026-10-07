@@ -161,8 +161,8 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
     if rung4["z_source"] not in ("closed_form", "sampled"):
         raise ValueError(f"strategy {name}: z_source {rung4['z_source']!r}; use closed_form or sampled")
     for source in (add.rate_source, rung4["drop_rate_source"]):
-        if source not in ("ros", "per_game", "board"):
-            raise ValueError(f"strategy {name}: rate source {source!r}; use ros, per_game or board")
+        if source not in ("ros", "per_game", "board", "blend"):
+            raise ValueError(f"strategy {name}: rate source {source!r}; use ros, per_game, board or blend")
     return Strategy(
         name=name,
         adddrop=add,

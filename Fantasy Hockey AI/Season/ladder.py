@@ -265,10 +265,10 @@ def run_one(config, calendar, data, eligibility, scoreset, rungs, replication, v
         for manager in opponents:
             data["opponent_field"].attach(manager, replication)
     base = [m.rung % managers_module.VOR_TWIN for m in field]
-    if any(r in (5, 7, 8) for r in base) and strategy.adddrop.rate_source == "ros"             and data.get("ros") is None:
+    if any(r in (5, 7, 8) for r in base) and strategy.adddrop.rate_source in ("ros", "blend")             and data.get("ros") is None:
         raise SystemExit("rung 5 reads rest-of-season projections and none are built -- run "
                          "Projections/ros_train.py --horizon season --predictions-out")
-    if any(m.strategy.adddrop.rate_source == "board" for m in field
+    if any(m.strategy.adddrop.rate_source in ("board", "blend") for m in field
            if hasattr(m.strategy, "adddrop")) and scoreset.name not in data.get("board_values", {}):
         raise SystemExit("a seat prices moves on the preseason board (rate_source board) and no "
                          "consensus values are loaded (data['board_values'], ladder.consensus_values)")

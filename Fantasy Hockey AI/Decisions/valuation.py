@@ -23,6 +23,14 @@ import slots as slots_module
 # median 0.912, mean 0.990. The same constant rung 4 uses for a player with no draw tonight.
 PER_GAME_CV = 0.9
 
+# Rate source `blend`: the board's weight is BLEND_GAMES / (BLEND_GAMES + games he has played this
+# season), so the preseason consensus leads until his own games outnumber it. 7: the board at 0.7
+# after a week's ~3 games -- the opening weight of the calendar blend tried 2026-10-03 -- and his
+# own season taking over by ~20 games. Prompted by Jake Sanderson (espn-la, 2026-10-06): one 4:29
+# game, left injured, took the model from 309 to 164 rest-of-season points and the plan rented
+# him away.
+BLEND_GAMES = 7.0
+
 
 def rate(view, player_id, source="per_game") -> float:
     """Expected fantasy points per team game, P(plays) included.
@@ -42,6 +50,10 @@ def rate(view, player_id, source="per_game") -> float:
     (view.board_rate); a goalie's rest-of-season rate (his start share); anyone else the per-game
     carried rate. What the live plan priced on until 2026-10-03 -- a comparison arm now.
 
+    `source="blend"`: a skater on both, the board (scaled to the model's level, view.board_scale)
+    and the model weighted by the games he has played this season (BLEND_GAMES); anyone else as
+    `ros`.
+
     Measured 2026-10-03 (realistic league, beagles strategy), `ros` against `board`:
       * The position-prior rest-of-season model lost to the frozen board, -22.4 +/- 1.6 pts/wk on
         2024-25 and -4.9 +/- 1.2 on 2025-26. When the two disagreed (3,900 skaters added or
@@ -56,7 +68,10 @@ def rate(view, player_id, source="per_game") -> float:
       * Not kept: blends of the board with the model. Board 0.4 / position-prior model 0.6:
         +21.2 (the board's level). A weight sliding 0.7 -> 0.4 over six weeks: +1.7 +/- 0.8 over
         the board at 64 drafts, then +1.5 +/- 1.0 over the history-prior model alone (halves
-        +3.1 / -0.2, win +0.001) -- nothing once the model has its prior. The board with the
+        +3.1 / -0.2, win +0.001) -- nothing once the model has its prior. Weighted by games played
+        instead (`blend`, 2026-10-06), +0.94 +/- 0.84 at 56 drafts (halves +2.05 / -0.17): neutral,
+        adopted live for the user's reason -- one short injury-exit game cannot halve a player;
+        confirmed on 2025-26 (56 drafts): reverting to `ros` -4.19 +/- 1.01, both halves negative. The board with the
         nightly model's per-game rate instead: -6.0 +/- 1.5 vs the board; that rate alone,
         -9.7 vs `ros`.
       * Frozen at the model's opening-week rows instead of the board: -65.5 -- the position-prior
@@ -65,7 +80,13 @@ def rate(view, player_id, source="per_game") -> float:
     if source == "board" and board_covers(view, player_id):
         value = view.board_rate(player_id)
         return value if value is not None else view.ros_rate(player_id)
-    if source == "ros":
+    if source == "blend":
+        value = view.ros_rate(player_id)
+        board = view.board_rate(player_id)
+        if value is not None and board is not None:
+            weight = BLEND_GAMES / (BLEND_GAMES + view.ros_games(player_id))
+            return weight * board * view.board_scale + (1.0 - weight) * value
+    if source in ("ros", "blend"):
         value = view.ros_rate(player_id)
         if value is not None:
             return value
@@ -84,7 +105,7 @@ def known(view, player_id, source="per_game") -> bool:
     """Whether anything has projected this player yet. Unknown is not zero: `rate` falls back to 0
     for a player with no row, which is fine for ranking a free agent nobody has seen but wrong for
     choosing whom to drop."""
-    if source == "ros" and view.ros_rate(player_id) is not None:
+    if source in ("ros", "blend") and view.ros_rate(player_id) is not None:
         return True
     if source == "board" and board_covers(view, player_id):
         return True

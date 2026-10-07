@@ -84,6 +84,14 @@ then the plan priced on the preseason board, frozen; the history-prior model mea
 it in the realistic league and, unlike the board, follows the season (Decisions/valuation.py
 `rate`). The Roster and Free agents tabs' Rate and ROS pts are these numbers.
 
+**Blended with the board since 2026-10-06** (`adddrop.rate_source = "blend"` in both live strategies):
+a skater on both gets the board, scaled to the model's level, weighted 7/(7+games he has played this
+season), and the model for the rest (Decisions/valuation.py `BLEND_GAMES`). Jake Sanderson left
+espn-la's opener after 4:29; the model alone cut him from 309 to 164 rest-of-season points and the plan
+rented him away for Cam York. Blended he is 1.82 a team game, not 1.15, and kept. Neutral in the
+realistic league (+0.94 +/- 0.84 pts/wk, 2024-25, 56 drafts); the user's call. Confirmed on 2025-26
+(56 drafts): reverting to the model alone -4.19 +/- 1.01, both halves negative.
+
 ## The draft board
 
 **The live board**: `python draft_board.py --season 2026-27 --weights points-league` writes

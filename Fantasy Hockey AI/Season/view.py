@@ -64,7 +64,7 @@ class SlateView:
                  healthy_estimate=None,
                  goalie_draw_column=None, future_draws=None, phase="regular", alive=True,
                  on_bye=False, week_weight_mode="flat", returns=None, closed_tonight=None,
-                 board_estimate=None):
+                 board_estimate=None, ros_games=None, board_scale=1.0):
         self.day = pd.Timestamp(day)
         self.week = week
         self.config = config
@@ -117,6 +117,10 @@ class SlateView:
         # Skaters' preseason consensus per team game, frozen all season (engine.board_ros): the
         # live plan's rest-of-season rate, for rate source `board`.
         self.board_estimate = board_estimate or {}
+        # {player_id: games he has played this season before his latest rest-of-season row}, and
+        # the model's level over the board's (the players both cover): rate source `blend`.
+        self.ros_game_counts = ros_games or {}
+        self.board_scale = board_scale
         # {player_id: the date an injured player is expected back} -- his injury type's typical
         # remaining absence (ModelFeatures/build_injury_absence.py), in his team's games. Windows
         # count his games from then; a player not in it is out tonight only, as before.
@@ -356,6 +360,10 @@ class SlateView:
         """His rest-of-season points per team game (availability included), or `default`."""
         value = self.ros_estimate.get(int(player_id))
         return default if value is None else float(value)
+
+    def ros_games(self, player_id) -> float:
+        """Games he had played this season as of his latest rest-of-season row (0 if none)."""
+        return float(self.ros_game_counts.get(int(player_id), 0.0))
 
     def board_rate(self, player_id, default=None):
         """His preseason consensus points per team game (skaters), or `default`."""

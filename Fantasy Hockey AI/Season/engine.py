@@ -291,6 +291,10 @@ class Season:
         # as the per-game projections. Carried forward like `latest_rate`, never read ahead.
         self.ros_by_day = {}
         self.latest_ros = {}
+        # Games played before each row (rate source `blend`), carried the same way.
+        self.ros_gp_by_day = {}
+        self.latest_ros_gp = {}
+        self.board_scale = 1.0
         ros = self.data.get("ros")
         if ros is not None and len(ros):
             points = self.scoreset.score_columns(ros, prefix="proj_")
@@ -301,6 +305,12 @@ class Season:
                                   "rate": per_game})
             for day, rows in frame.groupby("game_date"):
                 self.ros_by_day[pd.Timestamp(day)] = dict(zip(rows["player_id"], rows["rate"]))
+            if "gp_std" in ros.columns:
+                played = pd.DataFrame({"game_date": ros["game_date"].to_numpy(),
+                                       "player_id": ros["player_id"].astype(int).to_numpy(),
+                                       "gp": ros["gp_std"].astype(float).to_numpy()})
+                for day, rows in played.groupby("game_date"):
+                    self.ros_gp_by_day[pd.Timestamp(day)] = dict(zip(rows["player_id"], rows["gp"]))
         # Goalies: projected share of his team's remaining starts x the league-average line
         # (Projections/goalie_workload.py) -- workload, not quality, which does not project.
         goalie_ros = self.data.get("goalie_ros")
@@ -586,7 +596,8 @@ class Season:
             future_draws=(lambda _d=day, _w=week: self.future_draws(_d, _w)),
             **self._season_shape(team_index, week, opponent),
             rate_estimate=self.latest_rate, healthy_estimate=self.healthy_rate,
-            ros_estimate=self.latest_ros, board_estimate=self.board_ros, returns=self.returns)
+            ros_estimate=self.latest_ros, board_estimate=self.board_ros, returns=self.returns,
+            ros_games=self.latest_ros_gp, board_scale=self.board_scale)
         # A per-seat pricing choice, so the candidate seat can differ (valuation.player_value).
         view.goalie_absence = self.field[team_index].strategy.adddrop.goalie_absence
         return view
@@ -660,6 +671,12 @@ class Season:
         of `run`'s day loop, a method so a copy of the league (Season/branch.py) can play days."""
         opponents = self._opponents_for(schedule.get(week, []))
         self.latest_ros.update(self.ros_by_day.get(pd.Timestamp(day), {}))
+        self.latest_ros_gp.update(self.ros_gp_by_day.get(pd.Timestamp(day), {}))
+        if self.board_ros:
+            # The model's level over the board's, over the skaters both cover (as live's skater_ros).
+            shared = [p for p in self.board_ros if p in self.latest_ros]
+            board = sum(self.board_ros[p] for p in shared)
+            self.board_scale = sum(self.latest_ros[p] for p in shared) / board if board > 0 else 1.0
         self.latest_team.update(self.nhl_team_by_day.get(day, {}))
         goalie_projections = self._goalie_projections(day, history)
         # Tonight's lockout report updates the players it lists; everyone else keeps his last.
