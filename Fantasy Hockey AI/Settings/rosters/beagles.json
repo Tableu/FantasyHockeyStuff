@@ -1,6 +1,6 @@
 {
-  "name": "espn-default",
-  "description": "PROVISIONAL ESPN public league (default settings), 2026-09-25: ESPN's roster, move limit, waiver and playoff defaults are not published (espn.com story 34491407 covers scoring only), so this copies the Fleaflicker 12090 league's roster and rules (league.json) and uses ESPN's own position eligibility. Pair it with Settings/scoring/espn-default.json. Replace from the joined league's mSettings. Known ESPN differences not modelled here: add/drop, waiver and IR moves lock at the day's first game; a healthy player on IR blocks adds.",
+  "name": "beagles",
+  "description": "Detected from fleaflicker league 12090 on 2026-10-07 (sync_league_settings.py); registry overrides: {\"schedule\": {\"min_first_week_games\": 20, \"regular_season_weeks_by_season\": {\"2024-25\": 24, \"2025-26\": 21}}}. Not held by these settings: a tied playoff matchup goes to the higher starter total, then the best single starter, then the bench (the harness: more regular-season points); week(s) [19] run two weeks on Fleaflicker (the harness's calendar splits them; the live plan reads the platform's weeks).",
   "teams": 14,
   "active_slots": {
     "C": 2,
@@ -15,16 +15,17 @@
   "ir": 2,
   "moves_per_week": 7,
   "moves_carry_over": false,
-  "waiver_days": 2,
+  "waiver_days": 1,
   "ties": "split",
   "schedule": {
     "type": "round_robin",
-    "regular_season_weeks": 24,
-    "regular_season_weeks_by_season": {
-      "2025-26": 21
-    },
+    "regular_season_end": "03-14",
     "week_starts_on": "MON",
-    "min_first_week_games": 20
+    "min_first_week_games": 20,
+    "regular_season_weeks_by_season": {
+      "2024-25": 24,
+      "2025-26": 21
+    }
   },
   "draft": {
     "type": "snake",
@@ -39,8 +40,6 @@
     "seeding": "record",
     "tiebreak": "points_for"
   },
-  "eligibility_platform": "espn",
-  "eligibility_season": "2026-27",
   "slot_positions": {
     "C": [
       "C"
@@ -51,32 +50,33 @@
     "RW": [
       "RW"
     ],
-    "D": [
-      "D"
-    ],
-    "G": [
-      "G"
-    ],
     "F": [
       "C",
       "LW",
       "RW"
+    ],
+    "D": [
+      "D"
     ],
     "F/D": [
       "C",
       "LW",
       "RW",
       "D"
+    ],
+    "G": [
+      "G"
     ]
   },
   "rules": {
     "lineup_lock": "per_game",
-    "add_effective": "next_day_after_first_game",
+    "add_effective": "immediate",
     "waivers": "rolling",
-    "game_start_waivers": false,
+    "game_start_waivers": true,
     "ir_eligible": [
       "OUT",
       "SUSP",
+      "DTD",
       "IR"
     ],
     "position_max": {},
@@ -87,5 +87,7 @@
       "ir_stash": 0,
       "ir_activate": 0
     }
-  }
+  },
+  "eligibility_platform": "fleaflicker",
+  "eligibility_season": "2026-27"
 }

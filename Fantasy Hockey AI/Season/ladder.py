@@ -397,6 +397,8 @@ def main():
     weights = args.weights or ["points-league"]
 
     log.info("%s", config.describe())
+    for note in config.approximations:
+        log.info("simulated as: %s", note)
     data = inputs.load_season(args.season)
     data["prior_season"] = args.prior_season
 
@@ -419,7 +421,8 @@ def main():
     log.info("field: %s", field_config.describe())
     report = {"season": args.season, "league": config.name, "strategy": strategy.name,
               "rungs": list(rungs), "replications": args.replications, "results": {},
-              "vor_values": strategy.vor_values, "field": field_config.describe()}
+              "vor_values": strategy.vor_values, "field": field_config.describe(),
+              "approximations": config.approximations}
     if 5 in rungs:
         report["adddrop"] = params.describe()
         log.info("rung 5 add/drop: %s", params.describe())

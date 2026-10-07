@@ -12,5 +12,6 @@
   "adp_platform": "espn",
   "active": false,
   "auth": null,
+  "overrides": {},
   "draft_window": {}
 }

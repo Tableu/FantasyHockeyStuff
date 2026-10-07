@@ -275,7 +275,8 @@ def main():
     result = compare(base, alt, replications)
     result.update({"season": args.season, "league": args.league, "weights": args.weights,
                    "opponents": list(opponents), "shipped": tune.label(shipped),
-                   "candidate": tune.label(candidate), "code": ctx.code})
+                   "candidate": tune.label(candidate), "code": ctx.code,
+                   "approximations": ctx.config.approximations})
     out = args.out or (paths.ensure(paths.REPORTS_DIR / "oneseat")
                        / f"{args.season}_{args.league}_{ctx.key(candidate, replications)}.json")
     with open(out, "w", encoding="utf-8") as handle:

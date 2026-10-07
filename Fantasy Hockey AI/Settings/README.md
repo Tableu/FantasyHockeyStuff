@@ -72,15 +72,24 @@ per-stat numbers only. `Season/` defaults to `points-league`.
   "eligibility_season": "2026-27",
   "slot_positions": {"C": ["C"], "LW": ["LW"], "RW": ["RW"], "D": ["D"], "G": ["G"],
                      "F": ["C", "LW", "RW"], "F/D": ["C", "LW", "RW", "D"]},
-  "rules": {"lineup_lock": "daily", "waivers": "rolling", "ir_eligible": "injured",
+  "rules": {"lineup_lock": "per_game", "add_effective": "immediate", "waivers": "rolling",
+            "game_start_waivers": true, "ir_eligible": ["OUT", "SUSP", "DTD", "IR"],
+            "position_max": {},
             "move_cost": {"add": 1, "claim": 1, "drop": 0, "ir_stash": 0, "ir_activate": 0}}
 }
 ```
 
 - **Slots:** every slot in `active_slots` needs an entry in `slot_positions` naming the positions
   (`C LW RW D G`) it accepts. A composite slot lists several; a slot may not mix `G` with skaters.
-- **Rules:** `lineup_lock` `daily`, `waivers` `rolling`, `ir_eligible` `injured` are the values the
-  harness implements. `move_cost` is what each action spends from `moves_per_week`.
+- **Rules** say what the league's rules ARE, not what the harness simulates:
+  `lineup_lock` (`daily` | `per_game`), `add_effective` (`immediate` | `next_day_after_first_game`:
+  an add made after the day's first puck counts tomorrow), `waivers` (`rolling`),
+  `game_start_waivers` (a free agent whose game started goes on waivers), `ir_eligible` (the
+  statuses IR takes, from `OUT SUSP DTD IR`), `position_max` (`{"G": 4}`: most rostered at a
+  position; `{}` = none). `move_cost` is what each action spends from `moves_per_week`. Where the
+  harness simulates a rule approximately (`league.RULE_CHOICES`), the config lists it in
+  `approximations` and ladder/oneseat reports carry the list; a value with no approximation (FAAB,
+  weekly-reset waivers) is refused at load. The live plan reads the real rule.
 - **Ties:** `split` (half a win each) or `loss` (neither team gets a win).
 - **Schedule:** `round_robin` matchup weeks starting `week_starts_on`. Give the regular season's
   length as `regular_season_weeks` or as `regular_season_end` (`"MM-DD"`: through the week
@@ -296,8 +305,14 @@ importer and snapshot job read the active Fleaflicker league's id from here.
   login -- for ESPN the `espn_s2` and `SWID` cookies from a logged-in browser (F12 -> Application ->
   Cookies -> espn.com). They expire when you log out of ESPN; a 401 means copy fresh ones. `null`
   for a public league.
-- `rules` / `scoring` for a readable league can be generated from the platform:
-  `Live/import_league_settings.py --league <name> --write` (ESPN today).
+- `rules` / `scoring` for a readable league are DETECTED from the platform, never typed:
+  `Live/sync_league_settings.py --league <name> --write` writes `rosters/<name>.json` and
+  `scoring/<name>.json` (ESPN: mSettings; Fleaflicker: FetchLeagueRules, the scoreboard, the draft
+  board and the league's /rules page). The plan server re-detects them once a day and the plan
+  says when a setting changed (`reports/<league>/settings_changes.json`). `--check` translates the
+  platform answers saved in `Live/fixtures/settings/` offline and compares them with the files.
+- `overrides`: settings no platform reports, laid over the detected ones -- the backtest's
+  `min_first_week_games` and the replayed seasons' lengths (`regular_season_weeks_by_season`).
 - `draft_window`: the draft window's saved settings (⚙ Save as default writes them here): playoff
   dates, teams, slots, bench, points per stat and the two platforms, overriding the fields above
   **for the draft tools only**. `{}` = use the files.

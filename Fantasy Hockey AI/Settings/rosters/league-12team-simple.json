@@ -55,8 +55,14 @@
   },
   "rules": {
     "lineup_lock": "daily",
+    "add_effective": "immediate",
     "waivers": "rolling",
-    "ir_eligible": "injured",
+    "game_start_waivers": false,
+    "ir_eligible": [
+      "OUT",
+      "SUSP"
+    ],
+    "position_max": {},
     "move_cost": {
       "add": 1,
       "claim": 1,

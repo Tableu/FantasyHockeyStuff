@@ -47,6 +47,7 @@ import live
 import livepaths
 import paths
 import platforms
+import sync_league_settings
 
 WINDOW_LEAD = dt.timedelta(minutes=30)
 MODEL_FEATURES = paths.SIBLINGS / "ModelFeatures"
@@ -256,6 +257,13 @@ class Planner:
                 self.last[kind] = dt.datetime.now()
         tonight(self.day, echo)
         self.last["projections"] = dt.datetime.now()
+        # Each league's settings, re-detected once a day (sync_league_settings.daily) before the
+        # planning child starts -- it reads the files fresh.
+        if not self.league_file:
+            for league in self.leagues:
+                if league.readable and self.league_last[league.name].get("settings", dt.datetime.min).date() != self.day:
+                    sync_league_settings.daily(league, echo)
+                    self.league_last[league.name]["settings"] = dt.datetime.now()
         results = {}
         outcome = plan_in_child([league.name for league in self.leagues], self.day, now, self.league_file,
                                 self.platform_season, echo)

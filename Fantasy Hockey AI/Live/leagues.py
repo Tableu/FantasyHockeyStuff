@@ -14,6 +14,8 @@ Every Live tool takes `--league <name>` and gets from here what used to be separ
     active                whether scheduled jobs run this league
     auth                  a key into Settings/secrets.json (gitignored) for a private league's login,
                           e.g. ESPN's espn_s2 + SWID cookies; None for a public league
+    overrides             settings no platform reports, laid over the detected ones by
+                          sync_league_settings.py (e.g. {"schedule": {"min_first_week_games": 20}})
     draft_window          the draft window's saved settings (its settings popup's Save as default)
 
 Command-line flags still override a field for one run. Unknown or missing keys fail at load, as
@@ -31,7 +33,8 @@ LEAGUES_DIR = season_paths.SETTINGS_DIR / "leagues"
 DEFAULT_LEAGUE = "beagles"
 PLATFORMS = ("fleaflicker", "espn", "standalone")
 KEYS = ("name", "description", "platform", "league_id", "season", "team", "rules", "scoring",
-        "strategy", "eligibility_platform", "adp_platform", "active", "auth", "draft_window")
+        "strategy", "eligibility_platform", "adp_platform", "active", "auth", "overrides",
+        "draft_window")
 
 
 @dataclasses.dataclass
@@ -49,6 +52,7 @@ class League:
     adp_platform: str
     active: bool
     auth: str | None
+    overrides: dict
     draft_window: dict
     path: Path
 

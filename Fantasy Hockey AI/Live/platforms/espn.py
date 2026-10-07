@@ -66,6 +66,32 @@ STAT_NAMES = {13: "G", 14: "A", 15: "+/-", 16: "PTS", 17: "PIM", 18: "PPG", 19: 
 GOALIE_KEYS = {"wins", "losses", "ot_losses", "shutouts", "saves", "goals_against"}
 
 
+# ESPN's codes for the rules Season/league.py names, as seen in leagues so far (espn-la 2026-27,
+# a private 14-team league 2025-26/2026-27). A code missing here fails `league_settings` with its
+# name: look it up on the league's settings page and add it, never guess.
+LINEUP_LOCKS = {"INDIVIDUAL_GAME": "per_game"}
+# rosterLocktimeType: adds and drops made after the day's first game take effect tomorrow.
+ROSTER_LOCKS = {"FIRSTGAME_SCORINGPERIOD": "next_day_after_first_game"}
+# A traditional order that is never reset is the rolling one (a winner goes to the back).
+WAIVER_TYPES = {"WAIVERS_TRADITIONAL": "rolling"}
+DRAFT_TYPES = {"SNAKE": "snake"}
+SEEDINGS = {"H2H_RECORD": "record"}
+# positionLimits keys: ESPN's position ids (a limit <= 0 is none).
+POSITION_IDS = {1: "C", 2: "LW", 3: "RW", 4: "D", 5: "G"}
+# ESPN-wide, not league settings: IR holds players ruled out (or on the NHL's IR); each add or
+# claim is one acquisition, drops and IR moves are free.
+IR_ELIGIBLE = ("OUT", "SUSP", "IR")
+MOVE_COST = {"add": 1, "claim": 1, "drop": 0, "ir_stash": 0, "ir_activate": 0}
+UNLIMITED_MOVES = 99      # the harness needs a number; no real week comes near it
+
+
+def _code(field: str, code, table: dict):
+    if code not in table:
+        raise ValueError(f"ESPN {field} {code!r} is not translated yet (platforms/espn.py); known: "
+                         f"{sorted(table)}")
+    return table[code]
+
+
 def _weekly_limit(acquisition: dict) -> int | None:
     """Adds a full (7-day) matchup week allows, None = unlimited: the matchup limit (per day when
     matchupLimitPerScoringPeriod), else acquisitionLimit."""
@@ -78,6 +104,82 @@ def _weekly_limit(acquisition: dict) -> int | None:
 def espn_year(season: str) -> int:
     """'2026-27' -> 2027: ESPN's season number is the year the season ends."""
     return int(season[:4]) + 1
+
+
+def settings_from(s: dict) -> dict:
+    """The league's settings in Season/league.py's terms -- {"settings": a Settings/rosters body
+    (no name, description or eligibility), "scoring": {"skaters", "goalies"}, "notes": [what
+    the league does that those terms cannot hold]}. ESPN's codes are translated here and only
+    here; a code not in the tables below fails the read rather than mapping to the nearest.
+    `s` is mSettings' "settings" (Espn.settings); nothing here reads the network."""
+    roster, acquisition = s["rosterSettings"], s["acquisitionSettings"]
+    schedule, scoring = s["scheduleSettings"], s["scoringSettings"]
+    notes = []
+    counts = {SLOT_LABELS[int(k)]: v for k, v in roster["lineupSlotCounts"].items() if v}
+    limit = _weekly_limit(acquisition)
+    if limit is None:
+        notes.append(f"no acquisition limit (written as {UNLIMITED_MOVES} a week)")
+    if acquisition["isUsingAcquisitionBudget"]:
+        waivers = "faab"
+    elif acquisition["waiverOrderReset"]:
+        waivers = "reset_weekly"
+    else:
+        waivers = _code("acquisitionType", acquisition["acquisitionType"], WAIVER_TYPES)
+    teams = schedule["playoffTeamCount"]
+    rounds = next(r for r in range(1, 6) if 2 ** r >= teams)
+    if len(schedule.get("divisions") or []) > 1:
+        notes.append(f"{len(schedule['divisions'])} divisions (the harness schedules one table)")
+    if scoring["playoffMatchupTieRule"] != "NONE" or scoring["matchupTieRule"] != "NONE":
+        notes.append(f"tie rules {scoring['matchupTieRule']}/{scoring['playoffMatchupTieRule']} "
+                     f"(the harness splits a regular-season tie)")
+    notes.append("a tied playoff matchup: ESPN's rule is not reported; the harness gives it to "
+                 "the team with more regular-season points")
+    caps = {POSITION_IDS[int(k)]: v for k, v in roster["positionLimits"].items()
+            if v > 0 and int(k) in POSITION_IDS}
+    out = scoring_from(s)
+    notes += [f"{stat} {points:+g} scored but not projected" for stat, points in out.pop("unsupported").items()]
+    return {"settings": {
+        "teams": s["size"],
+        "active_slots": {k: v for k, v in counts.items() if k not in ("BN", "IR")},
+        "bench": counts.get("BN", 0), "ir": counts.get("IR", 0),
+        "moves_per_week": limit or UNLIMITED_MOVES,
+        "moves_carry_over": False,
+        "waiver_days": max(1, round(acquisition["waiverHours"] / 24)),
+        "ties": "split",
+        "schedule": {"type": "round_robin", "regular_season_weeks": schedule["matchupPeriodCount"],
+                     "week_starts_on": "MON"},
+        "draft": {"type": _code("draft type", s["draftSettings"]["type"], DRAFT_TYPES),
+                  "order": "lottery", "keepers": s["draftSettings"]["keeperCount"]},
+        "playoffs": {"teams": teams, "byes": 2 ** rounds - teams, "rounds": rounds,
+                     "weeks_per_round": schedule["playoffMatchupPeriodLength"],
+                     "seeding": _code("playoffSeedingRule", schedule["playoffSeedingRule"], SEEDINGS),
+                     "tiebreak": "points_for"},
+        "slot_positions": {**{k: SLOT_POSITIONS[k] for k in counts if k in SLOT_POSITIONS}, "G": ["G"]},
+        "rules": {
+            "lineup_lock": _code("lineupLocktimeType", roster["lineupLocktimeType"], LINEUP_LOCKS),
+            "add_effective": _code("rosterLocktimeType", roster["rosterLocktimeType"], ROSTER_LOCKS),
+            "waivers": waivers,
+            "game_start_waivers": False,
+            "ir_eligible": list(IR_ELIGIBLE),
+            "position_max": caps,
+            "move_cost": dict(MOVE_COST)}},
+        "scoring": out, "notes": notes}
+
+
+def scoring_from(s: dict) -> dict:
+    """{"skaters": {...}, "goalies": {...}, "unsupported": {stat: points}} -- the league's points
+    per stat in Settings/scoring terms, and what our projections cannot score."""
+    out = {"skaters": {}, "goalies": {}, "unsupported": {}}
+    for item in s["scoringSettings"]["scoringItems"]:
+        points = float(item["points"])
+        if points == 0.0:
+            continue
+        key = STAT_KEYS.get(item["statId"])
+        if key is None:
+            out["unsupported"][STAT_NAMES.get(item["statId"], f"stat {item['statId']}")] = points
+        else:
+            out["goalies" if key in GOALIE_KEYS else "skaters"][key] = points
+    return out
 
 
 class Espn:
@@ -111,40 +213,12 @@ class Espn:
     def settings(self) -> dict:
         return self._get("mSettings")["settings"]
 
-    def rules(self) -> dict:
-        """The roster rules in our terms: starting slots, bench, IR, slot eligibility, lock timing,
-        acquisition limit (None = unlimited), waivers, schedule."""
-        s = self.settings()
-        counts = {SLOT_LABELS[int(k)]: v for k, v in s["rosterSettings"]["lineupSlotCounts"].items() if v}
-        acquisition = s["acquisitionSettings"]
-        schedule = s["scheduleSettings"]
-        return {"teams": s["size"],
-                "slots": {k: v for k, v in counts.items() if k not in ("BN", "IR")},
-                "slot_positions": {k: SLOT_POSITIONS[k] for k in counts if k in SLOT_POSITIONS},
-                "bench": counts.get("BN", 0), "ir": counts.get("IR", 0),
-                "max_goalies": s["rosterSettings"]["positionLimits"].get("5"),
-                "lineup_lock": s["rosterSettings"]["lineupLocktimeType"],
-                "acquisition_limit": _weekly_limit(acquisition),
-                "waivers": acquisition["acquisitionType"], "waiver_hours": acquisition["waiverHours"],
-                "faab": acquisition["isUsingAcquisitionBudget"],
-                "regular_season_weeks": schedule["matchupPeriodCount"],
-                "playoff_teams": schedule["playoffTeamCount"],
-                "scoring_type": s["scoringSettings"]["scoringType"]}
+    def league_settings(self) -> dict:
+        """settings_from(this league's mSettings)."""
+        return settings_from(self.settings())
 
     def scoring(self) -> dict:
-        """{"skaters": {...}, "goalies": {...}, "unsupported": {stat: points}} -- the league's points
-        per stat in Settings/scoring terms, and what our projections cannot score."""
-        out = {"skaters": {}, "goalies": {}, "unsupported": {}}
-        for item in self.settings()["scoringSettings"]["scoringItems"]:
-            points = float(item["points"])
-            if points == 0.0:
-                continue
-            key = STAT_KEYS.get(item["statId"])
-            if key is None:
-                out["unsupported"][STAT_NAMES.get(item["statId"], f"stat {item['statId']}")] = points
-            else:
-                out["goalies" if key in GOALIE_KEYS else "skaters"][key] = points
-        return out
+        return scoring_from(self.settings())
 
     # ---------- rosters ----------
 

@@ -47,6 +47,7 @@ import paths
 import schedule as schedule_module
 import simlayer
 import state as state_module
+import sync_league_settings
 import view as view_module
 from decisionlayer import adddrop as adddrop_module
 from decisionlayer import draft as draft_module
@@ -73,12 +74,11 @@ WEEK_ALTERNATIVES = 9
 MOVE_KINDS = {"repair": "Repair", "add": "Upgrade", "claim": "Claim", "rental": "Rental",
               "rental claim": "Rental claim"}
 PLATFORM_NAMES = {"fleaflicker": "Fleaflicker", "espn": "ESPN"}     # as the plan footer names them
-# Platforms where a free-agent add made after the day's first puck counts from the next day (ESPN --
-# the user, 2026-10-04). Lineups still lock per game, as on Fleaflicker. Such a move is priced from
-# tomorrow for both sides: the add cannot play tonight, so its drop is best made once the dropped
-# player's game tonight is over, and the plan window says so. Fleaflicker takes the add at once; the
-# player counts from his next game (closed_tonight).
-ADDS_LOCK_AT_FIRST_PUCK = {"espn"}
+# In a league whose adds made after the day's first puck count from the next day (rules.add_effective
+# "next_day_after_first_game": ESPN's FIRSTGAME_SCORINGPERIOD -- the user, 2026-10-04), such a move
+# is priced from tomorrow for both sides: the add cannot play tonight, so its drop is best made once
+# the dropped player's game tonight is over, and the plan window says so. Where adds count at once
+# ("immediate": Fleaflicker), the player counts from his next game (closed_tonight).
 # The local hour by which the nightly job (pipeline/run_nightly_ingest.cmd, 4:00) has loaded last
 # night's games and projections; a plan after it on older ones says so (LiveRunner.freshness).
 NIGHTLY_DONE_HOUR = 6
@@ -124,6 +124,9 @@ class LeagueSnapshot:
     # say (Fleaflicker): on Sunday night that is still the old week until 6:00 AM Eastern Monday,
     # while the plan is for Monday (LiveRunner._state's rollover).
     period_end: str | None = None
+    # When the platform's week turns over, as the plan says it ("6:00 AM Eastern"), where the
+    # adapter knows (Fleaflicker.week_turns_over).
+    turns_over: str | None = None
 
     @classmethod
     def load(cls, path: Path) -> "LeagueSnapshot":
@@ -138,7 +141,7 @@ class LeagueSnapshot:
                    lineup={k: [int(p) for p in v] for k, v in raw.get("lineup", {}).items()},
                    waivers={int(k): v for k, v in raw.get("waivers", {}).items()},
                    move_limit=raw.get("move_limit"), week_days=raw.get("week_days"),
-                   period_end=raw.get("period_end"),
+                   period_end=raw.get("period_end"), turns_over=raw.get("turns_over"),
                    source=raw.get("source", f"file {Path(path).name}"))
 
 
@@ -201,6 +204,7 @@ class LeagueSnapshot:
                 teams[me]["moves_used"] = used
         return cls(teams=teams, me=me, opponent=opponent, moves_free=moves_free,
                    move_limit=move_limit, week_days=week_days, period_end=period_end,
+                   turns_over=getattr(adapter, "week_turns_over", None),
                    my_week_points=matchup.points if matchup else 0.0,
                    opponent_week_points=matchup.opponent_points if matchup else 0.0,
                    lineup=lineup, waivers=waivers,
@@ -468,9 +472,11 @@ class LiveRunner:
                     and clears != clears.normalize() and clears > at):
                 closed_tonight.add(int(p))
 
-        # After the day's first puck (ADDS_LOCK_AT_FIRST_PUCK), today's adds take effect tomorrow.
+        # After the day's first puck, in a league that holds adds until tomorrow, today's adds take
+        # effect tomorrow.
         moves_from = (day + pd.Timedelta(days=1)
-                      if self.league.platform in ADDS_LOCK_AT_FIRST_PUCK and started else None)
+                      if self.config.rules["add_effective"] == "next_day_after_first_game" and started
+                      else None)
         self.adds_locked = moves_from is not None
 
         def view(state=state, **changes):
@@ -502,16 +508,19 @@ class LiveRunner:
         manager.plan.week_alternatives = WEEK_ALTERNATIVES
         manager.transactions(view())
         next_week, next_plans = self._next_week_plans(manager, state, week, view, skaters, goalie_projections)
-        problems = ([ros_note] if ros_note else []) + self.freshness()
+        problems = (([ros_note] if ros_note else []) + self.freshness()
+                    + sync_league_settings.recent(self.league.name, self.day))
         if self.rollover:
             left, cap = self.rollover["leftover"], self.rollover["new_cap"]
+            platform = PLATFORM_NAMES.get(self.league.platform, "The platform")
+            turns_over = snapshot.turns_over or "the start of its new week"
             problems.append(
-                f"{self.league.platform.capitalize()}'s week turns over at 6:00 AM Eastern: a move made "
+                f"{platform}'s week turns over at {turns_over}: a move made "
                 f"before then counts against last week's {left} leftover move(s), free for this week "
                 "-- make today's moves tonight, at most that many -- and later ones against this "
                 f"week's {cap}" if left else
-                f"{self.league.platform.capitalize()}'s week turns over at 6:00 AM Eastern and last week "
-                f"has no moves left: make today's moves after 6:00 AM Eastern (3:00 AM Pacific); they "
+                f"{platform}'s week turns over at {turns_over} and last week "
+                f"has no moves left: make today's moves after {turns_over}; they "
                 f"count against this week's {cap}")
         # A drop list carried into a new matchup week is easy to forget (it overrides who may be
         # dropped until cleared): say when it was set.
@@ -1089,8 +1098,8 @@ class LiveRunner:
             # The players the user marked OK to drop, the plan's only drops but its own rentals
             # (Live/droppable.py); None: the model chose.
             "droppable": None if self.droppable is None else sorted(self.droppable),
-            # After the day's first puck (ADDS_LOCK_AT_FIRST_PUCK): the day today's adds take
-            # effect; else None.
+            # After the day's first puck, in a league that holds adds until tomorrow
+            # (rules.add_effective): the day today's adds take effect; else None.
             "moves_from": (self.day + dt.timedelta(days=1)).isoformat() if self.adds_locked else None,
             "next_week": next_week, "next_week_plans": [team_plan(i, w) for i, w in enumerate(next_plans)],
             "stream_mode": self.strategy.streaming.mode, "horizon_weeks": self.strategy.adddrop.horizon_weeks,

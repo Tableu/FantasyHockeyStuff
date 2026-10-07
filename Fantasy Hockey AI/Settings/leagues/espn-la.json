@@ -15,5 +15,10 @@
   "adp_platform": "espn",
   "active": true,
   "auth": null,
+  "overrides": {
+    "schedule": {
+      "min_first_week_games": 20
+    }
+  },
   "draft_window": {}
 }

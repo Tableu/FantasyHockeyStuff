@@ -1,6 +1,6 @@
 {
   "name": "espn-la",
-  "description": "Generated from espn league 1747127466 (import_league_settings.py). Differs from the platform: lineup lock INDIVIDUAL_GAME (the harness locks daily); waivers WAIVERS_TRADITIONAL (the harness rolls them); at most 4 goalies rostered (not enforced by the harness).",
+  "description": "Detected from espn league 1747127466 on 2026-10-07 (sync_league_settings.py); registry overrides: {\"schedule\": {\"min_first_week_games\": 20}}. Not held by these settings: 2 divisions (the harness schedules one table); a tied playoff matchup: ESPN's rule is not reported; the harness gives it to the team with more regular-season points.",
   "teams": 10,
   "active_slots": {
     "F": 9,
@@ -29,12 +29,10 @@
     "teams": 4,
     "byes": 0,
     "rounds": 2,
-    "weeks_per_round": 1,
+    "weeks_per_round": 2,
     "seeding": "record",
     "tiebreak": "points_for"
   },
-  "eligibility_platform": "espn",
-  "eligibility_season": "2026-27",
   "slot_positions": {
     "F": [
       "C",
@@ -55,9 +53,18 @@
     ]
   },
   "rules": {
-    "lineup_lock": "daily",
+    "lineup_lock": "per_game",
+    "add_effective": "next_day_after_first_game",
     "waivers": "rolling",
-    "ir_eligible": "injured",
+    "game_start_waivers": false,
+    "ir_eligible": [
+      "OUT",
+      "SUSP",
+      "IR"
+    ],
+    "position_max": {
+      "G": 4
+    },
     "move_cost": {
       "add": 1,
       "claim": 1,
@@ -65,5 +72,7 @@
       "ir_stash": 0,
       "ir_activate": 0
     }
-  }
+  },
+  "eligibility_platform": "espn",
+  "eligibility_season": "2026-27"
 }

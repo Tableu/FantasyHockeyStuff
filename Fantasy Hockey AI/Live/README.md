@@ -18,10 +18,11 @@ planpass.py         the pass's steps, shared by both: snapshots, tonight, read l
 sheets.py           the windows' read-only tksheet tables: row colours by tag, header-click sorting
 leagues.py          the league registry (Settings/leagues/<name>.json): --league on every tool
 platforms/          read-only platform adapters: fleaflicker.py (draft board, rosters + IR, lineup
-                    slots, moves used this week, matchup, rules), espn.py (settings + scoring,
+                    slots, moves used this week, matchup, league settings), espn.py (settings + scoring,
                     rosters + IR, lineup slots, matchup, draft; private leagues via cookies),
                     standalone.py. Platform ids -> PlayerIDs via platforms.PlayerIds
-import_league_settings.py  writes a league's Settings/rosters + scoring files from its platform
+sync_league_settings.py  detects a league's settings (Settings/rosters + scoring) from its platform;
+                    the adapters' league_settings() translate, Season/league.py says what they mean
 seasonlayer.py      the one bridge into Season/ (league, state, view, schedule, inputs, ...)
 livepaths.py        Live's own locations (never named paths.py -- see seasonlayer.py)
 fixtures/           made-up leagues for exercising the tools before a league has rosters

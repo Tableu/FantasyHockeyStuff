@@ -8,13 +8,22 @@
     "id": 63341,
     "name": "Burnaby Beagles"
   },
-  "rules": "league",
-  "scoring": "points-league",
+  "rules": "beagles",
+  "scoring": "beagles",
   "strategy": "strategy-beagles",
   "eligibility_platform": "fleaflicker",
   "adp_platform": "espn",
   "active": true,
   "auth": null,
+  "overrides": {
+    "schedule": {
+      "min_first_week_games": 20,
+      "regular_season_weeks_by_season": {
+        "2024-25": 24,
+        "2025-26": 21
+      }
+    }
+  },
   "draft_window": {
     "playoffs": [
       "2027-03-15",

@@ -41,14 +41,32 @@ NHL_TO_FANTASY = {"C": "C", "L": "LW", "R": "RW", "D": "D", "G": "G"}
 # (`slot_positions` in the roster file), tested by set intersection in `Decisions/slots.py`.
 POSITIONS = frozenset(SKATER_POSITIONS) | {GOALIE_POSITION}
 
-# The rules the harness implements, and the values it can run. A setting outside these is refused
-# at load rather than silently ignored -- a FAAB league run as rolling waivers would produce
+# A league's rules as the platform has them (Live/sync_league_settings.py detects them), not as the
+# harness happens to simulate them. Each choice maps every value a real league can carry to how the
+# harness simulates it: None = exactly; a sentence = the approximation, kept on the config
+# (`approximations`) so a report says what it ran. A value missing from its table is refused at
+# load rather than approximated silently -- a FAAB league run as rolling waivers would produce
 # numbers that look like a result.
-SUPPORTED_RULES = {
-    "lineup_lock": {"daily"},           # lineups set every night before the lock
-    "waivers": {"rolling"},             # claim priority rolls: a winner goes to the back
-    "ir_eligible": {"injured"},         # IR takes a player in an injury spell at the lockout
+RULE_CHOICES = {
+    # When a starter's slot locks: every night at once, or each player at his own game.
+    "lineup_lock": {"daily": None,
+                    "per_game": "lineups lock once a night (the league locks each player at his game)"},
+    # When an add counts: at once, or -- after the day's first game has started -- from tomorrow.
+    "add_effective": {"immediate": None,
+                      "next_day_after_first_game": "adds count at once (the league holds an add made "
+                                                   "after the day's first game until tomorrow)"},
+    # Claim priority: rolls (a winner goes to the back, never reset).
+    "waivers": {"rolling": None},
+    # Whether a free agent whose game has started goes on waivers until the next processing.
+    "game_start_waivers": {False: None,
+                           True: "free agents stay free after their game starts (the league puts "
+                                 "them on waivers until the next processing)"},
 }
+# Injury designations a league's IR may hold. The harness's IR takes a player in an injury spell
+# (OUT or SUSP on a live report); a league that also takes day-to-day players is approximated.
+IR_STATUSES = ("OUT", "SUSP", "DTD", "IR")
+SIMULATED_IR = frozenset({"OUT", "SUSP"})
+RULE_KEYS = set(RULE_CHOICES) | {"ir_eligible", "position_max", "move_cost"}
 MOVE_ACTIONS = ("add", "claim", "drop", "ir_stash", "ir_activate")
 
 # A tied week: "split" gives each team half a win (a W-L-T record ranked by win percentage);
@@ -101,8 +119,9 @@ class LeagueConfig:
     waiver_days: int
     # {slot code: [positions it accepts]} -- e.g. "F": ["C", "LW", "RW"]. Required.
     slot_positions: dict
-    # League rules: lineup_lock, waivers, ir_eligible (see SUPPORTED_RULES) and move_cost, the
-    # moves each action spends from the weekly budget ({"add": 1, "claim": 1, "drop": 0, ...}).
+    # League rules: the choices in RULE_CHOICES, ir_eligible ([IR_STATUSES]), position_max
+    # ({position: most rostered}, {} = none) and move_cost, the moves each action spends from the
+    # weekly budget ({"add": 1, "claim": 1, "drop": 0, ...}).
     rules: dict
     # How a tied week is scored: "split" or "loss" (SUPPORTED_TIES).
     ties: str
@@ -182,16 +201,23 @@ class LeagueConfig:
             if GOALIE_POSITION in accepted and len(accepted) > 1:
                 raise ValueError(f"{self.name}: slot {slot} mixes goalies and skaters, which the "
                                  f"harness does not support (it counts goalie slots separately)")
-        missing = set(SUPPORTED_RULES) - set(self.rules) | ({"move_cost"} - set(self.rules))
-        if missing:
-            raise ValueError(f"{self.name}: rules is missing {sorted(missing)}")
-        extra = set(self.rules) - set(SUPPORTED_RULES) - {"move_cost"}
-        if extra:
-            raise ValueError(f"{self.name}: unknown rule(s) {sorted(extra)}")
-        for rule, allowed in SUPPORTED_RULES.items():
-            if self.rules[rule] not in allowed:
-                raise ValueError(f"{self.name}: {rule} = {self.rules[rule]!r} is not supported by "
-                                 f"the harness yet (supported: {sorted(allowed)})")
+        missing, extra = RULE_KEYS - set(self.rules), set(self.rules) - RULE_KEYS
+        if missing or extra:
+            raise ValueError(f"{self.name}: rules is missing {sorted(missing)}, unknown {sorted(extra)}")
+        for rule, choices in RULE_CHOICES.items():
+            value = self.rules[rule]
+            if not any(value is c or (type(value) is type(c) and value == c) for c in choices):
+                raise ValueError(f"{self.name}: {rule} = {value!r} is not supported by the harness "
+                                 f"yet (supported: {list(choices)})")
+        statuses = self.rules["ir_eligible"]
+        if not isinstance(statuses, list) or not statuses or set(statuses) - set(IR_STATUSES):
+            raise ValueError(f"{self.name}: ir_eligible must list statuses from {list(IR_STATUSES)}; "
+                             f"got {statuses!r}")
+        caps = self.rules["position_max"]
+        if not isinstance(caps, dict) or set(caps) - POSITIONS or any(
+                isinstance(v, bool) or not isinstance(v, int) or v < 1 for v in caps.values()):
+            raise ValueError(f"{self.name}: position_max maps a position to a whole number >= 1; "
+                             f"got {caps!r}")
         costs = self.rules["move_cost"]
         if set(costs) != set(MOVE_ACTIONS) or any(int(v) != v or v < 0 for v in costs.values()):
             raise ValueError(f"{self.name}: move_cost needs a non-negative whole number for each "
@@ -294,6 +320,24 @@ class LeagueConfig:
     def move_cost(self, action: str) -> int:
         """Moves an action spends from the week's budget (rules.move_cost)."""
         return int(self.rules["move_cost"][action])
+
+    @property
+    def approximations(self) -> list:
+        """How the harness's simulation departs from this league's real rules, one sentence each
+        (RULE_CHOICES); empty when it runs them exactly. The live plan uses the real rules."""
+        out = [next(note for c, note in RULE_CHOICES[rule].items()
+                    if self.rules[rule] is c or (type(self.rules[rule]) is type(c) and self.rules[rule] == c))
+               for rule in RULE_CHOICES]
+        out = [note for note in out if note]
+        # "IR" itself is a designation the simulation's injury spells already cover.
+        league_ir = set(self.rules["ir_eligible"]) - {"IR"}
+        if league_ir != SIMULATED_IR:
+            out.append(f"IR takes OUT and SUSP players (the league takes "
+                       f"{', '.join(sorted(self.rules['ir_eligible']))})")
+        if self.rules["position_max"]:
+            caps = ", ".join(f"{n} {p}" for p, n in self.rules["position_max"].items())
+            out.append(f"no roster cap by position (the league allows at most {caps})")
+        return out
 
     @property
     def roster_size(self) -> int:

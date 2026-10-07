@@ -117,12 +117,20 @@ def _day(bound) -> dt.date:
     return dt.datetime.fromtimestamp(int(bound["startEpochMilli"]) / 1000, EASTERN).date()
 
 
+def period_rows(scoreboard: dict) -> list:
+    """[(number, first day, last day, start, end)] from a FetchLeagueScoreboard answer."""
+    return sorted((p["ordinal"], _day(p["low"]), _day(p["high"]), _instant(p["low"]),
+                   _instant(p["high"]) + dt.timedelta(days=1))
+                  for p in scoreboard.get("eligibleSchedulePeriods", []))
+
+
 class Fleaflicker:
     """One Fleaflicker league, read. `season` reads a past season (e.g. 2025) where the endpoint
     takes it; transactions do not (the endpoint refuses `season`), so they are always current."""
 
     platform = "fleaflicker"
     platform_name = "Fleaflicker"       # its name in platform_ids.parquet
+    week_turns_over = "6:00 AM Eastern (3:00 AM Pacific)"    # a period's first instant (period_at)
 
     def __init__(self, league_id: int, season=None):
         self.league_id = int(league_id)
@@ -191,10 +199,7 @@ class Fleaflicker:
         """[(number, first day, last day, start, end)]: `start` the instant the period begins
         (6:00 AM Eastern on its first day), `end` the instant after its last day (UTC)."""
         def fetch():
-            raw = self._get("FetchLeagueScoreboard", season=self.season)
-            return sorted((p["ordinal"], _day(p["low"]), _day(p["high"]), _instant(p["low"]),
-                           _instant(p["high"]) + dt.timedelta(days=1))
-                          for p in raw.get("eligibleSchedulePeriods", []))
+            return period_rows(self._get("FetchLeagueScoreboard", season=self.season))
         # Asked once per team's move count and per period lookup: 17-45 fetches a read, now one.
         return self._reuse(("periods", self.season), fetch)
 
@@ -282,16 +287,186 @@ class Fleaflicker:
 
     # ---------- the league ----------
 
-    def rules(self) -> dict:
-        """FetchLeagueRules: roster positions (label, eligibility, starters) and sizes."""
-        raw = self._get("FetchLeagueRules")
-        return {"slots": {p["label"]: p.get("start", 0) for p in raw.get("rosterPositions", [])
-                          if p.get("group") == "START"},
-                "slot_positions": {p["label"]: p.get("eligibility", []) for p in raw.get("rosterPositions", [])
-                                   if p.get("group") == "START"},
-                "bench": raw.get("numBench"), "max_roster": raw.get("maxRosterSize"),
-                "ir": next((p.get("start", 0) for p in raw.get("rosterPositions", [])
-                            if p.get("group") == "INJURED"), 0)}
+    def league_settings(self) -> dict:
+        """settings_from this league's answers (current season)."""
+        url = RULES_PAGE.format(league=self.league_id)
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            page = response.read().decode("utf-8", "replace")
+        return settings_from(self._get("FetchLeagueRules"), page,
+                             self._get("FetchLeagueScoreboard", season=self.season),
+                             self.draft_board(), len(self.teams()))
+
+
+# ---------- league settings (Fleaflicker.league_settings) ----------
+
+RULES_PAGE = "https://www.fleaflicker.com/nhl/leagues/{league}/rules"
+UNLIMITED_MOVES = 99      # the harness needs a number; no real week comes near it
+POSITIONS = ("C", "LW", "RW", "D", "G")
+WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+# The rules page's wording for the rules Season/league.py names, as league 12090 shows it
+# (2026-10-07), matched on how the text starts. Wording missing here fails the read with the text:
+# add it from the league's settings page, never guess.
+LINEUP_LOCKS = {"At game start": "per_game"}
+CLAIMS = {"Waiver Priority": "rolling", "Blind Bid": "faab"}
+GAME_START = {"Dropped players and all free agents after game start": True, "Dropped players only": False}
+IR_NAMES = {"Day-to-day": "DTD", "Out": "OUT", "Suspended": "SUSP", "Injured Reserve": "IR"}
+# Fleaflicker-wide, not league settings: an add or a claim is one transaction against the limit,
+# drops and IR moves are free (MOVE_TYPES), and an add counts at once -- from his next game.
+MOVE_COST = {"add": 1, "claim": 1, "drop": 0, "ir_stash": 0, "ir_activate": 0}
+# FetchLeagueRules category id -> our scoring key (Settings/scoring/*.json); a scored category not
+# here is reported as not projected, never dropped silently.
+CATEGORIES = {1: "goals", 5: "assists", 36: "ppp", 37: "shp", 4: "shots", 8: "pim", 13: "hits",
+              14: "blocks", 19: "wins", 20: "losses", 22: "ot_losses", 23: "shutouts", 26: "saves",
+              27: "goals_against"}
+GOALIE_KEYS = {"wins", "losses", "ot_losses", "shutouts", "saves", "goals_against"}
+
+
+def _clean(fragment: str) -> str:
+    text = html.unescape(re.sub(r"<[^>]+>", " ", fragment)).replace("\ufffd", " ").replace("\xa0", " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_rules_page(page: str) -> dict:
+    """{label: (text, html)} for every <dt>/<dd> pair on a rules page, and "tooltips": {id: text}."""
+    out = {_clean(label): (_clean(value), value)
+           for label, value in re.findall(r"<dt>(.*?)</dt>\s*<dd>(.*?)</dd>", page, flags=re.S)}
+    data = re.search(r"window\.pageData\s*=\s*(\{.*?\});", page, flags=re.S)
+    tips = json.loads(data.group(1)).get("tooltips", []) if data else []
+    out["tooltips"] = {i: _clean(t["contents"]) for t in tips for i in t["ids"]}
+    return out
+
+
+def _text(page: dict, label: str) -> str:
+    if label not in page:
+        raise ValueError(f"Fleaflicker rules page has no {label!r} (the page changed?)")
+    return page[label][0]
+
+
+def _phrase(label: str, text: str, table: dict):
+    for start, value in table.items():
+        if text.startswith(start):
+            return value
+    raise ValueError(f"Fleaflicker {label} {text!r} is not translated yet (platforms/fleaflicker.py)")
+
+
+def _ir_statuses(page: dict) -> list:
+    """The IR slot's tooltip: "The following injury statuses are eligible: Day-to-day, Out, ..."."""
+    tip = re.search(r'id="(ttId[\d_]+)">IR<', page["Totals"][1])
+    text = page["tooltips"].get(tip.group(1), "") if tip else ""
+    names = [n.strip() for n in text.split("eligible:", 1)[1].split(",")] if "eligible:" in text else []
+    unknown = [n for n in names if n not in IR_NAMES]
+    if not names or unknown:
+        raise ValueError(f"Fleaflicker IR eligibility {text!r} not read (unknown: {unknown})")
+    return [IR_NAMES[n] for n in names]
+
+
+def _scoring(api: dict, notes: list) -> dict:
+    """{"skaters", "goalies"}: points per unit of each scored category (a rule's points over its
+    `forEvery`). A bounded or bonus rule fails: points per unit cannot hold it."""
+    out = {"skaters": {}, "goalies": {}}
+    for group in api.get("groups", []):
+        for rule in group.get("scoringRules", []):
+            if any(k in rule for k in ("boundLower", "boundUpper", "isBonus")):
+                raise ValueError(f"Fleaflicker scoring rule {rule['description']!r}: bounds and "
+                                 f"bonuses are not supported")
+            key = CATEGORIES.get(rule["category"]["id"])
+            points = rule["points"]["value"] / rule.get("forEvery", 1)
+            if key is None:
+                notes.append(f"{rule['category']['abbreviation']} {points:+g} scored but not projected")
+            else:
+                out["goalies" if key in GOALIE_KEYS else "skaters"][key] = round(points, 6)
+    return out
+
+
+def settings_from(api: dict, page: str, scoreboard: dict, board: dict, teams: int) -> dict:
+    """The league's settings in Season/league.py's terms -- {"settings": a Settings/rosters body
+    (no name, description or eligibility), "scoring": {"skaters", "goalies"}, "notes": [what
+    the league does that those terms cannot hold]}: slots, sizes and scoring from
+    FetchLeagueRules, the weeks from FetchLeagueScoreboard, the draft order from the board, the
+    rest from the rules page. Fleaflicker's wording is translated here and only here; wording
+    not in the tables below fails the read rather than mapping to the nearest.
+    The arguments are the raw answers -- FetchLeagueRules, the /rules page's HTML, FetchLeagueScoreboard,
+    FetchLeagueDraftBoard, the number of teams; nothing here reads the network."""
+    page = parse_rules_page(page)
+    notes = []
+    start = [p for p in api["rosterPositions"] if p.get("group") == "START"]
+    caps = {p["label"]: p["max"] for p in start
+            if p.get("max") is not None and p["label"] in POSITIONS and p["max"] < api["maxActive"]}
+
+    limit = re.search(r"Week:\s*(\d+)", _text(page, "Transaction Limits"))
+    if limit is None:
+        notes.append(f"no weekly transaction limit (written as {UNLIMITED_MOVES} a week)")
+    hours = re.fullmatch(r"(\d+) Hours?", _text(page, "Time on Waivers After Drop"))
+    if hours is None:
+        raise ValueError(f"Fleaflicker waiver time {_text(page, 'Time on Waivers After Drop')!r} not read")
+    waivers = _phrase("How Are Claims Resolved", _text(page, "How Are Claims Resolved"), CLAIMS)
+    if waivers == "rolling" and _text(page, "Reset Order Weekly") == "Yes":
+        waivers = "reset_weekly"
+    if _text(page, "Break Regular Season Ties") != "No":
+        notes.append("regular-season ties are broken by the league's tiebreakers (the harness splits them)")
+    notes.append("a tied playoff matchup goes to the higher starter total, then the best single "
+                 "starter, then the bench (the harness: more regular-season points)")
+    # "Most average points/game" first: a record tie goes to the higher points per game, which
+    # is points_for over the same games played.
+    rank = _text(page, "Power & Playoff Rank Tiebreakers")
+    if not rank.startswith(("Most average points/game", "Most total points")):
+        raise ValueError(f"Fleaflicker rank tiebreakers {rank!r} not translated")
+    if _text(page, "Rank division winners higher") != "No":
+        notes.append("division winners are seeded first (the harness has no divisions)")
+
+    playoffs = re.search(r"(\d+)\s*Teams; Weeks:\s*(\d+)-(\d+).*?(\d+) byes?\s*\((no re-seeding|re-seeding)\)",
+                         _text(page, "Playoffs"))
+    if playoffs is None:
+        raise ValueError(f"Fleaflicker playoffs {_text(page, 'Playoffs')!r} not read")
+    teams_in, first_week, last_week, byes = (int(g) for g in playoffs.groups()[:4])
+    rounds = next(r for r in range(1, 6) if 2 ** r >= teams_in)
+    weeks = last_week - first_week + 1
+    if weeks % rounds:
+        raise ValueError(f"Fleaflicker playoffs: {weeks} weeks over {rounds} rounds")
+    if playoffs.group(5) != "no re-seeding":
+        notes.append("the bracket is re-seeded each round (the harness keeps it fixed)")
+
+    periods = period_rows(scoreboard)
+    regular = [row for row in periods if row[0] < first_week]
+    long_weeks = [n for n, lo, hi, _, _ in regular[1:] if (hi - lo).days + 1 > 7]
+    if long_weeks:
+        notes.append(f"week(s) {long_weeks} run two weeks on Fleaflicker (the harness's calendar "
+                     f"splits them; the live plan reads the platform's weeks)")
+    picks = picks_from(board)
+    overall = {(c["round"], c["team_id"]): c["overall"] for c in picks}
+    first = next(c for c in picks if c["overall"] == 1)
+    size = sum(1 for c in picks if c["round"] == 1)
+    draft = "snake" if overall.get((2, first["team_id"])) == 2 * size else "linear"
+
+    return {"settings": {
+        "teams": teams,
+        "active_slots": {p["label"]: p["start"] for p in start},
+        "bench": api["numBench"],
+        "ir": next((p.get("start", 0) for p in api["rosterPositions"] if p.get("group") == "INJURED"), 0),
+        "moves_per_week": int(limit.group(1)) if limit else UNLIMITED_MOVES,
+        "moves_carry_over": False,
+        "waiver_days": max(1, round(int(hours.group(1)) / 24)),
+        "ties": "split",
+        "schedule": {"type": "round_robin",
+                     # the regular season ends with the last period before the playoffs
+                     "regular_season_end": regular[-1][2].strftime("%m-%d"),
+                     "week_starts_on": WEEKDAYS[periods[1][1].weekday()]},
+        "draft": {"type": draft, "order": "lottery", "keepers": 0},
+        "playoffs": {"teams": teams_in, "byes": byes, "rounds": rounds,
+                     "weeks_per_round": weeks // rounds, "seeding": "record",
+                     "tiebreak": "points_for"},
+        "slot_positions": {p["label"]: p["eligibility"] for p in start},
+        "rules": {
+            "lineup_lock": _phrase("Lineup Locking", _text(page, "Lineup Locking"), LINEUP_LOCKS),
+            "add_effective": "immediate",
+            "waivers": waivers,
+            "game_start_waivers": _phrase("Who is Placed on Waivers",
+                                          _text(page, "Who is Placed on Waivers"), GAME_START),
+            "ir_eligible": _ir_statuses(page),
+            "position_max": caps,
+            "move_cost": dict(MOVE_COST)}},
+        "scoring": _scoring(api, notes), "notes": notes}
 
 
 def _score(game, side) -> float:
