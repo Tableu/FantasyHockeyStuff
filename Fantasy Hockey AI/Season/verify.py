@@ -543,7 +543,8 @@ def check_week_choices() -> str:
     that plans later moves, planned without making anything: a pinned move -- the worst free agent
     playing that night, which no bar would pass -- is in every plan, marked; a day's OK-to-drop
     list is the only drop that day but the plan's own pickups and an open spot; every plan's
-    calendar nights (nights_view) are legal lineups on the roster held; plan A's fits start."""
+    calendar nights (nights_view) are legal lineups on the roster held; plan A's slot-picker list
+    (fits_tonight) is there."""
     from dataclasses import replace
     weekplan, slots = sys.modules["weekplan"], sys.modules["slots"]
     strategy = _strategy()

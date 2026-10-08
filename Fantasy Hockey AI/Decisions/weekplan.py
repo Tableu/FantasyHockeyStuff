@@ -93,15 +93,23 @@ def run(view, params: streaming.StreamParams, horizon, source, slot_order, accep
         return [], []
     planner = WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, z)
     plan = planner.plan()
+    # The live plan window's week is the user's to build (`view.user_builds_week`, the user's
+    # call 2026-10-07): only the moves they pinned are made, today's included, and the model's
+    # plans -- built around those pins -- are recommendations. Plan A then carries `mine`: the
+    # calendar (nights_view) and the slot picker's list (fits_tonight) on the pins alone. Never
+    # set in a backtest.
+    mine = list(planner.seeded()[0]) if getattr(view, "user_builds_week", False) else None
     # Only the first plan is made. Making the best of 3 by week total instead measured nothing
     # (2024-25, strategy-espn-la, 32 drafts: +0.33 +/- 0.45 pts/wk; best of 5, 16: +0.27 +/- 0.73):
     # the plan is made again every day, so a better week on paper rarely survives to be played.
     # Both before today's moves change the state.
     if alternatives > 0:
         out = TeamPlans(planner).plans(plan, alternatives)
+        if mine is not None:
+            out[0]["mine"] = {"nights": planner.nights_view(mine), "fits": planner.fits_tonight(mine)}
     else:
         out = [planner.summary(plan, planner.first_pickup(plan))]
-    return planner.execute(plan), out
+    return planner.execute(plan if mine is None else mine), out
 
 
 class WeekPlanner:
@@ -713,29 +721,28 @@ class WeekPlanner:
                         "moves": [m for m in moves if m["day"] == night]})
         return out
 
-    def fits_tonight(self, moves, shown=40) -> dict:
-        """{night: [(free agent, the night's lineup gain, his games left this week)]}: the free
-        agents who would START that night if added to the roster the plan holds -- what the Week
-        tab offers to add -- best gain first, `shown` a night. A waiver claim counts from the night
-        he clears. Changes nothing."""
+    def fits_tonight(self, moves, shown=150) -> dict:
+        """{night: [(free agent, his points that night, the night's lineup gain if added, his
+        games left this week)]}: every free agent who plays that night -- what the Week tab's slot
+        picker offers, filtered there to the slot clicked -- most points first, `shown` a night.
+        The gain is on the roster the plan holds that night, without a drop (0.0: he would not
+        start). A waiver claim counts from the night he clears. Changes nothing."""
         ordered, out = self.ordered(moves), {}
         pool = [q for q in self.addable + self.claimable if q in self.pool_rate]
         for night in self.nights:
             held = self.roster_at(self.roster, ordered, night, ordered=True)
             values = self._values_on(night, held)
             base = slots_module.assign_value(self.slot_order, values, self.eligibility, self.accepts)
+            playing = [(q, self.tonight[q] if night == self.today and q in self.tonight else self.pool_rate[q])
+                       for q in pool if q not in held and night in self.plays_on(q)
+                       and not (q in self.claimable and self.view.waiver_clears(q) > night)]
             found = []
-            for q in pool:
-                if (q in held or night not in self.plays_on(q)
-                        or (q in self.claimable and self.view.waiver_clears(q) > night)):
-                    continue
-                trial = dict(values)
-                trial[q] = self.tonight[q] if night == self.today and q in self.tonight else self.pool_rate[q]
-                lineup = slots_module.assign(self.slot_order, trial, self.eligibility, self.accepts)
-                if q in lineup.started:
-                    gain = sum(trial[p] for p in lineup.started) - base
-                    found.append((q, gain, sum(1 for n in self.nights_of(q) if n >= night)))
-            out[night] = sorted(found, key=lambda f: (-f[1], f[0]))[:shown]
+            for q, points in sorted(playing, key=lambda f: (-f[1], f[0]))[:shown]:
+                with_him = slots_module.assign_value(self.slot_order, {**values, q: points},
+                                                     self.eligibility, self.accepts)
+                found.append((q, points, max(0.0, with_him - base),
+                              sum(1 for n in self.nights_of(q) if n >= night)))
+            out[night] = found
         return out
 
     @staticmethod

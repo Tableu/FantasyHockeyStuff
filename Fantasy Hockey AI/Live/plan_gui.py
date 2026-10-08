@@ -34,31 +34,41 @@ on the platform yourself.
                  clear and the edge (gain - bar) they are ranked by (rentals: the Week tab). Above
                  them, OK to drop for upgrades: tick players and upgrades drop only them -- goalies
                  and starters included, even when that leaves a lineup slot empty (roster.fill_check
-                 = none); none ticked, the model chooses. Planned on at Re-plan or a refresh.
-                 Upgrades and the week plan are apart: the week is planned as if no upgrade is
-                 made, so nothing here changes the Week tab; a rental today that an upgrade leaves
-                 no room for (same drop, no moves left) is not made, and the problems say so
-                 Forced drops (an IR activation into a full roster) stay the model's
-    Week         the week's streaming plans (strategy mode 'week', Decisions/weekplan.py), two views:
-                 Calendar  plan A day by day, each day a column: its lineup points and open slots,
+                 = none); none ticked, the model chooses. The list stays open while you tick;
+                 clicking outside it saves and re-plans. Upgrades and the week plan are apart: the
+                 week is planned as if no upgrade is made, so nothing here changes the Week tab; a
+                 rental today that an upgrade leaves no room for (same drop, no moves left) is not
+                 made, and the problems say so. Forced drops (an IR activation into a full roster) stay the model's
+    Week         the week's streaming plans (strategy mode 'week', Decisions/weekplan.py), two views.
+                 The week is yours to build: the calendar starts empty -- your roster -- and the
+                 plan makes only the rentals you pick; the model's plans are recommendations:
+                 Calendar  your week day by day, each day a column: its lineup points and open slots,
                            its moves, and the league's lineup slots with who starts in each that
                            night on the roster the plan holds -- a rental in every slot he fills
                            while held (blue; yours darker, open slots red). Under each day: OK to
                            drop (everyone held that day; ticked, that day's rentals drop only them --
-                           or a rental the plan picked up itself; none ticked, the plan chooses) and
-                           Add (the free agents who would start that night, with the points he adds
-                           that night and his games left): picking one pins him on that day, the
-                           rest of the week planned around him. Every change is saved on the server
-                           (Live/choices.py) at once and planned on when you press Re-plan (the last
-                           league read again, about 2 s) or refresh; until then the bar says so and
-                           a new pick shows as not planned yet. A cross takes a pick out; Clear
+                           or a rental the plan picked up itself; none ticked, the plan chooses): it
+                           stays open while you tick, and clicking outside it saves and re-plans.
+                           Click an open slot (+) or a rental's (\u21c4) for the slot picker: the
+                           free agents who play that night and fit the slot, most points that night
+                           first, with the lineup points he adds and his games left -- picking one
+                           pins him that night (in place of the rental, who keeps the slot until
+                           then), the rest of the week planned around him. Click a night's heading
+                           for its recommended moves beside the calendar -- every plan's moves that
+                           day, each with its slot's other options; click one to pick it, a picked
+                           one (blue) to take it back. Every change is saved on the server
+                           (Live/choices.py) at once; a pick is planned on when you press Re-plan
+                           (the last league read again, about 2 s) or refresh -- until then the bar
+                           says so and it shows as not planned yet -- and a drop list re-plans as
+                           soon as it closes. A cross takes a pick out; Clear
                            forgets the week's choices
                  Plans     every plan by NHL team (TeamPlans): each rental is a team slot -- day,
                            team, position -- that any of the players on that team who fit it can
                            fill. One row per plan: its schedule ("Tue NYR RW -> Thu CGY C ..."), what
                            it adds this week, its expected edge (each slot's options discounted by
-                           the chance each is taken first) and its thinnest slot. Plan A is the one
-                           made (today's slots are the Moves); B, C, ... each leave out every earlier
+                           the chance each is taken first) and its thinnest slot. Plan A is the
+                           model's best week around your picks (only your picks are made); B, C, ...
+                           each leave out every earlier
                            plan's first team you did not pick -- the fallbacks when a team is picked
                            over; your picks are in every plan. Click a plan for its slots, a slot for
                            its options, ranked by edge
@@ -132,7 +142,8 @@ STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": 
 # A row's look by its tags: a recommended action, an injury status, greyed (a placeholder message).
 # The Week tab's calendar: a cell's width in characters, and its colour by what the plan does.
 CALENDAR_CELL_CHARS = 22
-CALENDAR_COLOURS = {"held": "#f9fafb", "new": PLAN_COLOUR, "pinned": "#bfdbfe", "open": "#fde2e2"}
+CALENDAR_COLOURS = {"held": "#f9fafb", "new": PLAN_COLOUR, "pinned": "#bfdbfe", "open": "#fde2e2",
+                    "selected": "#e5e7eb"}
 ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "empty": {"fg": "#9ca3af"},
               **{status: {"bg": colour} for status, colour in STATUS_COLOURS.items()},
               **{owner: {"bg": colour} for owner, colour in OWNER_COLOURS.items()}}
@@ -268,8 +279,7 @@ class PlanWindow:
         # What you chose (Live/choices.py; the server keeps them): who upgrades may drop (the
         # Upgrade tab) and the Week tab's day by day drop lists and picks.
         self.choices = {"upgrade_drops": [], "days": {}}
-        # The dropdowns' check variables, kept alive while their menus show (tk drops them else).
-        self.upgrade_vars, self.calendar_vars = [], []
+        self.drop_popup = None             # an open OK-to-drop list: (window, close)
 
         root.title(f"Plan -- {self.league.name}: {self.league.team_name or 'my team'}"
                    + f" (server {self.server.url})")
@@ -287,8 +297,10 @@ class PlanWindow:
         body.add(self.tabs, weight=4)
         scoring = simlayer.load_scoreset(self.league.scoring)
         # The calendar's rows: the league's lineup slots in its own order (C C LW LW ... G G).
-        active = league_module.load(self.league.rules).active_slots
-        self.slot_rows = [slot for slot, count in active.items() for _ in range(count)]
+        config = league_module.load(self.league.rules)
+        self.slot_rows = [slot for slot, count in config.active_slots.items() for _ in range(count)]
+        self.slot_accepts = {slot: set(config.slot_positions[slot]) for slot in config.active_slots}
+        self.selected_night = None         # the calendar's night whose recommendations show
         scored = set(scoring.skaters) | set(scoring.goalies)
         self.stat_keys = [k for k in draft_board.STAT_HEADINGS if k == "gp" or k in scored]
         stat_columns = [(k, draft_board.STAT_HEADINGS[k], 48) for k in self.stat_keys]
@@ -365,14 +377,14 @@ class PlanWindow:
 
     def _build_upgrade(self, columns):
         """The Upgrade tab: who upgrades may drop -- a dropdown of the roster and a Clear button --
-        above the pickups table. Ticking anyone saves and re-plans at once."""
+        above the pickups table. The list stays open while you tick; clicking outside it saves and
+        re-plans (`_drop_popup`)."""
         frame = ttk.Frame(self.tabs)
         self.tabs.add(frame, text="Upgrade")
         bar = ttk.Frame(frame, padding=(0, 6, 0, 4))
         bar.pack(fill="x")
-        self.upgrade_menu_button = ttk.Menubutton(bar, text="OK to drop for upgrades \u25be")
-        self.upgrade_menu = tk.Menu(self.upgrade_menu_button, tearoff=False)
-        self.upgrade_menu_button["menu"] = self.upgrade_menu
+        self.upgrade_menu_button = ttk.Button(bar, text="OK to drop for upgrades \u25be",
+                                              command=self._open_upgrade_drops)
         self.upgrade_menu_button.pack(side="left", padx=6)
         self.upgrade_drops_var = tk.StringVar()
         ttk.Label(bar, textvariable=self.upgrade_drops_var).pack(side="left", padx=6)
@@ -386,16 +398,8 @@ class PlanWindow:
         return sheets.Table(table, columns, ROW_STYLES)
 
     def _fill_upgrade_menu(self):
-        """The upgrades' drop dropdown: everyone on the roster (not IR), ticked if marked."""
+        """The upgrades' drop list's button and the line beside it."""
         marked = set(self.choices.get("upgrade_drops", []))
-        self.upgrade_menu.delete(0, "end")
-        self.upgrade_vars = []
-        for r in sorted((r for r in self.plan.get("roster", []) if not r.get("on_ir") and r.get("player_id")),
-                        key=lambda r: r["player"]):
-            var = tk.BooleanVar(value=r["player_id"] in marked)
-            self.upgrade_vars.append(var)
-            self.upgrade_menu.add_checkbutton(label=r["player"], variable=var,
-                                              command=lambda q=r["player_id"]: self._toggle_upgrade_drop(q))
         self.upgrade_drops_var.set(
             (f"{len(marked)} marked: upgrades drop only these." if marked else
              "None marked: the plan chooses who upgrades drop.")
@@ -411,9 +415,59 @@ class PlanWindow:
         return ((made.get("upgrade_drops") or []) != (mine.get("upgrade_drops") or [])
                 or (made.get("days") or {}) != (mine.get("days") or {}))
 
-    def _toggle_upgrade_drop(self, player_id):
-        marked = set(self.choices.get("upgrade_drops", [])) ^ {player_id}
-        self._save_choices({**self.choices, "upgrade_drops": sorted(marked)})
+    def _open_upgrade_drops(self):
+        """Who upgrades may drop: everyone on the roster (not IR)."""
+        players = [{"player_id": r["player_id"], "player": r["player"]}
+                   for r in (self.plan or {}).get("roster", []) if not r.get("on_ir") and r.get("player_id")]
+
+        def apply(chosen):
+            self._save_choices({**self.choices, "upgrade_drops": sorted(chosen)}, replan=True)
+
+        self._drop_popup(self.upgrade_menu_button, "OK to drop for upgrades", players,
+                         set(self.choices.get("upgrade_drops", [])), apply)
+
+    def _drop_popup(self, anchor, title, players, marked, apply):
+        """An OK-to-drop list under `anchor` that stays open while you tick: a box per player,
+        ticked if `marked`. Clicking outside it (or Esc) closes it, and if anything changed calls
+        `apply(the ticked ids)` -- which saves and re-plans."""
+        if self.busy or not players:
+            return
+        top = tk.Toplevel(self.root)
+        top.overrideredirect(True)
+        top.geometry(f"+{anchor.winfo_rootx()}+{anchor.winfo_rooty() + anchor.winfo_height()}")
+        box = tk.Frame(top, background="white", borderwidth=1, relief="solid")
+        box.pack(fill="both", expand=True)
+        tk.Label(box, text=f"{title} -- tick any, click outside to apply", background="white",
+                 foreground="#6b7280", font=("Segoe UI", 8), anchor="w").pack(fill="x", padx=6, pady=(4, 2))
+        ticks = {}
+        for h in sorted(players, key=lambda h: h["player"]):
+            ticks[h["player_id"]] = var = tk.BooleanVar(value=h["player_id"] in marked)
+            tk.Checkbutton(box, text=h["player"], variable=var, background="white", anchor="w",
+                           activebackground="#e0ecff").pack(fill="x", padx=6)
+
+        def close(event=None):
+            if not top.winfo_exists():
+                return
+            chosen = {q for q, var in ticks.items() if var.get()}
+            self.root.unbind_all("<Escape>")
+            top.grab_release()
+            top.destroy()
+            self.drop_popup = None
+            if chosen != set(marked):
+                apply(chosen)
+
+        def click(event):
+            x, y = event.x_root - top.winfo_rootx(), event.y_root - top.winfo_rooty()
+            if not (0 <= x < top.winfo_width() and 0 <= y < top.winfo_height()):
+                close()
+
+        top.bind("<Button-1>", click)
+        # Esc anywhere in the window while the list is open (a borderless window may never get the
+        # keyboard focus on Windows).
+        self.root.bind_all("<Escape>", close)
+        top.focus_force()
+        top.grab_set()                     # every click in the window comes here: outside closes
+        self.drop_popup = (top, close)     # (a test can reach it)
 
     def _build_week_bar(self):
         """The Week tab: a Calendar / Plans switch, a this week / next week switch (shown only when
@@ -439,11 +493,26 @@ class PlanWindow:
         self.week_clear.pack(side="right", padx=6)
         self.week_note = tk.StringVar()
         ttk.Label(bar, textvariable=self.week_note).pack(side="right", padx=6)
-        # The calendar: a grid of labels in a frame that scrolls.
-        self.calendar_outer = ttk.Frame(frame)
-        canvas = tk.Canvas(self.calendar_outer, highlightthickness=0, background="white")
-        scroll_y = ttk.Scrollbar(self.calendar_outer, orient="vertical", command=canvas.yview)
-        scroll_x = ttk.Scrollbar(self.calendar_outer, orient="horizontal", command=canvas.xview)
+        # The calendar view: the calendar (a grid of labels in a frame that scrolls) and, beside
+        # it, the selected night's recommended moves.
+        self.calendar_outer = ttk.PanedWindow(frame, orient="horizontal")
+        left = ttk.Frame(self.calendar_outer)
+        right = ttk.Frame(self.calendar_outer, padding=(6, 0, 0, 0))
+        self.calendar_outer.add(left, weight=3)
+        self.calendar_outer.add(right, weight=2)
+        self.panel_title = tk.StringVar(value="Click a night for its recommended moves.")
+        ttk.Label(right, textvariable=self.panel_title, font=("Segoe UI", 9, "bold"),
+                  wraplength=420, justify="left").pack(anchor="w", pady=(0, 4))
+        panel = ttk.Frame(right)
+        panel.pack(fill="both", expand=True)
+        self.night_panel = sheets.Table(panel, [("plan", "Plans", 60), ("kind", "Move", 80),
+                                                ("add", "Add", 210), ("drop", "Drop", 170),
+                                                ("edge", "Edge", 50), ("add_games", "Games", 50)],
+                                        ROW_STYLES, on_row_click=self._pin_recommended)
+        self.panel_actions = []            # panel row -> (day, add id, drop id) or None
+        canvas = tk.Canvas(left, highlightthickness=0, background="white")
+        scroll_y = ttk.Scrollbar(left, orient="vertical", command=canvas.yview)
+        scroll_x = ttk.Scrollbar(left, orient="horizontal", command=canvas.xview)
         canvas.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
         scroll_y.pack(side="right", fill="y")
         scroll_x.pack(side="bottom", fill="x")
@@ -1035,7 +1104,7 @@ class PlanWindow:
         self.headline.set(f"{p['team']} -- {p['game_date']} · week {p['week']} vs {opponent} · "
                           f"P(win) {p['p_win']:.0%} · moves left after the plan {p['moves_left']}"
                           + (" · today's moves are free" if p.get("free_moves") else "")
-                          + (f" · {len(p['week_plan'])} rental(s) planned this week"
+                          + (f" · {self._rentals_planned()} rental(s) planned this week"
                              if p.get("stream_mode") == "week" else "")
                           + ("" if p.get("games_today", True) else " · no NHL games today")
                           # The upgrades' drop list overrides the model's drops until cleared.
@@ -1165,7 +1234,8 @@ class PlanWindow:
             if key not in opened:
                 continue
             for index, w in enumerate(moves):
-                made = which == "this" and label == "A" and w["today"]
+                # Made today: your picks only (the plan makes no other rental).
+                made = which == "this" and w["today"] and w.get("pinned")
                 slot_key = ("slot", label, index)
                 options = w.get("options") or []
                 day = weekday(w["day"])
@@ -1210,17 +1280,32 @@ class PlanWindow:
         plans = p.get("next_week_plans") if self.week_which.get() == "next" else p.get("week_plans")
         return (plans or [None])[0]
 
+    def _rentals_planned(self) -> int:
+        """Rentals in the week the calendar shows (your picks; plan A's moves in an older plan)."""
+        week = self._my_week() or {}
+        if "nights" in week:
+            return sum(len(n["moves"]) for n in week["nights"])
+        return len(self.plan.get("week_plan", []))
+
+    def _my_week(self):
+        """The calendar's week: your picks alone (plan A's `mine` -- the plan makes only them), or
+        plan A itself in a plan saved before that existed."""
+        a = self._plan_a()
+        return None if a is None else (a.get("mine") or a)
+
     def _fill_calendar(self):
-        """The Week tab's calendar: plan A day by day. A column per day left this week: its lineup
+        """The Week tab's calendar: your week day by day (`_my_week`: your picks alone -- it starts
+        empty, your roster). A column per day left this week: its lineup
         points and open slots, its moves (yours pinned, with a cross to take one out), then the
         league's lineup slots with who starts in each that night on the roster the plan holds --
         a rental in every slot he fills while held -- then the day's OK-to-drop dropdown (everyone
-        held that day; none ticked: the plan's own choice) and its Add dropdown (the free agents
-        who would start that night). Each change is saved on the server and re-planned at once."""
+        held that day; none ticked: the plan's own choice). Click a night's heading (or any cell)
+        for its recommended moves beside the calendar; click an open slot or a rental's to pick
+        who goes in it (`_open_slot_picker`). Choices are saved at once and planned on at
+        Re-plan."""
         for child in self.calendar.winfo_children():
             child.destroy()
-        self.calendar_vars = []
-        a = self._plan_a()
+        a = self._my_week()
         nights = (a or {}).get("nights") or []
         mine = self.choices.get("days", {})
         week_days = [n["day"] for n in nights]
@@ -1242,15 +1327,21 @@ class PlanWindow:
         names = {h["player_id"]: h["player"] for n in nights for h in n["held"]}
         names.update({f["player_id"]: f["player"]
                       for found in ((a or {}).get("fits") or {}).values() for f in found})
-        fits = (a or {}).get("fits") or {}
+        # Your week's pickups: a slot one of them fills can be clicked to replace him.
+        rentals = {m["add"]["player_id"] for n in nights for m in n["moves"]}
+        if self.selected_night not in week_days:
+            self.selected_night = week_days[0]
         bold, small = ("Segoe UI", 9, "bold"), ("Segoe UI", 8)
         cell = dict(width=CALENDAR_CELL_CHARS, anchor="w", justify="left", font=small,
                     wraplength=CALENDAR_CELL_CHARS * 7, padx=4, pady=2)
         tk.Label(self.calendar, text="Slot", font=bold, background="white").grid(row=0, column=0, sticky="w", padx=4)
         for column, n in enumerate(nights, 1):
             day = pd.Timestamp(n["day"])
-            tk.Label(self.calendar, text=f"{day:%a %b} {day.day}\n{n['points']:.1f} pts \u00b7 {len(n['open'])} open",
-                     font=bold, background="white").grid(row=0, column=column, sticky="ew", padx=1)
+            heading = tk.Label(self.calendar, text=f"{day:%a %b} {day.day}\n{n['points']:.1f} pts \u00b7 {len(n['open'])} open",
+                               font=bold, cursor="hand2",
+                               background=CALENDAR_COLOURS["selected"] if n["day"] == self.selected_night else "white")
+            heading.grid(row=0, column=column, sticky="ew", padx=1)
+            heading.bind("<Button-1>", lambda event, d=n["day"]: self._select_night(d))
             moves = tk.Frame(self.calendar, background="white")
             moves.grid(row=1, column=column, sticky="nsew", padx=1, pady=(0, 4))
             for m in n["moves"]:
@@ -1284,50 +1375,171 @@ class PlanWindow:
             for row, slot in enumerate(slot_order, 2):
                 s = waiting.get(slot, []).pop(0) if waiting.get(slot) else None
                 if s is None:
-                    text, colour = "(open)", CALENDAR_COLOURS["open"]
+                    text, colour = "(open) \u2795", CALENDAR_COLOURS["open"]
                 else:
-                    text = f"{s['player']}\n{s['pts']:.1f}"
+                    text = f"{s['player']}\n{s['pts']:.1f}" + ("  \u21c4" if s["player_id"] in rentals else "")
                     colour = CALENDAR_COLOURS["pinned" if s["player_id"] in pinned else "new" if s.get("new") else "held"]
-                tk.Label(self.calendar, text=text, background=colour, **cell).grid(
-                    row=row, column=column, sticky="nsew", padx=1, pady=1)
+                pickable = s is None or s["player_id"] in rentals
+                label = tk.Label(self.calendar, text=text, background=colour,
+                                 cursor="hand2" if pickable and not self.busy else "", **cell)
+                label.grid(row=row, column=column, sticky="nsew", padx=1, pady=1)
+                label.bind("<Button-1>", lambda event, d=n["day"], sl=slot, who=s, ok=pickable:
+                           self._open_slot_picker(d, sl, who) if ok else self._select_night(d))
         row = 2 + len(slot_order)
         for column, n in enumerate(nights, 1):
             chosen = mine.get(n["day"], {})
             drops = set(chosen.get("drops", []))
             box = tk.Frame(self.calendar, background="white")
             box.grid(row=row, column=column, sticky="ew", padx=1, pady=(6, 0))
-            drop_button = ttk.Menubutton(box, text=(f"OK to drop: {len(drops)} \u25be" if drops
-                                                    else "OK to drop: plan's \u25be"))
-            drop_menu = tk.Menu(drop_button, tearoff=False)
-            for h in sorted(n["held"], key=lambda h: h["player"]):
-                var = tk.BooleanVar(value=h["player_id"] in drops)
-                self.calendar_vars.append(var)
-                drop_menu.add_checkbutton(label=h["player"], variable=var,
-                                          command=lambda d=n["day"], q=h["player_id"]: self._toggle_day_drop(d, q))
-            drop_button["menu"] = drop_menu
+            drop_button = ttk.Button(box, text=(f"OK to drop: {len(drops)} \u25be" if drops
+                                                else "OK to drop: plan's \u25be"))
+            drop_button.configure(command=lambda b=drop_button, d=n["day"], held=n["held"]:
+                                  self._open_day_drops(b, d, held))
             drop_button.pack(fill="x")
-            add_button = ttk.Menubutton(box, text="Add \u25be")
-            add_menu = tk.Menu(add_button, tearoff=False)
-            for f in fits.get(n["day"], []):
-                add_menu.add_command(label=f"{f['player']}  {f['positions']}  +{f['gain']:.1f} that night \u00b7 "
-                                           f"{f['games']} game{'s' if f['games'] != 1 else ''} left",
-                                     command=lambda d=n["day"], q=f["player_id"]: self._pin(d, q))
-            if not fits.get(n["day"]):
-                add_menu.add_command(label="No free agent would start that night", state="disabled")
-            add_button["menu"] = add_menu
-            add_button.pack(fill="x", pady=(2, 0))
-            for button in (drop_button, add_button):
-                button.state(["disabled"] if self.busy else ["!disabled"])
+            drop_button.state(["disabled"] if self.busy else ["!disabled"])
+        self._fill_night_panel()
+
+    def _select_night(self, day):
+        """Show `day`'s recommended moves beside the calendar (and mark its heading)."""
+        self.selected_night = day
+        self._fill_calendar()
+
+    def _fill_night_panel(self):
+        """The selected night's recommended moves: every plan's move made that day (A the one
+        made; B, C, ... the fallbacks), the same move in several plans listed once with all their
+        labels, each followed by its slot's other options. Click one to pick it."""
+        day = self.selected_night
+        p = self.plan
+        plans = (p.get("next_week_plans") if self.week_which.get() == "next" else p.get("week_plans")) or []
+        if day is None:
+            self.panel_title.set("Click a night for its recommended moves.")
+            self.night_panel.set_rows([])
+            self.panel_actions = []
+            return
+        when = pd.Timestamp(day)
+        picked = {m["add"] for m in self.choices.get("days", {}).get(day, {}).get("moves", [])}
+        moves = {}                         # (add, drop) -> [labels, the move]
+        for plan in plans:
+            for m in plan.get("moves", []):
+                if m["day"] == day and m.get("add_id") is not None:
+                    moves.setdefault((m["add_id"], m.get("drop_id")), [[], m])[0].append(plan["label"])
+        rows, self.panel_actions = [], []
+        for (add, drop), (labels, m) in sorted(moves.items(), key=lambda kv: -kv[1][1]["edge"]):
+            slot = f"{m.get('team') or ''} {m.get('pos') or ''}".strip()
+            rows.append(((", ".join(labels), m["kind"], f"{m['add']}" + (f"  [{slot}]" if slot else ""),
+                          m["drop"] or "(open spot)", f"{m['edge']:+.1f}", m["add_games"]),
+                         ("plan",) if add in picked else ()))
+            self.panel_actions.append((day, add, drop))
+            for rank, o in enumerate((o for o in m.get("options", []) if o.get("player_id") != add), 2):
+                rows.append((("", o["kind"], f"      {rank}. {o['add']}", "", f"{o['edge']:+.1f}", o["add_games"]),
+                             ("plan",) if o.get("player_id") in picked else ()))
+                self.panel_actions.append((day, o.get("player_id"), drop))
+        self.panel_title.set(f"Recommended on {when:%a %b} {when.day} -- click one to pick it, a blue one to unpick"
+                             + (" (then Re-plan)" if rows else ""))
+        self.night_panel.set_rows(rows or [(("", "", "No plan moves that night.", "", "", ""), ("empty",))])
+
+    def _pin_recommended(self, index):
+        """A click on the panel: pick that move -- or, on one already picked that night (blue),
+        take the pick back. A new pick's drop is kept when he is on the roster now; a player the
+        plan only picks up later is left to the plan (the day's list or its own)."""
+        if self.busy or index >= len(self.panel_actions) or self.panel_actions[index] is None:
+            return
+        day, add, drop = self.panel_actions[index]
+        if add is None:
+            return
+        if any(m["add"] == add for m in self.choices.get("days", {}).get(day, {}).get("moves", [])):
+            self._unpin(day, add)
+            return
+        held_now = {r["player_id"] for r in self.plan.get("roster", [])}
+        self._pin(day, add, drop if drop in held_now else None)
+
+    def _open_slot_picker(self, day, slot, occupant):
+        """The slot picker: the free agents who play `day` and fit `slot`, most points that night
+        first. Picking one adds him that night -- into an open slot with the plan's drop (the day's
+        list or its own), or in place of the rental in the slot (`_replace_rental`)."""
+        if self.busy:
+            return
+        self.selected_night = day
+        a = self._my_week() or {}
+        accepts = self.slot_accepts.get(slot, {slot})
+        found = [f for f in (a.get("fits") or {}).get(day, [])
+                 if accepts & set(f["positions"].split("/"))]
+        found.sort(key=lambda f: (-f["pts"], f["player"]))
+        when = pd.Timestamp(day)
+        top = tk.Toplevel(self.root)
+        top.title(f"Add on {when:%a %b} {when.day} -- {slot} slot")
+        top.transient(self.root)
+        top.geometry("720x520")
+        ttk.Label(top, padding=8, wraplength=680, justify="left",
+                  text=(f"{when:%a %b} {when.day}, {slot} slot"
+                        + (f": replacing {occupant['player']} from this night" if occupant else ": open")
+                        + ". Free agents who play that night and fit the slot, most points that night first."
+                          " Picked: saved now, planned on at Re-plan.")).pack(anchor="w")
+        columns = (("player", "Player", 230), ("positions", "Pos", 70), ("pts", "Pts that night", 95),
+                   ("gain", "Lineup gain", 85), ("games", "Games left", 75), ("status", "Status", 60))
+        tree = ttk.Treeview(top, columns=[c[0] for c in columns], show="headings", selectmode="browse")
+        for key, heading, width in columns:
+            tree.heading(key, text=heading)
+            tree.column(key, width=width, anchor="w" if key == "player" else "center")
+        for f in found:
+            tree.insert("", "end", iid=str(f["player_id"]),
+                        values=(f["player"], f["positions"], f"{f['pts']:.2f}", f"{f['gain']:+.1f}",
+                                f["games"], f.get("status") if f.get("status") not in (None, "ACTIVE") else ""))
+        tree.pack(fill="both", expand=True, padx=8)
+        if not found:
+            ttk.Label(top, text="No free agent who fits this slot plays that night.", padding=8).pack()
+
+        def choose(event=None):
+            chosen = tree.selection()
+            if not chosen:
+                return
+            top.destroy()
+            if occupant is None:
+                self._pin(day, int(chosen[0]))
+            else:
+                self._replace_rental(day, occupant["player_id"], int(chosen[0]))
+
+        tree.bind("<Double-1>", choose)
+        buttons = ttk.Frame(top, padding=8)
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="Cancel", command=top.destroy).pack(side="right", padx=4)
+        ttk.Button(buttons, text="Add", command=choose).pack(side="right", padx=4)
+        top.grab_set()
+        self.picker = top                  # the window open now (a test can reach it)
+
+    def _replace_rental(self, day, rental, player_id):
+        """`player_id` in place of the plan's rental `rental` from `day` on. The rental's own move
+        (his day, his drop) is pinned too when the plan only chose it, so he holds the slot until
+        then; picked the same day he was added, the new player takes his move instead."""
+        a = self._my_week() or {}
+        added = next(((n["day"], m) for n in a.get("nights") or [] for m in n["moves"]
+                      if m["add"]["player_id"] == rental), None)
+        if added is None:
+            self._pin(day, player_id)
+            return
+        first, move = added
+        his_drop = move["drop"]["player_id"] if move["drop"] else None
+        new = copy.deepcopy(self.choices)
+        if first == day:
+            chosen = self._day_choice(new, day)
+            chosen["moves"] = [m for m in chosen["moves"] if m["add"] != rental]
+            chosen["moves"].append({"add": player_id, "drop": his_drop})
+        else:
+            if not move["pinned"]:
+                self._day_choice(new, first)["moves"].append({"add": rental, "drop": his_drop})
+            self._day_choice(new, day)["moves"].append({"add": player_id, "drop": rental})
+        self._save_choices(new)
 
     def _day_choice(self, choices, day) -> dict:
         return choices.setdefault("days", {}).setdefault(day, {"drops": [], "moves": []})
 
-    def _pin(self, day, player_id):
-        """Add a free agent on `day` -- his drop the day's list or the plan's choice -- and re-plan."""
+    def _pin(self, day, player_id, drop=None):
+        """Pick a free agent on `day` -- dropping `drop`, or (None) whom the day's list or the plan
+        chooses. Saved; planned on at Re-plan."""
         new = copy.deepcopy(self.choices)
         moves = self._day_choice(new, day)["moves"]
         if all(m["add"] != player_id for m in moves):
-            moves.append({"add": player_id, "drop": None})
+            moves.append({"add": player_id, "drop": drop})
             self._save_choices(new)
 
     def _unpin(self, day, player_id):
@@ -1336,23 +1548,30 @@ class PlanWindow:
         chosen["moves"] = [m for m in chosen["moves"] if m["add"] != player_id]
         self._save_choices(new)
 
-    def _toggle_day_drop(self, day, player_id):
-        new = copy.deepcopy(self.choices)
-        chosen = self._day_choice(new, day)
-        chosen["drops"] = sorted(set(chosen["drops"]) ^ {player_id})
-        self._save_choices(new)
+    def _open_day_drops(self, anchor, day, held):
+        """A day's OK-to-drop list: everyone the plan holds that day."""
+        when = pd.Timestamp(day)
+
+        def apply(chosen):
+            new = copy.deepcopy(self.choices)
+            self._day_choice(new, day)["drops"] = sorted(chosen)
+            self._save_choices(new, replan=True)
+
+        self._drop_popup(anchor, f"OK to drop on {when:%a %b} {when.day}", held,
+                         set(self.choices.get("days", {}).get(day, {}).get("drops", [])), apply)
 
     def _clear_week(self):
         """Forget the picks and drop lists of the week shown."""
-        a = self._plan_a()
+        a = self._my_week()
         week_days = {n["day"] for n in (a or {}).get("nights") or []}
         new = copy.deepcopy(self.choices)
         new["days"] = {d: c for d, c in new.get("days", {}).items() if d not in week_days}
         self._save_choices(new)
 
-    def _save_choices(self, new):
+    def _save_choices(self, new, replan=False):
         """Show the change at once and save it on the server behind; the server's answer is what
-        was saved. Nothing is re-planned until Re-plan or a refresh."""
+        was saved. Nothing is re-planned until Re-plan or a refresh -- or, with `replan` (a drop
+        list closed), once the save is in."""
         self.choices = new
         if self.plan:
             self._fill_upgrade_menu()
@@ -1360,6 +1579,8 @@ class PlanWindow:
         def work():
             try:
                 self.messages.put(("choices", self.server.set_choices(new)["choices"]))
+                if replan:
+                    self.messages.put(("start", "plan"))
             except Exception as error:  # noqa: BLE001 -- show it, keep the window
                 self.messages.put(("error", f"saving your choices: {type(error).__name__}: {error}"))
         threading.Thread(target=work, daemon=True).start()

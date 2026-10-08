@@ -512,6 +512,7 @@ class LiveRunner:
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
             v.upgrade_drops = self.upgrade_drops      # adddrop
             v.ir_ok = ir_ok                           # view.healthy_on_ir
+            v.user_builds_week = True                 # weekplan.run: only your picks are made
             v.day_drops, v.pinned = self.day_drops, self.pinned   # streaming.spots, weekplan
             v.moves_from = moves_from                 # adddrop, streaming.run, weekplan
             return v
@@ -1004,7 +1005,7 @@ class LiveRunner:
         # move is a team slot (weekplan.TeamPlans): its team and position, and the players on that
         # team who fit it, ranked -- any of them buys the same nights.
         def option_rows(options):
-            return [{"add": name(o["incoming"]), "kind": MOVE_KINDS[o["kind"]],
+            return [{"add": name(o["incoming"]), "player_id": int(o["incoming"]), "kind": MOVE_KINDS[o["kind"]],
                      "positions": "/".join(sorted(self.eligibility.get(o["incoming"], ()))),
                      "from": o["effective"].date().isoformat(), "add_rate": priced(o["incoming"]),
                      "add_periph": self.peripheral(o["incoming"]), "add_games": o["games"],
@@ -1022,6 +1023,7 @@ class LiveRunner:
                              "today": m["today"], "for_next_week": m["for_next_week"],
                              "kind": MOVE_KINDS[m["kind"]], "add": name(p),
                              "drop": name(d) if d is not None else None,
+                             "add_id": int(p), "drop_id": int(d) if d is not None else None,
                              "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
                              "add_periph": self.peripheral(p),
                              "add_games": m["incoming_games"],
@@ -1061,8 +1063,10 @@ class LiveRunner:
 
         def fit_rows(fits):
             return {night.date().isoformat(): [{**person(q), "positions": "/".join(sorted(self.eligibility.get(q, ()))),
-                                                "gain": round(gain, 1), "games": games,
-                                                "rate": priced(q)} for q, gain, games in found]
+                                                "pts": round(points, 2), "gain": round(gain, 1),
+                                                "games": games, "rate": priced(q),
+                                                "status": "GTD" if q in gtd else state_status.get(q)}
+                                               for q, points, gain, games in found]
                     for night, found in fits.items()}
 
         # The plan made (A) and the alternatives (B, C, ...), each opening on a different team.
@@ -1071,6 +1075,9 @@ class LiveRunner:
             return {
                 "nights": night_rows(w.get("nights", [])),
                 **({"fits": fit_rows(w["fits"])} if "fits" in w else {}),
+                # Your week (weekplan.run's `mine`): the calendar on your picks alone.
+                **({"mine": {"nights": night_rows(w["mine"]["nights"]), "fits": fit_rows(w["mine"]["fits"])}}
+                   if "mine" in w else {}),
                 "label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
                 "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
                 "expected": None if w.get("expected") is None else round(w["expected"], 1),
