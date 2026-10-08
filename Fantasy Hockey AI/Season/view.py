@@ -189,8 +189,11 @@ class SlateView:
         return self._state.waived.get(player_id)
 
     def healthy_on_ir(self) -> list:
-        """IR players whose latest report says healthy. The league makes these come off today."""
-        return [p for p in self.ir if p not in self.injured]
+        """IR players whose latest report says healthy. The league makes these come off today.
+        `ir_ok` (the live plan only): players whose report the league's IR still takes -- a
+        day-to-day player where rules.ir_eligible lists DTD -- who may stay."""
+        allowed = getattr(self, "ir_ok", frozenset())
+        return [p for p in self.ir if p not in self.injured and p not in allowed]
 
     def roster_room(self) -> int:
         """Open roster spots (IR excluded): what an activation or a drop-less add can use."""

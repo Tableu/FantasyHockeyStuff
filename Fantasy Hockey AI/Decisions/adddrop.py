@@ -111,9 +111,10 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
     # A rostered player with no rate yet is unknown, not worthless: never a drop candidate.
     drops = [d for d in sorted(roster, key=lambda p: forward[p])
              if d not in reserved and valuation.known(view, d, params.rate_source)]
-    # The user's own list when the live plan has one (Live/droppable.py): only those may go.
-    chosen = getattr(view, "droppable", None)
-    if chosen is not None:
+    # The user's own list for upgrades when the live plan has one (Live/choices.py, the Upgrade
+    # tab): only those may go.
+    chosen = getattr(view, "upgrade_drops", None)
+    if chosen:
         drops = [d for d in drops if d in chosen]
     if view.roster_room() > 0:
         # An open spot (a stash made it) is the cheapest "drop" there is: nobody leaves. The

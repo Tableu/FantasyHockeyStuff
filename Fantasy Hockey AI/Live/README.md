@@ -17,6 +17,8 @@ run_live.py         the same pass in the terminal (reports/<league>/plans/plan_{
 planpass.py         the pass's steps, shared by both: snapshots, tonight, read league, plan, save
 sheets.py           the windows' read-only tksheet tables: row colours by tag, header-click sorting
 leagues.py          the league registry (Settings/leagues/<name>.json): --league on every tool
+choices.py          what you chose in the plan window (reports/<league>/choices.json): who upgrades
+                    may drop, and the Week tab's day by day drop lists and pinned pickups
 platforms/          read-only platform adapters: fleaflicker.py (draft board, rosters + IR, lineup
                     slots, moves used this week, matchup, league settings), espn.py (settings + scoring,
                     rosters + IR, lineup slots, matchup, draft; private leagues via cookies),

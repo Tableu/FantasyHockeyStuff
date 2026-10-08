@@ -18,11 +18,16 @@ order, hands each step what the step before it left, and writes down what it saw
 
 The order is the design. IR runs before any move is priced, so an activation's forced drop is
 settled first; upgrades run before streams, so a rental can only spend moves an upgrade did not
-want; and every transaction is done before the lineup solver sees the roster.
+want; and every transaction is done before the lineup solver sees the roster. The live plan window
+alone plans the week apart from the upgrades (`week_view_on`, the user's call 2026-10-07): on the
+roster and moves before them, so choosing upgrades never changes the week plan; today's rentals are
+then made after the upgrades, and one they left no room for is reported, not made.
 
 `DailyPlan` works against the same view interface as every manager (Decisions/README.md), so the
 live runner section 10 needs later builds a real view and calls the same two methods.
 """
+
+import copy
 
 import adddrop
 import streaming
@@ -43,6 +48,15 @@ class DailyPlan:
         # window asks for some (`week_alternatives`); a backtest never does.
         self.week_alternatives = 0
         self.week_plans = []
+        # The plan window keeps the week plan apart from the upgrades (the user, 2026-10-07):
+        # given a state, `week_view_on` returns a view of it, and the week is planned on the
+        # roster and moves as they were before today's upgrades -- choosing upgrades never
+        # changes the week plan. Today's rentals are then made on the roster after the upgrades;
+        # one they left no room for (its drop gone, no moves left) is not made and is listed in
+        # `week_conflicts` as (rental, why). A backtest never sets it: rentals spend what the
+        # upgrades leave.
+        self.week_view_on = None
+        self.week_conflicts = []
 
     def before_lock(self, view) -> None:
         """Steps 1-4: everything that changes the roster."""
@@ -64,15 +78,20 @@ class DailyPlan:
         m.move_log += repairs
         entry["repairs"] = len(repairs)
 
+        apart = self.week_view_on is not None and self.stream_params.mode == "week"
+        before_upgrades = copy.deepcopy(view._state) if apart else None
         upgrades = adddrop.run(view, m.params, m.slot_order, m.accepts, m._fieldable)
         m.move_log += upgrades
         entry["upgrades"] = len(upgrades)
 
         if self.stream_params.mode == "week":
             rentals, self.week_plans = weekplan.run(
-                view, self.stream_params, m.params.horizon_weeks, m.params.rate_source,
-                m.slot_order, m.accepts, m._fieldable, z=z, alternatives=self.week_alternatives)
+                self.week_view_on(before_upgrades) if apart else view, self.stream_params,
+                m.params.horizon_weeks, m.params.rate_source, m.slot_order, m.accepts,
+                m._fieldable, z=z, alternatives=self.week_alternatives)
             self.week_plan = self.week_plans[0]["moves"] if self.week_plans else []
+            if apart:
+                rentals = self._make_after_upgrades(view, rentals)
         else:
             rentals = streaming.run(view, self.stream_params, m.params.horizon_weeks,
                                     m.params.rate_source, m.slot_order, m.accepts, m._fieldable,
@@ -81,6 +100,32 @@ class DailyPlan:
         entry["rentals"] = len(rentals)
         entry["moves_left_end"] = view.moves_left
         self.log.append(entry)
+
+    def _make_after_upgrades(self, view, rentals) -> list:
+        """Today's rentals, planned before the upgrades, made on the roster after them (the
+        `week_view_on` mode): those that cannot be made are left out and kept in
+        `week_conflicts` with the reason."""
+        made, self.week_conflicts = [], []
+        state = view._state
+        team = state.teams[view.team_index]
+        for r in rentals:
+            if r["outgoing"] is not None and r["outgoing"] not in team.roster:
+                self.week_conflicts.append((r, "an upgrade already drops him"))
+                continue
+            if r["incoming"] not in state.pool:
+                self.week_conflicts.append((r, "an upgrade already adds him"))
+                continue
+            try:
+                if r["kind"] == "rental claim":
+                    state.submit_claim(view.team_index, r["incoming"], drop=r["outgoing"], today=view.day)
+                else:
+                    state.add(view.team_index, r["incoming"], view.day, drop=r["outgoing"], reason="rental")
+            except Exception as error:             # noqa: BLE001 - state raises IllegalMove
+                self.week_conflicts.append((r, "no moves or roster room left after them"
+                                            if view.moves_left <= 0 else str(error)))
+                continue
+            made.append(r)
+        return made
 
     def at_lock(self, view):
         """Step 5: the lineup."""

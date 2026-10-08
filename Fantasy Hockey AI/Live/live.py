@@ -39,7 +39,7 @@ import pandas as pd
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import livepaths
 import draft_board
-import droppable as droppable_module
+import choices as choices_module
 import engine as engine_module
 import inputs
 import league as league_module
@@ -142,7 +142,14 @@ class LeagueSnapshot:
                    waivers={int(k): v for k, v in raw.get("waivers", {}).items()},
                    move_limit=raw.get("move_limit"), week_days=raw.get("week_days"),
                    period_end=raw.get("period_end"), turns_over=raw.get("turns_over"),
+                   moves_free=raw.get("moves_free"),
                    source=raw.get("source", f"file {Path(path).name}"))
+
+    def dump(self, path: Path) -> Path:
+        """Write the snapshot as `load` reads it back (planpass keeps each league's last read, so a
+        re-plan on the user's choices needs no platform read)."""
+        Path(path).write_text(json.dumps(dataclasses.asdict(self), default=str), encoding="utf-8")
+        return Path(path)
 
 
     @classmethod
@@ -429,6 +436,10 @@ class LiveRunner:
         status = reported_status(self.day)
 
         injured = set(status.loc[status["status"].isin(INJURED), "player_id"].astype(int))
+        # Who the league's IR still takes besides them (rules.ir_eligible: Fleaflicker 12090 takes
+        # day-to-day players): they may stay on IR -- never forced off with a drop -- until their
+        # report clears. They are not out: a DTD player is valued and started as before.
+        ir_ok = set(status.loc[status["status"].isin(self.config.rules["ir_eligible"]), "player_id"].astype(int))
         unavailable = injured | set(rows.loc[rows["injured_at_lockout"].fillna(False).astype(bool), "player_id"].astype(int))
         playing = set(rows["player_id"].astype(int))
         nhl_team = {p: t for p, t in self.board_team.items() if t is not None}
@@ -454,8 +465,11 @@ class LiveRunner:
         decision_points = self._draws(skaters, goalies)
 
         state = self._state(snapshot, day)
-        # Who the user marked OK to drop (Live/droppable.py), or None: the model chooses.
-        self.droppable = droppable_module.load(self.league.name)
+        # What the user chose in the plan window (Live/choices.py): who upgrades may drop (the
+        # Upgrade tab), and the Week tab's day by day OK-to-drop lists and pinned moves. None or
+        # empty: the model chooses.
+        self.choices = choices_module.load(self.league.name, self.day)
+        self.upgrade_drops, self.day_drops, self.pinned = choices_module.for_planner(self.choices)
         week = self.calendar.week_from(day)
         phase = "playoffs" if week and week > self.regular_weeks else "regular"
 
@@ -496,7 +510,9 @@ class LiveRunner:
                 ros_games=self.ros_games, board_scale=self.board_scale)
             v = view_module.SlateView(**{**fields, **changes})
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
-            v.droppable = self.droppable              # adddrop, streaming.spots, weekplan
+            v.upgrade_drops = self.upgrade_drops      # adddrop
+            v.ir_ok = ir_ok                           # view.healthy_on_ir
+            v.day_drops, v.pinned = self.day_drops, self.pinned   # streaming.spots, weekplan
             v.moves_from = moves_from                 # adddrop, streaming.run, weekplan
             return v
 
@@ -506,6 +522,9 @@ class LiveRunner:
         state_now = copy.deepcopy(state)
         manager = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
         manager.plan.week_alternatives = WEEK_ALTERNATIVES
+        # The week plan apart from the upgrades (the user, 2026-10-07; orchestrator.DailyPlan
+        # week_view_on): planned on the roster and moves before today's upgrades.
+        manager.plan.week_view_on = lambda before_upgrades: view(state=before_upgrades)
         manager.transactions(view())
         next_week, next_plans = self._next_week_plans(manager, state, week, view, skaters, goalie_projections)
         problems = (([ros_note] if ros_note else []) + self.freshness()
@@ -522,15 +541,16 @@ class LiveRunner:
                 f"{platform}'s week turns over at {turns_over} and last week "
                 f"has no moves left: make today's moves after {turns_over}; they "
                 f"count against this week's {cap}")
-        # A drop list carried into a new matchup week is easy to forget (it overrides who may be
-        # dropped until cleared): say when it was set.
-        if self.droppable is not None:
-            set_on = droppable_module.saved_on(self.league.name)
+        # The upgrades' drop list carried into a new matchup week is easy to forget (it overrides
+        # who may be dropped until cleared): say when it was set. The Week tab's lists are by day
+        # and lapse with them.
+        if self.upgrade_drops is not None:
+            set_on = choices_module.saved_on(self.choices)
             set_week = self.calendar.week_from(pd.Timestamp(set_on)) if set_on else None
             if week is not None and set_week is not None and set_week < week:
-                problems.append(f"the OK-to-drop list ({len(self.droppable)} player(s)) was set on "
-                                f"{set_on:%a %b %d} in week {set_week} and is still active -- the "
-                                "plan drops only them; clear or change it on the Roster tab")
+                problems.append(f"the upgrades' OK-to-drop list ({len(self.upgrade_drops)} player(s)) "
+                                f"was set on {set_on:%a %b %d} in week {set_week} and is still active "
+                                "-- upgrades drop only them; clear or change it on the Upgrade tab")
         hidden = (list(snapshot.teams[snapshot.me].get("unmatched", []))
                   + [p for p in snapshot.teams[snapshot.me]["roster"] if p not in self.eligibility])
         if hidden:
@@ -538,7 +558,7 @@ class LiveRunner:
                             "no player id or no eligibility) -- their spots count as full, but the "
                             "plan never moves or starts them; check the platform id map")
         try:
-            state.assert_ir_resolved(snapshot.me, injured)
+            state.assert_ir_resolved(snapshot.me, injured | ir_ok)
         except state_module.IllegalMove as error:
             problems.append(str(error))
         v = view()
@@ -1008,6 +1028,7 @@ class LiveRunner:
                              "drop_games": m["outgoing_games"] if d is not None else None,
                              "gain": round(m["gain"], 1), "bar": round(m["bar"], 1),
                              "edge": round(m["gain"] - m["bar"], 1),
+                             "pinned": m.get("pinned", False),       # the user's pick (choices.py)
                              "team": teams.get(m["team"]) if m.get("team") is not None else None,
                              # The pick's own positions: a slot takes any skater (or a goalie).
                              "pos": "/".join(sorted(self.eligibility.get(p, ()))) or m.get("group"),
@@ -1021,10 +1042,35 @@ class LiveRunner:
                                        "delta": round(n["delta"], 1)} for n in m.get("near", [])]})
             return rows
         week_plan = week_rows(manager.plan.week_plan)
+        # The Week tab's calendar (weekplan.WeekPlanner.nights_view): each night, who starts in
+        # which slot on the roster the plan holds, who it holds, its open slots and moves. A
+        # rental is anyone not on the roster this morning.
+        mine = set(before["roster"])
+        person = lambda q: {"player_id": int(q), "player": name(q)}
+
+        def night_rows(nights):
+            return [{"day": n["night"].date().isoformat(), "points": round(n["points"], 1),
+                     "started": [{**person(q), "slot": slot, "pts": round(value, 2),
+                                  "new": q not in mine} for slot, q, value in n["started"]],
+                     "open": n["open"], "held": [person(q) for q in n["held"]],
+                     "moves": [{"add": person(m["incoming"]),
+                                "drop": person(m["outgoing"]) if m["outgoing"] is not None else None,
+                                "kind": MOVE_KINDS["rental claim" if m["kind"] == "claim" else "rental"],
+                                "pinned": m.get("pinned", False)} for m in n["moves"]]}
+                    for n in nights]
+
+        def fit_rows(fits):
+            return {night.date().isoformat(): [{**person(q), "positions": "/".join(sorted(self.eligibility.get(q, ()))),
+                                                "gain": round(gain, 1), "games": games,
+                                                "rate": priced(q)} for q, gain, games in found]
+                    for night, found in fits.items()}
+
         # The plan made (A) and the alternatives (B, C, ...), each opening on a different team.
         def team_plan(i, w):
             slot_list = week_rows(w["moves"])
             return {
+                "nights": night_rows(w.get("nights", [])),
+                **({"fits": fit_rows(w["fits"])} if "fits" in w else {}),
                 "label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
                 "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
                 "expected": None if w.get("expected") is None else round(w["expected"], 1),
@@ -1036,6 +1082,15 @@ class LiveRunner:
                              for m in slot_list],
                 "moves": slot_list}
         week_plans = [team_plan(i, w) for i, w in enumerate(manager.plan.week_plans)]
+        # Today's rentals the upgrades left no room for (the week is planned without them).
+        for r, why in manager.plan.week_conflicts:
+            problems.append(f"today's rental {name(r['incoming'])}"
+                            + (f" for {name(r['outgoing'])}" if r["outgoing"] is not None else "")
+                            + f" clashes with today's upgrades ({why}) -- not made; the week plan "
+                            "is planned as if no upgrade is made, so choose between them")
+        # The user's picks the plan could not put in (weekplan.WeekPlanner.seeded).
+        for day_, q, why in (manager.plan.week_plans[0].get("skipped", []) if manager.plan.week_plans else []):
+            problems.append(f"your pick {name(q)} on {pd.Timestamp(day_):%a %b %d} was left out: {why}")
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]
@@ -1095,9 +1150,8 @@ class LiveRunner:
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "options": choices, "week_plan": week_plan, "week_plans": week_plans,
             # On the week's last day, next week's plans too (_next_week_plans); else none.
-            # The players the user marked OK to drop, the plan's only drops but its own rentals
-            # (Live/droppable.py); None: the model chose.
-            "droppable": None if self.droppable is None else sorted(self.droppable),
+            # What the user chose (Live/choices.py) as the plan applied it -- player ids.
+            "choices": self.choices,
             # After the day's first puck, in a league that holds adds until tomorrow
             # (rules.add_effective): the day today's adds take effect; else None.
             "moves_from": (self.day + dt.timedelta(days=1)).isoformat() if self.adds_locked else None,

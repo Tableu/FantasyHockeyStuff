@@ -538,6 +538,75 @@ def check_team_plans(alternatives=3) -> str:
             f"the moves made, budgets and left-out teams all held")
 
 
+def check_week_choices() -> str:
+    """The Week tab's choices (Live/choices.py) as weekplan takes them, on the first day of a season
+    that plans later moves, planned without making anything: a pinned move -- the worst free agent
+    playing that night, which no bar would pass -- is in every plan, marked; a day's OK-to-drop
+    list is the only drop that day but the plan's own pickups and an open spot; every plan's
+    calendar nights (nights_view) are legal lineups on the roster held; plan A's fits start."""
+    from dataclasses import replace
+    weekplan, slots = sys.modules["weekplan"], sys.modules["slots"]
+    strategy = _strategy()
+    strategy = replace(strategy, streaming=replace(strategy.streaming, spots=2, mode="week"))
+    found = {}
+
+    def legal_nights(plan, slot_order, accepts, eligibility):
+        for n in plan["nights"]:
+            starters = [p for _, p, _ in n["started"]]
+            assert len(starters) == len(set(starters)), f"a player starts twice on {n['night']:%a}"
+            assert set(starters) <= set(n["held"]), f"a starter on {n['night']:%a} is not held"
+            assert len(n["started"]) + len(n["open"]) == len(slot_order), "slots lost on a night"
+            for slot, p, _ in n["started"]:
+                assert slots.fills(slot, eligibility.get(p, frozenset()), accepts), f"{p} cannot fill {slot}"
+
+    def checked(view, params, horizon, source, slot_order, accepts, fieldable, z=0.0, alternatives=0):
+        if alternatives and not found:
+            planner = weekplan.WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, z)
+            later = [m for m in planner.plan() if m["day"] > planner.today]
+            if later:
+                day = later[0]["day"]
+                pool = [q for q in planner.addable if day in planner.plays_on(q) and q in planner.pool_rate]
+                worst = min(pool, key=lambda q: (planner.pool_rate[q], q))
+                listed = sorted(planner.roster)[:2]
+                view.pinned, view.day_drops = [(day, worst, None)], {day: set(listed)}
+                try:
+                    planner = weekplan.WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, z)
+                    plan = planner.plan()
+                    plans = weekplan.TeamPlans(planner).plans(plan, 3)
+                finally:
+                    del view.pinned, view.day_drops
+                assert not planner.skipped, f"the pin was skipped: {planner.skipped}"
+                for w in plans:
+                    pins = [m for m in w["moves"] if m.get("pinned")]
+                    assert [(m["day"], m["incoming"]) for m in pins] == [(day, worst)], \
+                        f"plan {w['first']}: pins {[(m['day'], m['incoming']) for m in pins]}"
+                    picked = {m["incoming"]: m["effective"] for m in w["moves"]}
+                    for m in w["moves"]:
+                        if m["day"] == day and not m.get("pinned") and m["outgoing"] is not None:
+                            assert m["outgoing"] in listed or m["outgoing"] in picked, \
+                                f"a move on the listed day drops {m['outgoing']}, not {listed}"
+                    legal_nights(w, slot_order, accepts, view._state.eligibility)
+                fits = sum(len(v) for v in plans[0]["fits"].values())
+                found.update(day=day, plans=len(plans), fits=fits, gain=planner.pool_rate[worst])
+        return original(view, params, horizon, source, slot_order, accepts, fieldable, z=z,
+                        alternatives=alternatives)
+
+    season, _ = _small_season((2, 7), strategy=strategy, sims=0)
+    for m in season.field:
+        if m.rung == 7:
+            m.plan.week_alternatives = 3
+    rate = {int(k): 1.0 for k in season.player_pool()}
+    original = weekplan.run
+    weekplan.run = checked
+    try:
+        season.run({p: -i for i, p in enumerate(sorted(rate))}, rate)
+    finally:
+        weekplan.run = original
+    assert found, "no day planned a later move to pin against"
+    return (f"{found['day']:%Y-%m-%d}: a pin at {found['gain']:.2f} pts/g in all {found['plans']} plans, "
+            f"the day's drop list held, every night a legal lineup, {found['fits']} fits listed")
+
+
 def check_injury_returns() -> str:
     """Each injured player's expected return (ModelFeatures/build_injury_absence.py): every injured
     player with a team gets one, never before today, from his current spell's TYPE -- the table
@@ -1443,6 +1512,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("ros provenance", check_ros_provenance),
           ("hold", check_hold), ("ir", check_ir), ("streaming", check_streaming),
           ("team plans", check_team_plans),
+          ("week choices", check_week_choices),
           ("injury returns", check_injury_returns),
           ("frozen rosters", check_frozen_rosters),
           ("vor board", check_vor_board), ("consensus board", check_consensus_board),

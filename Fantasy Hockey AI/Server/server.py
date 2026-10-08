@@ -13,8 +13,10 @@ Every call but the job's takes ?league=<name> (default: the first league served,
 
     GET  /plan                 the league's newest plan for the plan's day -- today, or tomorrow once
                                every game today has started: {league, file, saved_at, plan}
-    POST /refresh {mode}       'full' or 'quick' -- re-plans EVERY league; returns the job. A tap
-                               while a refresh runs joins it
+    POST /refresh {mode}       'full' or 'quick' -- re-plans EVERY league; 'plan' -- re-plans the
+                               ?league= one on its last league read and your choices (about 2 s);
+                               returns the job. A tap while a refresh runs joins it (a 'plan' is
+                               queued behind it)
     GET  /jobs/{id}?after=n    the job's state and its progress lines after line n
     GET  /status               the leagues served, the day, the running job, when each step last ran
                                (the league's own read included), the league's newest plan
@@ -23,9 +25,10 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /games/{id}?after=n   one game: line score, team stats, box score with fantasy points, plays
                                after sortOrder n
     GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
-    GET  /droppable            the players you marked OK to drop: {league, player_ids} ([]: the
-                               model chooses its own drops)
-    PUT  /droppable {player_ids}   replaces that list ([] clears it); the next refresh plans on it
+    GET  /choices              what you chose in the plan window (Live/choices.py): {league,
+                               choices: {upgrade_drops, days: {date: {drops, moves}}}}
+    PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
+                               until a refresh (or a 'plan') -- the window says so
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
 read, plan and saved plan files in a child process that exits after -- so the server's memory does
@@ -56,7 +59,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import seasonlayer  # noqa: E402,F401 -- puts Season/ on sys.path; see seasonlayer.py
-import droppable  # noqa: E402
+import choices  # noqa: E402
 import games as live_games  # noqa: E402
 import leagues  # noqa: E402
 import paths  # noqa: E402
@@ -83,6 +86,7 @@ class Job:
         self.started, self.finished = dt.datetime.now(), None
         self.error = None
         self.plan_files = {}            # league -> the plan file this job saved for it
+        self.only = None                # a 'plan' job's leagues (their choices changed); None: all
 
     def echo(self, text):
         self.lines.append(f"{dt.datetime.now():%H:%M:%S}  {text}")
@@ -108,6 +112,7 @@ class Worker:
         self.numbers = itertools.count(1)
         self.lock = threading.Lock()
         self.windows_done = set()       # puck times the auto window re-planned since it started
+        self.pending = set()            # leagues whose choices changed during a running job
 
     def league(self, name=None):
         """A league served, by name (None: the first); a 404 for one it does not serve."""
@@ -131,12 +136,17 @@ class Worker:
     def now(self) -> dt.datetime:
         return dt.datetime.fromisoformat(self.args.now) if self.args.now else utc_now()
 
-    def start(self, mode: str, by: str = "tap") -> Job:
-        """A new refresh, or the running one if there is one."""
+    def start(self, mode: str, by: str = "tap", only=None) -> Job:
+        """A new refresh, or the running one if there is one. A 'plan' (`only`: the leagues whose
+        choices changed) asked for while one runs is queued: it starts when that one ends, with
+        the choices saved by then."""
         with self.lock:
             if self.current is not None:
+                if mode == "plan":
+                    self.pending.update(only or self.leagues)
                 return self.current
             job = Job(next(self.numbers), mode, by)
+            job.only = only
             self.jobs[job.id] = job
             for old in list(self.jobs)[:-JOBS_KEPT]:
                 del self.jobs[old]
@@ -151,7 +161,7 @@ class Worker:
                 a = self.args
                 self.planner = planpass.Planner(list(self.leagues.values()), day, a.league_file,
                                                 a.platform_season, a.skip_snapshots)
-            results = self.planner.run(job.mode, self.now(), job.echo)
+            results = self.planner.run(job.mode, self.now(), job.echo, only=job.only)
             failed = {name: r for name, r in results.items() if isinstance(r, BaseException)}
             job.plan_files = {name: r for name, r in results.items() if name not in failed}
             if failed:
@@ -165,6 +175,9 @@ class Worker:
             job.finished = dt.datetime.now()
             with self.lock:
                 self.current = None
+                queued, self.pending = sorted(self.pending), set()
+            if queued:
+                self.start("plan", "choices", only=queued)
 
     def planned_for(self, window) -> bool:
         """Whether this group of games already has its plans: re-planned by the auto window since
@@ -214,8 +227,8 @@ class Refresh(BaseModel):
     mode: str = "quick"
 
 
-class Droppable(BaseModel):
-    player_ids: list[int] = []
+class Choices(BaseModel):
+    choices: dict = {}
 
 
 def make_app(worker: Worker) -> FastAPI:
@@ -260,21 +273,22 @@ def make_app(worker: Worker) -> FastAPI:
                 "saved_at": iso(dt.datetime.fromtimestamp(path.stat().st_mtime)),
                 "plan": json.loads(path.read_text(encoding="utf-8"))}
 
-    @app.get("/droppable")
-    def get_droppable(league: str | None = None):
+    @app.get("/choices")
+    def get_choices(league: str | None = None):
         chosen = worker.league(league)
-        return {"league": chosen.name, "player_ids": sorted(droppable.load(chosen.name) or [])}
+        return {"league": chosen.name, "choices": choices.load(chosen.name, worker.day())}
 
-    @app.put("/droppable")
-    def put_droppable(body: Droppable, league: str | None = None):
+    @app.put("/choices")
+    def put_choices(body: Choices, league: str | None = None):
         chosen = worker.league(league)
-        return {"league": chosen.name, "player_ids": droppable.save(chosen.name, body.player_ids)}
+        return {"league": chosen.name, "choices": choices.save(chosen.name, body.choices, worker.day())}
 
     @app.post("/refresh")
-    def refresh(body: Refresh):
-        if body.mode not in ("full", "quick"):
-            raise HTTPException(422, "mode must be 'full' or 'quick'")
-        return worker.start(body.mode).view()
+    def refresh(body: Refresh, league: str | None = None):
+        if body.mode not in ("full", "quick", "plan"):
+            raise HTTPException(422, "mode must be 'full', 'quick' or 'plan'")
+        only = [worker.league(league).name] if body.mode == "plan" else None
+        return worker.start(body.mode, only=only).view()
 
     @app.get("/jobs/{job_id}")
     def get_job(job_id: str, after: int = 0):

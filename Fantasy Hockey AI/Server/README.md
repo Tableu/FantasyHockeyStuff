@@ -19,15 +19,15 @@ the first league served; plan_gui.py sends its own `--league`.
 | Call | Does |
 | --- | --- |
 | GET /plan | The league's newest saved plan for the plan's day -- today, or tomorrow once every game today has started (today's until tomorrow's is saved): {league, file, saved_at, plan} (404 before the first) |
-| POST /refresh {"mode": "full" or "quick"} | Starts a refresh of every league and returns its job; a tap while one runs joins it |
+| POST /refresh {"mode": "full", "quick" or "plan"} | Starts a refresh of every league and returns its job; a tap while one runs joins it. "plan" re-plans only ?league= on its last league read and your choices (about 2 s), queued behind a running refresh |
 | GET /jobs/{id}?after=n | The job's state, each league's saved plan file, its progress lines after line n |
 | GET /status | The leagues served, the day, the running job, when each step last ran (with the league's own read), its newest plan |
 | GET /games | Today's games: score, clock, how many of your players and your opponent's are in each |
 | GET /goals | Every goal today, newest first, with the fantasy points it earned either side |
 | GET /games/{id}?after=n | One game: line score, team stats, box score with fantasy points, plays after sortOrder n |
 | GET /games/{id}/lines | Each team's lines, pairs and power-play / penalty-kill units as used |
-| GET /droppable | The players you marked OK to drop: {league, player_ids}; [] = the model chooses its own drops |
-| PUT /droppable {"player_ids": [...]} | Replaces that list ([] clears it); the next refresh plans on it (Live/droppable.py) |
+| GET /choices | What you chose in the plan window (Live/choices.py): {league, choices: {upgrade_drops, days: {date: {drops, moves}}}} |
+| PUT /choices {"choices": {...}} | Replaces them; returns {league, choices}. Nothing re-plans until a refresh, or POST /refresh {"mode": "plan"}?league= (that league on its last read, about 2 s) |
 
 The live games calls are games.py's: the NHL's public feeds held in memory (nothing goes to the
 database), one shared copy per feed for every league, fetched again only once the NHL's cache says it expired (about
