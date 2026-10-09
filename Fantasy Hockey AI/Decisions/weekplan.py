@@ -93,23 +93,22 @@ def run(view, params: streaming.StreamParams, horizon, source, slot_order, accep
         return [], []
     planner = WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, z)
     plan = planner.plan()
-    # The live plan window's week is the user's to build (`view.user_builds_week`, the user's
-    # call 2026-10-07): only the moves they pinned are made, today's included, and the model's
-    # plans -- built around those pins -- are recommendations. Plan A then carries `mine`: the
-    # calendar (nights_view) and the slot picker's list (fits_tonight) on the pins alone. Never
-    # set in a backtest.
-    mine = list(planner.seeded()[0]) if getattr(view, "user_builds_week", False) else None
     # Only the first plan is made. Making the best of 3 by week total instead measured nothing
     # (2024-25, strategy-espn-la, 32 drafts: +0.33 +/- 0.45 pts/wk; best of 5, 16: +0.27 +/- 0.73):
     # the plan is made again every day, so a better week on paper rarely survives to be played.
     # Both before today's moves change the state.
     if alternatives > 0:
         out = TeamPlans(planner).plans(plan, alternatives)
-        if mine is not None:
-            out[0]["mine"] = {"nights": planner.nights_view(mine), "fits": planner.fits_tonight(mine)}
+        # The live plan window (`view.week_workbench`, never a backtest): plan A carries what the
+        # window builds the Week tab's calendar from -- the user's own week, picked there and
+        # never planned on here (the user, 2026-10-08).
+        if getattr(view, "week_workbench", False):
+            recommended = {o["incoming"] for plan in out for m in plan["moves"]
+                           for o in [m, *m.get("options", [])]}
+            out[0]["workbench"] = planner.workbench(recommended)
     else:
         out = [planner.summary(plan, planner.first_pickup(plan))]
-    return planner.execute(plan if mine is None else mine), out
+    return planner.execute(plan), out
 
 
 class WeekPlanner:
@@ -142,16 +141,15 @@ class WeekPlanner:
         self.addable = [p for p in free if not view.on_waivers(p)]
         pool = self.addable + self.claimable
         self.spots = streaming.spots(view, params, horizon, source, pool, eligibility,
-                                     goalies=self.goalies, user=False)
-        # The user's choices in the live plan (Live/choices.py, the Week tab), never in a
-        # backtest: {day: who may be dropped that day} in place of the spots (`drops_on`), and
-        # pinned moves [(day, add, drop or None)] put in before any the plan picks (`seeded`).
-        self.day_drops = {d: set(ps) for d, ps in (getattr(view, "day_drops", None) or {}).items() if ps}
+                                     goalies=self.goalies)
+        # The user's picks in the live plan (Live/choices.py, the Week tab), never in a backtest:
+        # pinned moves [(day, add, drop or None: an open spot)] put in before any the plan picks
+        # (`seeded`).
         self.pinned = list(getattr(view, "pinned", None) or [])
         self.skipped = []                  # pins that could not be put in, and why (the window)
         if self.goalies:
-            # A starter is never rented away (unless the user marked him OK to drop that day:
-            # drops_on), even when a free agent projects as well: a goalie
+            # A starter is never rented away (unless the user picks his drop: `seeded`), even when
+            # a free agent projects as well: a goalie
             # projected to start `starter_share` of his team's remaining games (his rest-of-season
             # rate over the league-average line; Projections/goalie_workload.py) keeps his spot.
             lines = view.goalie_projections["expected_line"]
@@ -355,14 +353,10 @@ class WeekPlanner:
                 return False
         return True
 
-    def drops_on(self, day) -> set:
-        """Who a move made on `day` may drop: the user's list for that day (the Week tab), else
-        the spots. The plan's own earlier pickups and an open spot come on top (`trials`)."""
-        return self.day_drops.get(day, self.spots)
-
     def seeded(self) -> tuple:
         """The user's pinned moves put in first, in day order: (moves, spent, open spots). Each
-        takes its own drop, or the best one `drops_on` allows; no bar test -- the user chose it.
+        takes its own drop, or none -- an open roster spot; no bar test -- the user chose it.
+        The plan window places the user's own picks by these rules (Live/weekbook.py).
         A free agent on waivers is a claim made today, paying from when he clears, unless he
         clears by the pinned day, when he is an add then. A pin that cannot go in -- not a free
         agent, no drop that keeps the lineup fieldable, or over the budget -- is skipped and
@@ -386,11 +380,11 @@ class WeekPlanner:
                 clears = self.view.waiver_clears(incoming)
                 if day == self.today or clears > day:
                     kind, day, effective = "claim", self.today, max(clears, self.effective_on(self.today), effective)
-            drops = None if outgoing is None else {outgoing}
-            found = list(self.trials(moves, held, spent, open_spots, incoming, day, effective, drops,
-                                     force=True, kind=kind, own_drop=drops is not None))
+            found = list(self.trials(moves, held, spent, open_spots, incoming, day, effective,
+                                     {outgoing}, force=True, kind=kind, own_drop=outgoing is not None))
             if not found:
-                self.skipped.append((day, incoming, "no drop fits (or no moves left)"))
+                self.skipped.append((day, incoming, "no open roster spot (or no moves left)"
+                                     if outgoing is None else "no drop fits (or no moves left)"))
                 continue
             dropped, cost, trial = max(found, key=lambda f: f[2][-1]["gain"] - f[2][-1]["bar"])
             trial[-1]["pinned"] = True
@@ -569,7 +563,7 @@ class WeekPlanner:
     def trials(self, moves, held, spent, open_spots, incoming, day, effective, drops=None,
                force=False, kind=None, own_drop=False):
         """Every way to put `incoming` into the plan on `day` that clears its bar: (drop, cost,
-        the plan with the move in, last). The drops are who `drops_on(day)` allows, the plan's own
+        the plan with the move in, last). The drops are the spots, the plan's own
         earlier pickups and an open spot -- only those in `drops`, when given. `own_drop`: `drops`
         is a pinned move's own drop, anyone held then. `force`: no bar test (a pin, `seeded`)."""
         _, dropped, picked_up = held
@@ -578,7 +572,7 @@ class WeekPlanner:
         if own_drop:
             candidates = sorted(p for p in drops if p in before)
         else:
-            allowed = self.drops_on(day)
+            allowed = self.spots
             candidates = ([None] if open_spots > 0 else []) + sorted(
                 p for p in before
                 if p in allowed or (p in picked_up and picked_up[p] < effective))
@@ -721,29 +715,29 @@ class WeekPlanner:
                         "moves": [m for m in moves if m["day"] == night]})
         return out
 
-    def fits_tonight(self, moves, shown=150) -> dict:
-        """{night: [(free agent, his points that night, the night's lineup gain if added, his
-        games left this week)]}: every free agent who plays that night -- what the Week tab's slot
-        picker offers, filtered there to the slot clicked -- most points first, `shown` a night.
-        The gain is on the roster the plan holds that night, without a drop (0.0: he would not
-        start). A waiver claim counts from the night he clears. Changes nothing."""
-        ordered, out = self.ordered(moves), {}
-        pool = [q for q in self.addable + self.claimable if q in self.pool_rate]
+    def workbench(self, recommended=(), shown=150) -> dict:
+        """What the plan window builds the user's week from as they pick (Live/weekbook.py), with
+        no planning: the nights, the roster the week starts from, its open spots, the move budget
+        (`fits`'s: moves left, each day's reserve, the costs) and the players a pick can involve --
+        the roster, the `shown` best free agents each night by points, and the `recommended` ones
+        (the plans' picks and options) -- each with his value each night he plays (`night_value`'s)
+        and his team's nights this week. Changes nothing."""
+        config = self.state.config
+        pool = set(self.addable + self.claimable) & set(self.pool_rate)
+        free = {q for q in recommended if q in pool}
         for night in self.nights:
-            held = self.roster_at(self.roster, ordered, night, ordered=True)
-            values = self._values_on(night, held)
-            base = slots_module.assign_value(self.slot_order, values, self.eligibility, self.accepts)
-            playing = [(q, self.tonight[q] if night == self.today and q in self.tonight else self.pool_rate[q])
-                       for q in pool if q not in held and night in self.plays_on(q)
-                       and not (q in self.claimable and self.view.waiver_clears(q) > night)]
-            found = []
-            for q, points in sorted(playing, key=lambda f: (-f[1], f[0]))[:shown]:
-                with_him = slots_module.assign_value(self.slot_order, {**values, q: points},
-                                                     self.eligibility, self.accepts)
-                found.append((q, points, max(0.0, with_him - base),
-                              sum(1 for n in self.nights_of(q) if n >= night)))
-            out[night] = found
-        return out
+            playing = {q: self._values_on(night, [q]).get(q) for q in pool}
+            playing = sorted((q for q, v in playing.items() if v is not None), key=lambda q: (-playing[q], q))
+            free.update(playing[:shown])
+        players = {p: {"values": {n: self._values_on(n, [p])[p] for n in self.nights if n in self.plays_on(p)},
+                       "nights": [n for n in self.nights_of(p) if n <= self.week_end], "free": p in free,
+                       "clears": self.view.waiver_clears(p) if p in self.claimable else None}
+                   for p in set(self.roster) | free}
+        return {"nights": self.nights, "today": self.today, "moves_from": self.moves_from,
+                "roster": list(self.roster), "room": self.view.roster_room(),
+                "moves_left": self.moves_left, "reserve": {d: self.reserve_on(d) for d in self.move_days},
+                "costs": {kind: config.move_cost(kind) for kind in ("add", "claim", "drop")},
+                "free_today": bool(self.state.free_moves), "players": players}
 
     @staticmethod
     def first_pickup(moves):
@@ -1022,9 +1016,6 @@ class TeamPlans:
             banned.append(lead["team"])
         plans = ([self.summary(*o) for o in out]
                  + sorted((self.summary(*o) for o in others), key=lambda s: -s["expected"]))
-        # Plan A's day-by-day additions for the Week tab: who could start each night if added,
-        # and the user's pins that could not go in.
-        plans[0].update(fits=p.fits_tonight(a), skipped=list(p.skipped))
         return plans
 
     def near_ties(self, moves, i) -> list:

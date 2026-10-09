@@ -466,10 +466,10 @@ class LiveRunner:
 
         state = self._state(snapshot, day)
         # What the user chose in the plan window (Live/choices.py): who upgrades may drop (the
-        # Upgrade tab), and the Week tab's day by day OK-to-drop lists and pinned moves. None or
-        # empty: the model chooses.
+        # Upgrade tab; None or empty: the model chooses). The Week tab's picks are the window's
+        # alone -- never planned on here (the user, 2026-10-08).
         self.choices = choices_module.load(self.league.name, self.day)
-        self.upgrade_drops, self.day_drops, self.pinned = choices_module.for_planner(self.choices)
+        self.upgrade_drops = choices_module.upgrade_drops(self.choices)
         week = self.calendar.week_from(day)
         phase = "playoffs" if week and week > self.regular_weeks else "regular"
 
@@ -512,8 +512,7 @@ class LiveRunner:
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
             v.upgrade_drops = self.upgrade_drops      # adddrop
             v.ir_ok = ir_ok                           # view.healthy_on_ir
-            v.user_builds_week = True                 # weekplan.run: only your picks are made
-            v.day_drops, v.pinned = self.day_drops, self.pinned   # streaming.spots, weekplan
+            v.week_workbench = True                   # weekplan.run: the Week tab's calendar
             v.moves_from = moves_from                 # adddrop, streaming.run, weekplan
             return v
 
@@ -1061,23 +1060,34 @@ class LiveRunner:
                                 "pinned": m.get("pinned", False)} for m in n["moves"]]}
                     for n in nights]
 
-        def fit_rows(fits):
-            return {night.date().isoformat(): [{**person(q), "positions": "/".join(sorted(self.eligibility.get(q, ()))),
-                                                "pts": round(points, 2), "gain": round(gain, 1),
-                                                "games": games, "rate": priced(q),
-                                                "status": "GTD" if q in gtd else state_status.get(q)}
-                                               for q, points, gain, games in found]
-                    for night, found in fits.items()}
+        day_text = lambda d: None if d is None else pd.Timestamp(d).date().isoformat()
+        # When a claim clears: its day, or the moment when it clears during one (a claim counts
+        # from the first night at or after it -- the day after, then, as weekplan prices it).
+        clears_text = lambda d: (None if d is None else day_text(d) if pd.Timestamp(d) == pd.Timestamp(d).normalize()
+                                 else pd.Timestamp(d).isoformat())
+
+        def bench_rows(w):
+            """The Week tab's workbench (weekplan.WeekPlanner.workbench), dates as text and each
+            player with his name, positions, status and rate: the window builds the user's week
+            from it (Live/weekbook.py)."""
+            return {**{k: w[k] for k in ("room", "moves_left", "costs", "free_today")},
+                    "nights": [day_text(n) for n in w["nights"]], "today": day_text(w["today"]),
+                    "moves_from": day_text(w["moves_from"]), "roster": [int(q) for q in w["roster"]],
+                    "reserve": {day_text(d): r for d, r in w["reserve"].items()},
+                    "players": {str(int(q)): {**person(q), "positions": "/".join(sorted(self.eligibility.get(q, ()))),
+                                              "status": "GTD" if q in gtd else state_status.get(q),
+                                              "rate": priced(q), "free": f["free"], "clears": clears_text(f["clears"]),
+                                              "values": {day_text(n): round(v, 3) for n, v in f["values"].items()},
+                                              "nights": [day_text(n) for n in f["nights"]]}
+                                for q, f in w["players"].items()}}
 
         # The plan made (A) and the alternatives (B, C, ...), each opening on a different team.
         def team_plan(i, w):
             slot_list = week_rows(w["moves"])
             return {
                 "nights": night_rows(w.get("nights", [])),
-                **({"fits": fit_rows(w["fits"])} if "fits" in w else {}),
-                # Your week (weekplan.run's `mine`): the calendar on your picks alone.
-                **({"mine": {"nights": night_rows(w["mine"]["nights"]), "fits": fit_rows(w["mine"]["fits"])}}
-                   if "mine" in w else {}),
+                # What the window builds your week from (plan A only).
+                **({"workbench": bench_rows(w["workbench"])} if "workbench" in w else {}),
                 "label": "ABCDEFGHIJKLMNOP"[i], "first": name(w["first"]) if w["first"] is not None else None,
                 "week_gain": round(w["week_gain"], 1), "week_edge": round(w["week_edge"], 1),
                 "expected": None if w.get("expected") is None else round(w["expected"], 1),
@@ -1095,9 +1105,6 @@ class LiveRunner:
                             + (f" for {name(r['outgoing'])}" if r["outgoing"] is not None else "")
                             + f" clashes with today's upgrades ({why}) -- not made; the week plan "
                             "is planned as if no upgrade is made, so choose between them")
-        # The user's picks the plan could not put in (weekplan.WeekPlanner.seeded).
-        for day_, q, why in (manager.plan.week_plans[0].get("skipped", []) if manager.plan.week_plans else []):
-            problems.append(f"your pick {name(q)} on {pd.Timestamp(day_):%a %b %d} was left out: {why}")
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]

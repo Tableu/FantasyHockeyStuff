@@ -2,22 +2,21 @@
 server's /choices:
 
     {"upgrade_drops": [player id, ...],             the Upgrade tab: who an upgrade may drop
-     "days": {"2026-10-08": {"drops": [id, ...],    the Week tab, a day's OK-to-drop list: a rental
-                                                    made that day drops only one of these (or a
-                                                    rental the plan picked up itself, or nobody
-                                                    into an open spot)
-                             "moves": [{"add": id, "drop": id or null}]}},   the day's pinned moves:
-                                                    put in before any the plan picks, with that drop
-                                                    or (null) the best the day's list allows
+     "days": {"2026-10-08": {"moves": [{"add": id, "drop": id or null}]}},   the Week tab's picks
+                                                    that day, with that drop or (null) into an open
+                                                    spot: the window's own week (Live/weekbook.py),
+                                                    never planned on (the user, 2026-10-08)
      "updated_at": ...}
 
-An empty list, or no file: the model chooses (Decisions/adddrop.py, weekplan.py). A marked player
-may be anyone held -- goalies and starters included; a drop may leave a lineup slot empty, priced
-at the points it loses, as every move may under roster.fill_check = none (Decisions/strategy.py).
-A drop still pays its drop cost, and forced drops (an IR activation into a full roster) stay the
-model's. Days before the plan's day are ignored and dropped on the next save.
+An empty upgrade list, or no file: the model chooses (Decisions/adddrop.py). A marked player may be
+anyone held -- goalies and starters included; a drop may leave a lineup slot empty, priced at the
+points it loses, as every move may under roster.fill_check = none (Decisions/strategy.py). A drop
+still pays its drop cost, and forced drops (an IR activation into a full roster) stay the model's.
+Days before the plan's day are ignored and dropped on the next save.
 
 Until 2026-10-07 this was droppable.py: one list for upgrades and rentals alike (the Roster tab).
+Until 2026-10-08 each day also had an OK-to-drop list for the plan's own rentals; the user now
+picks each rental's drop with it (the window builds the week, Live/weekbook.py).
 """
 
 import datetime as dt
@@ -37,11 +36,10 @@ def _tidy(raw: dict, day: dt.date | None) -> dict:
     for day_text, chosen in sorted((raw.get("days") or {}).items()):
         if day is not None and dt.date.fromisoformat(day_text) < day:
             continue
-        drops = sorted({int(p) for p in chosen.get("drops", [])})
         moves = [{"add": int(m["add"]), "drop": None if m.get("drop") is None else int(m["drop"])}
                  for m in chosen.get("moves", [])]
-        if drops or moves:
-            out["days"][day_text] = {"drops": drops, "moves": moves}
+        if moves:
+            out["days"][day_text] = {"moves": moves}
     return out
 
 
@@ -69,14 +67,9 @@ def save(league: str, chosen: dict, day: dt.date | None = None) -> dict:
     return body
 
 
-def for_planner(chosen: dict) -> tuple:
-    """(upgrade drops or None, {day: set of drops}, [(day, add, drop or None)]) in the form the
-    view carries them (adddrop: `upgrade_drops`; weekplan: `day_drops`, `pinned`)."""
-    import pandas as pd
-    days = chosen.get("days", {})
-    day_drops = {pd.Timestamp(d): set(c["drops"]) for d, c in days.items() if c["drops"]}
-    pinned = [(pd.Timestamp(d), m["add"], m["drop"]) for d, c in days.items() for m in c["moves"]]
-    return set(chosen.get("upgrade_drops", [])) or None, day_drops, pinned
+def upgrade_drops(chosen: dict):
+    """Who upgrades may drop, as the view carries them (adddrop: `upgrade_drops`), or None."""
+    return set(chosen.get("upgrade_drops", [])) or None
 
 
 def saved_on(chosen: dict):

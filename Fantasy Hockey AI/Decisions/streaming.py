@@ -147,7 +147,7 @@ def is_goalie(eligibility, player_id) -> bool:
     return "G" in eligibility.get(player_id, frozenset())
 
 
-def spots(view, params, horizon, source, pool, eligibility, goalies=False, user=True) -> list:
+def spots(view, params, horizon, source, pool, eligibility, goalies=False) -> list:
     """Rostered skaters whose forward value is BELOW replacement -- the best free agent eligible
     at their positions, over the rest of the season -- cheapest first, at most k of them.
 
@@ -159,13 +159,6 @@ def spots(view, params, horizon, source, pool, eligibility, goalies=False, user=
     """
     if params.spots <= 0:
         return []
-    # The user's own list for today when the live plan has one (Live/choices.py, the Week tab's
-    # day lists): whoever on the roster is marked, goalies and players above replacement included.
-    # Never set in a backtest. `user=False`: the model's own spots (weekplan applies each day's
-    # list itself, WeekPlanner.drops_on).
-    chosen = (getattr(view, "day_drops", None) or {}).get(view.day) if user else None
-    if chosen:
-        return [p for p in view.roster if p in chosen]
     # Over the REST OF THE SEASON, not the upgrade rule's H weeks. Over three weeks two fewer team
     # games made Brock Nelson "below" Pavel Zacha at an equal rate (3.05 vs 3.02; 219.7 vs 217.5
     # rest of season), and Hanifin below Letang on seven straight days with a HIGHER rate. A short

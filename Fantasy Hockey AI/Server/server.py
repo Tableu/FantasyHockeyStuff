@@ -26,7 +26,7 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                after sortOrder n
     GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
     GET  /choices              what you chose in the plan window (Live/choices.py): {league,
-                               choices: {upgrade_drops, days: {date: {drops, moves}}}}
+                               choices: {upgrade_drops, days: {date: {moves}}}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
                                until a refresh (or a 'plan') -- the window says so
 
