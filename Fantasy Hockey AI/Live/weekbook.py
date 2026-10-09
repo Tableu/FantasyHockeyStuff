@@ -1,4 +1,4 @@
-"""Your week in the plan window, built from your picks as you make them: the Week tab's calendar,
+"""Your week in the plan window, built from your picks as you make them: the Weekly planner tab's calendar,
 slot picker and drop list (the user, 2026-10-08: the calendar is a tool for making your own plan,
 so it never waits for the plan server to plan again).
 
@@ -9,7 +9,7 @@ into it by the planner's rules for a pinned move (WeekPlanner.seeded) -- in day 
 its own drop or into an open spot, inside the week's move budget -- and solves each night's lineup
 on the roster that leaves (Decisions/slots.py, as the server does). A pick that cannot go in keeps
 its reason (`problem`) and changes nothing. Your picks are the window's alone: the server never
-plans on them -- the Moves tab and the model's plans are its own (the user, 2026-10-08).
+plans on them -- the AI Suggestions (today's moves, the plans) are its own (the user, 2026-10-08).
 
 Days are ISO text ("2026-10-08"); a claim clearing during a day carries its time
 ("2026-10-09T03:00:00"), which sorts after that day's night, so it counts from the next.
@@ -153,22 +153,26 @@ class Week:
         new = next(m for m in trial if m["add"] == add)
         return self.week_points(trial, new["effective"]) - self.week_points(moves, new["effective"])
 
-    def free_agents_on(self, moves, night, slot) -> list:
-        """The free agents who play `night` and fit `slot`, not picked up already: {"player_id",
-        "player", "positions", "status", "pts" (that night), "games" (his nights left this week
-        from then), "gain" (the week's lineup points he adds, before any drop)}, most points
-        first."""
-        accepts = self.accepts.get(slot, frozenset({slot}))
+    def free_agents_on(self, moves, night, without=None) -> list:
+        """The free agents who fit in `night`'s lineup -- added with nobody dropped (or with
+        `without`, a rental being replaced, gone), he would start that night, in whichever slot
+        the lineup solve puts him -- not picked up already: {"player_id", "player", "positions",
+        "status", "pts" (that night), "games" (his nights left this week from then), "gain" (the
+        week's lineup points he adds, before any drop)}, most points first."""
         picked = {m["add"] for m in self.made(moves)}
         start = self.effective_on(night)
         later = [n for n in self.nights if n >= start]
         held = {n: self.roster_at(moves, n) for n in later}
         base = {n: self.night_points(n, held[n]) for n in later}
+        tonight = self.roster_at(moves, night) - {without}
+        tonight_points = self.night_points(night, tonight)
         out = []
         for q, f in self.players.items():
-            if (not f["free"] or q in picked or q in held.get(night, ()) or night not in f["values"]
-                    or not accepts & self.eligibility[q] or (f["clears"] and f["clears"] > night)):
+            if (not f["free"] or q in picked or q in tonight or night not in f["values"]
+                    or (f["clears"] and f["clears"] > night)):
                 continue
+            if self.night_points(night, tonight | {q}) <= tonight_points + 1e-9:
+                continue                     # he would not start that night
             # No drop: the nights he plays from when he counts, on the roster held then.
             gain = sum(self.night_points(n, held[n] | {q}) - base[n] for n in later if n in f["values"])
             out.append({"player_id": q, "player": f["player"], "positions": f["positions"],

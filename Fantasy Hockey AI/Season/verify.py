@@ -539,12 +539,12 @@ def check_team_plans(alternatives=3) -> str:
 
 
 def check_week_choices() -> str:
-    """The Week tab's choices (Live/choices.py) as weekplan takes them, on the first day of a season
-    that plans later moves, planned without making anything: a pinned move -- the worst free agent
-    playing that night, which no bar would pass -- is in every plan, marked; a day's OK-to-drop
-    list is the only drop that day but the plan's own pickups and an open spot; every plan's
-    calendar nights (nights_view) are legal lineups on the roster held; plan A's slot-picker list
-    (fits_tonight) is there."""
+    """Pinned moves as weekplan takes them (WeekPlanner.seeded; the plan window's Weekly planner
+    places its picks by the same rules, Live/weekbook.py), on the first day of a season that plans
+    later moves, planned without making anything: a pinned move -- the worst free agent playing
+    that night, which no bar would pass, with its own drop -- is in every plan, marked; every
+    plan's calendar nights (nights_view) are legal lineups on the roster held; the Weekly
+    planner's workbench holds the roster and the pin."""
     from dataclasses import replace
     weekplan, slots = sys.modules["weekplan"], sys.modules["slots"]
     strategy = _strategy()
@@ -568,27 +568,26 @@ def check_week_choices() -> str:
                 day = later[0]["day"]
                 pool = [q for q in planner.addable if day in planner.plays_on(q) and q in planner.pool_rate]
                 worst = min(pool, key=lambda q: (planner.pool_rate[q], q))
-                listed = sorted(planner.roster)[:2]
-                view.pinned, view.day_drops = [(day, worst, None)], {day: set(listed)}
+                drop = sorted(planner.roster)[0]
+                view.pinned = [(day, worst, drop)]
                 try:
                     planner = weekplan.WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, z)
                     plan = planner.plan()
                     plans = weekplan.TeamPlans(planner).plans(plan, 3)
+                    bench = planner.workbench({worst})
                 finally:
-                    del view.pinned, view.day_drops
+                    del view.pinned
                 assert not planner.skipped, f"the pin was skipped: {planner.skipped}"
                 for w in plans:
                     pins = [m for m in w["moves"] if m.get("pinned")]
                     assert [(m["day"], m["incoming"]) for m in pins] == [(day, worst)], \
                         f"plan {w['first']}: pins {[(m['day'], m['incoming']) for m in pins]}"
-                    picked = {m["incoming"]: m["effective"] for m in w["moves"]}
-                    for m in w["moves"]:
-                        if m["day"] == day and not m.get("pinned") and m["outgoing"] is not None:
-                            assert m["outgoing"] in listed or m["outgoing"] in picked, \
-                                f"a move on the listed day drops {m['outgoing']}, not {listed}"
+                    assert pins[0]["outgoing"] == drop, f"the pin drops {pins[0]['outgoing']}, not {drop}"
                     legal_nights(w, slot_order, accepts, view._state.eligibility)
-                fits = sum(len(v) for v in plans[0]["fits"].values())
-                found.update(day=day, plans=len(plans), fits=fits, gain=planner.pool_rate[worst])
+                assert set(planner.roster) <= set(bench["players"]) and worst in bench["players"], \
+                    "the workbench misses the roster or the pin"
+                found.update(day=day, plans=len(plans), players=len(bench["players"]),
+                             gain=planner.pool_rate[worst])
         return original(view, params, horizon, source, slot_order, accepts, fieldable, z=z,
                         alternatives=alternatives)
 
@@ -605,7 +604,7 @@ def check_week_choices() -> str:
         weekplan.run = original
     assert found, "no day planned a later move to pin against"
     return (f"{found['day']:%Y-%m-%d}: a pin at {found['gain']:.2f} pts/g in all {found['plans']} plans, "
-            f"the day's drop list held, every night a legal lineup, {found['fits']} fits listed")
+            f"its drop held, every night a legal lineup, {found['players']} players on the workbench")
 
 
 def check_injury_returns() -> str:

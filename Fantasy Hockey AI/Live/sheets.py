@@ -102,7 +102,7 @@ class Table:
 
     def _wrap(self, text, width) -> list:
         """`text` broken at spaces into lines no wider than `width` pixels. A continuation line keeps
-        the first line's indent (the Week tab's ranked options); a word wider than the cell stays
+        the first line's indent (the week plans' ranked options); a word wider than the cell stays
         whole on its own line."""
         text = str(text)
         if not text or self.font.measure(text) <= width:

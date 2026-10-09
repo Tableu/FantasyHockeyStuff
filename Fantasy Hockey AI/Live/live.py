@@ -465,8 +465,8 @@ class LiveRunner:
         decision_points = self._draws(skaters, goalies)
 
         state = self._state(snapshot, day)
-        # What the user chose in the plan window (Live/choices.py): who upgrades may drop (the
-        # Upgrade tab; None or empty: the model chooses). The Week tab's picks are the window's
+        # What the user chose in the plan window (Live/choices.py): who upgrades may drop (AI
+        # Suggestions; None or empty: the model chooses). The Weekly planner tab's picks are the window's
         # alone -- never planned on here (the user, 2026-10-08).
         self.choices = choices_module.load(self.league.name, self.day)
         self.upgrade_drops = choices_module.upgrade_drops(self.choices)
@@ -512,7 +512,6 @@ class LiveRunner:
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
             v.upgrade_drops = self.upgrade_drops      # adddrop
             v.ir_ok = ir_ok                           # view.healthy_on_ir
-            v.week_workbench = True                   # weekplan.run: the Week tab's calendar
             v.moves_from = moves_from                 # adddrop, streaming.run, weekplan
             return v
 
@@ -522,11 +521,16 @@ class LiveRunner:
         state_now = copy.deepcopy(state)
         manager = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
         manager.plan.week_alternatives = WEEK_ALTERNATIVES
-        # The week plan apart from the upgrades (the user, 2026-10-07; orchestrator.DailyPlan
-        # week_view_on): planned on the roster and moves before today's upgrades.
-        manager.plan.week_view_on = lambda before_upgrades: view(state=before_upgrades)
+        # The week plans come after today's upgrades, as in a backtest (the user, 2026-10-08).
         manager.transactions(view())
-        next_week, next_plans = self._next_week_plans(manager, state, week, view, skaters, goalie_projections)
+        # The Weekly planner tab's calendar is the user's own week: its workbench is the league as it
+        # stands, before any of the model's moves (weekplan.workbench).
+        if manager.plan.week_plans:
+            now_view = view(state_now)
+            now_view.p_start_column = manager.p_start_column
+            manager.plan.week_plans[0]["workbench"] = self._workbench(manager, now_view, manager.plan.week_plans)
+        next_week, next_plans = self._next_week_plans(manager, state, state_now, week, view, skaters,
+                                                      goalie_projections)
         problems = (([ros_note] if ros_note else []) + self.freshness()
                     + sync_league_settings.recent(self.league.name, self.day))
         if self.rollover:
@@ -542,15 +546,14 @@ class LiveRunner:
                 f"has no moves left: make today's moves after {turns_over}; they "
                 f"count against this week's {cap}")
         # The upgrades' drop list carried into a new matchup week is easy to forget (it overrides
-        # who may be dropped until cleared): say when it was set. The Week tab's lists are by day
-        # and lapse with them.
+        # who may be dropped until cleared): say when it was set.
         if self.upgrade_drops is not None:
             set_on = choices_module.saved_on(self.choices)
             set_week = self.calendar.week_from(pd.Timestamp(set_on)) if set_on else None
             if week is not None and set_week is not None and set_week < week:
                 problems.append(f"the upgrades' OK-to-drop list ({len(self.upgrade_drops)} player(s)) "
                                 f"was set on {set_on:%a %b %d} in week {set_week} and is still active "
-                                "-- upgrades drop only them; clear or change it on the Upgrade tab")
+                                "-- upgrades drop only them; clear or change it above the upgrades in AI Suggestions")
         hidden = (list(snapshot.teams[snapshot.me].get("unmatched", []))
                   + [p for p in snapshot.teams[snapshot.me]["roster"] if p not in self.eligibility])
         if hidden:
@@ -574,39 +577,52 @@ class LiveRunner:
         return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
                               state_now, lineup_now, options, next_week, next_plans)
 
-    def _next_week_plans(self, manager, state, week, view, skaters, goalie_projections) -> tuple:
-        """On the matchup week's last day, next week's streaming plans as well (the Week tab's next
+    def _workbench(self, manager, v, plans):
+        """The Weekly planner tab's workbench on view `v` (weekplan.workbench), the `plans`' players in it."""
+        return weekplan_module.workbench(v, manager.plan.stream_params, manager.params.horizon_weeks,
+                                         manager.params.rate_source, manager.slot_order, manager.accepts,
+                                         manager._fieldable, plans)
+
+    def _next_week_plans(self, manager, state, state_now, week, view, skaters, goalie_projections) -> tuple:
+        """On the matchup week's last day, next week's streaming plans as well (the Weekly planner tab's next
         week): weekplan's team-slot plans from next week's first day, on the roster today's moves
         leave, with next week's move limit and no tonight -- every night priced on the players'
-        rates, as this week's later nights are. Shown only: it runs on a copy of the league, and
+        rates, as this week's later nights are. Plan A carries next week's calendar workbench, on
+        the roster as it stands now (`state_now`). Shown only: it runs on a copy of the league, and
         it is planned again from scratch once that week starts. Returns (next week, its plans), or
         (None, []) on any other day."""
         if (week is None or self.strategy.streaming.mode != "week" or week >= self.calendar.last_week
                 or pd.Timestamp(self.day) != self.calendar.weeks[week - 1].end):
             return None, []
         coming = self.calendar.weeks[week]
-        ahead = copy.deepcopy(state)
-        ahead.week, ahead.free_moves = coming.number, False
-        mine = ahead.teams[manager.team_index]
-        # Fleaflicker prorates its weekly limit by the week's days (_week_cap); a full week is
-        # the league's limit.
-        days = (coming.end - coming.start).days + 1
-        # After the first puck on ESPN a move takes effect tomorrow, so on the week's last day it
-        # counts toward next week -- and so does the platform's count (Espn.move_period), kept.
-        if not self.adds_locked:
-            mine.moves_used = 0
-        mine.week_cap = max(1, round(self.config.moves_per_week * days / 7))
-        v = view(ahead, day=coming.start, week=coming.number,
-                 projections=skaters.iloc[0:0], goalie_projections=goalie_projections.iloc[0:0],
-                 unavailable=set(), playing_tonight=set(), decision_points={}, closed_tonight=set(),
-                 opponent_index=None, my_week_points=0.0, opponent_week_points=0.0,
-                 phase="playoffs" if coming.number > self.regular_weeks else "regular")
-        v.p_start_column = manager.p_start_column
-        v.moves_from = None                           # next week: no lock yet
+
+        def next_view(base):
+            ahead = copy.deepcopy(base)
+            ahead.week, ahead.free_moves = coming.number, False
+            mine = ahead.teams[manager.team_index]
+            # Fleaflicker prorates its weekly limit by the week's days (_week_cap); a full week
+            # is the league's limit.
+            days = (coming.end - coming.start).days + 1
+            # After the first puck on ESPN a move takes effect tomorrow, so on the week's last day
+            # it counts toward next week -- and so does the platform's count (Espn.move_period), kept.
+            if not self.adds_locked:
+                mine.moves_used = 0
+            mine.week_cap = max(1, round(self.config.moves_per_week * days / 7))
+            v = view(ahead, day=coming.start, week=coming.number,
+                     projections=skaters.iloc[0:0], goalie_projections=goalie_projections.iloc[0:0],
+                     unavailable=set(), playing_tonight=set(), decision_points={}, closed_tonight=set(),
+                     opponent_index=None, my_week_points=0.0, opponent_week_points=0.0,
+                     phase="playoffs" if coming.number > self.regular_weeks else "regular")
+            v.p_start_column = manager.p_start_column
+            v.moves_from = None                       # next week: no lock yet
+            return v
+
         _, plans = weekplan_module.run(
-            v, manager.plan.stream_params, manager.params.horizon_weeks, manager.params.rate_source,
-            manager.slot_order, manager.accepts, manager._fieldable, z=0.0,
-            alternatives=WEEK_ALTERNATIVES)
+            next_view(state), manager.plan.stream_params, manager.params.horizon_weeks,
+            manager.params.rate_source, manager.slot_order, manager.accepts, manager._fieldable,
+            z=0.0, alternatives=WEEK_ALTERNATIVES)
+        if plans:
+            plans[0]["workbench"] = self._workbench(manager, next_view(state_now), plans)
         return coming.number, plans
 
     def expected_returns(self, injured, status, nhl_team) -> dict:
@@ -953,8 +969,9 @@ class LiveRunner:
             return row
 
         claims = [claim_row(p) for p, teams_ in state.pending_claims.items() if snapshot.me in teams_]
-        # The Upgrade tab: the add/drop rule's own moves first (upgrades and claims -- rentals are
-        # on the Week tab), then the pickups it priced on the roster as it stands, for comparison.
+        # AI Suggestions' upgrades: the add/drop rule's own moves first (upgrades and claims --
+        # rentals are in the week plans), then the pickups it priced on the roster as it stands,
+        # for comparison.
         choices = []
         upgrades = [q for q in manager.move_log if q["kind"] in ("add", "claim")]
         for q in upgrades:
@@ -1043,7 +1060,7 @@ class LiveRunner:
                                        "delta": round(n["delta"], 1)} for n in m.get("near", [])]})
             return rows
         week_plan = week_rows(manager.plan.week_plan)
-        # The Week tab's calendar (weekplan.WeekPlanner.nights_view): each night, who starts in
+        # The Weekly planner tab's calendar (weekplan.WeekPlanner.nights_view): each night, who starts in
         # which slot on the roster the plan holds, who it holds, its open slots and moves. A
         # rental is anyone not on the roster this morning.
         mine = set(before["roster"])
@@ -1067,7 +1084,7 @@ class LiveRunner:
                                  else pd.Timestamp(d).isoformat())
 
         def bench_rows(w):
-            """The Week tab's workbench (weekplan.WeekPlanner.workbench), dates as text and each
+            """The Weekly planner tab's workbench (weekplan.WeekPlanner.workbench), dates as text and each
             player with his name, positions, status and rate: the window builds the user's week
             from it (Live/weekbook.py)."""
             return {**{k: w[k] for k in ("room", "moves_left", "costs", "free_today")},
@@ -1099,12 +1116,6 @@ class LiveRunner:
                              for m in slot_list],
                 "moves": slot_list}
         week_plans = [team_plan(i, w) for i, w in enumerate(manager.plan.week_plans)]
-        # Today's rentals the upgrades left no room for (the week is planned without them).
-        for r, why in manager.plan.week_conflicts:
-            problems.append(f"today's rental {name(r['incoming'])}"
-                            + (f" for {name(r['outgoing'])}" if r["outgoing"] is not None else "")
-                            + f" clashes with today's upgrades ({why}) -- not made; the week plan "
-                            "is planned as if no upgrade is made, so choose between them")
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]

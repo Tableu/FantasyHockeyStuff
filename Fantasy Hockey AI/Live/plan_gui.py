@@ -27,51 +27,50 @@ on the platform yourself.
                  then his projected stat line
                  for tonight (per game, in the league's scored stats); then the bench and the IR
                  players, each with his report
-    Moves        IR moves, adds and drops, claims -- with the rate each was priced on
-    Upgrade      permanent pickups: the plan's upgrades and claims, highlighted, above the add/drop
-                 rule's own pricing of the top free agents on the roster you hold now, each with his
-                 best drop, the lineup points he gains over the pricing window, the bar a move must
-                 clear and the edge (gain - bar) they are ranked by (rentals: the Week tab). Above
-                 them, OK to drop for upgrades: tick players and upgrades drop only them -- goalies
-                 and starters included, even when that leaves a lineup slot empty (roster.fill_check
-                 = none); none ticked, the model chooses. The list stays open while you tick;
-                 clicking outside it saves and re-plans. Upgrades and the week plan are apart: the
-                 week is planned as if no upgrade is made, so nothing here changes the Week tab; a
-                 rental today that an upgrade leaves no room for (same drop, no moves left) is not
-                 made, and the problems say so. Forced drops (an IR activation into a full roster) stay the model's
-    Week         the week's streaming plans (strategy mode 'week', Decisions/weekplan.py), two views.
-                 The calendar is yours to build, apart from the plan: your picks never change the
-                 Moves tab or the model's plans (the user, 2026-10-08), which are recommendations:
-                 Calendar  your week day by day, each day a column: its lineup points and open slots,
-                           your picks that day, and the league's lineup slots with who starts in each
-                           that night -- a rental in every slot he fills while held (blue, open slots
-                           red). The window builds it from your picks itself (Live/weekbook.py, on the
-                           plan's workbench), so a pick shows at once -- no re-plan. Click an open slot
-                           (+) or a rental's (⇄) for the slot picker: the free agents who play that
-                           night and fit the slot -- the plans' picks and options that day first
-                           (blue, which plans beside them), then the most points that night -- with
-                           the week's lineup points each adds; and beside them who to drop for the
-                           one selected (the week gain with each; the plan's drop chosen for a plan's
-                           player; an open spot while the roster has room; a rental's slot drops that
-                           rental). A cross takes a pick out; a pick that cannot go in (no room, his
-                           drop not held then, over the move limit) says why in red. Clear forgets
-                           the week's picks
-                 Plans     every plan by NHL team (TeamPlans): each rental is a team slot -- day,
-                           team, position -- that any of the players on that team who fit it can
-                           fill. One row per plan: its schedule ("Tue NYR RW -> Thu CGY C ..."), what
-                           it adds this week, its expected edge (each slot's options discounted by
-                           the chance each is taken first) and its thinnest slot. Plan A is the
-                           model's best week -- its moves today are the Moves; B, C, ... each leave
-                           out every earlier plan's first team -- the fallbacks when a team is picked
+    AI Suggestions  the model's recommendations, three sections one above the other (drag
+                 between them to resize):
+                 Today's moves  IR moves, adds and drops, claims -- with the rate each was priced on
+                 Upgrades  permanent pickups: the plan's upgrades and claims, highlighted, above the
+                           add/drop rule's own pricing of the top free agents on the roster you hold
+                           now, each with his best drop, the lineup points he gains over the pricing
+                           window, the bar a move must clear and the edge (gain - bar) they are ranked
+                           by. Above them, OK to drop for upgrades: tick players and upgrades drop
+                           only them -- goalies and starters included, even when that leaves a lineup
+                           slot empty (roster.fill_check = none); none ticked, the model chooses. The
+                           list stays open while you tick; clicking outside it saves and re-plans.
+                           Forced drops (an IR activation into a full roster) stay the model's
+                 Week plans  the week's streaming plans (strategy mode 'week', Decisions/weekplan.py)
+                           by NHL team (TeamPlans): each rental is a team slot -- day, team,
+                           position -- that any of the players on that team who fit it can fill. One
+                           row per plan: its schedule ("Tue NYR RW -> Thu CGY C ..."), what it adds
+                           this week, its expected edge (each slot's options discounted by the chance
+                           each is taken first) and its thinnest slot -- planned after today's
+                           upgrades, on the roster and moves they leave. Plan A is the model's best
+                           week -- its moves today are among Today's moves; B, C, ... each leave out
+                           every earlier plan's first team -- the fallbacks when a team is picked
                            over. Click a plan for its slots, a slot for its options, ranked by edge,
                            and an option to pick him with the plan's drop (a rental the plan picks up
-                           earlier is picked with him) into your calendar; a picked one (blue) to
-                           take it back
-                 Picks are saved on the server (Live/choices.py) at once, for the window only. The
-                 plans' later days are planned again on every run. On the week's last day
-                 (Sunday) a switch shows next week instead: planned from its first day on the roster
-                 today's moves leave, with a fresh move limit -- a preview, planned again once it
-                 starts
+                           earlier is picked with him) into your Weekly planner tab; a picked one (blue) to
+                           take it back. The later days are planned again on every run
+    Weekly planner  your week, day by day -- yours to build, apart from the model: your picks never
+                 change its suggestions (the user, 2026-10-08). Each day a column: its lineup points
+                 and open slots, your picks that day, and the league's lineup slots with who starts
+                 in each that night -- a rental in every slot he fills while held (blue, open slots
+                 red). The window builds it from your picks itself (Live/weekbook.py, on the plan's
+                 workbench: your roster and moves as they stand, before the model's upgrades), so a
+                 pick shows at once -- no re-plan. Click an open slot (+) or a
+                 rental's (\u21c4) for the slot picker: the free agents who fit in that night's
+                 lineup (any slot), with a position filter -- the plans' picks and options that day first (blue, which plans beside
+                 them), then the most points that night -- with the week's lineup points each adds;
+                 and beside them who to drop for the one selected (the week gain with each; the
+                 plan's drop chosen for a plan's player; an open spot while the roster has room; a
+                 rental's slot drops that rental). A cross takes a pick out; a pick that cannot go in
+                 (no room, his drop not held then, over the move limit) says why in red. Clear
+                 forgets the week's picks. Picks are saved on the server (Live/choices.py) at once,
+                 for the window only
+                 On the week's last day (Sunday) a switch, on the Weekly planner tab and above the week plans,
+                 shows next week instead: planned from its first day on the roster today's moves
+                 leave, with a fresh move limit -- a preview, planned again once it starts
     Roster       every player you hold now: status, rate, rest-of-season points, Periph % (the share
                  of his projected points from hits, blocks, shots and PIM: high = steady, low = a
                  volatile scorer), games left this week and his stats (sortable); injured players
@@ -138,13 +137,16 @@ SHOT_TYPES = {"goal", "shot-on-goal", "missed-shot", "blocked-shot"}
 PLAN_COLOUR = "#e0ecff"         # a row the plan recommends acting on
 STATUS_COLOURS = {"OUT": "#fde2e2", "SUSP": "#fde2e2", "DTD": "#fff4d6", "GTD": "#fff4d6"}
 # A row's look by its tags: a recommended action, an injury status, greyed (a placeholder message).
-# The Week tab's calendar: a cell's width in characters, and its colour: held, your rental, open.
+# The Weekly planner tab's calendar: a cell's width in characters, and its colour: held, your rental, open.
 CALENDAR_CELL_CHARS = 22
 CALENDAR_COLOURS = {"held": "#f9fafb", "pinned": "#bfdbfe", "open": "#fde2e2"}
 ROW_STYLES = {"plan": {"bg": PLAN_COLOUR}, "empty": {"fg": "#9ca3af"},
               **{status: {"bg": colour} for status, colour in STATUS_COLOURS.items()},
               **{owner: {"bg": colour} for owner, colour in OWNER_COLOURS.items()}}
 
+
+# The slot picker's position filter, in this order (the positions its players have only).
+POSITION_ORDER = ("C", "LW", "RW", "D", "G")
 
 # Columns the Roster and Free agents tabs leave out of the shared player columns.
 ROSTER_HIDDEN = {"per_game", "plays_tonight", "plan", "where"}
@@ -273,8 +275,8 @@ class PlanWindow:
         # Sortable tables: name -> [column key, descending]. The roster keeps the plan's order until
         # a header is clicked; the free agents start best rate first.
         self.sorts = {"roster": [None, False], "free_agents": ["rate", True]}
-        # What you chose (Live/choices.py; the server keeps them): who upgrades may drop (the
-        # Upgrade tab) and the Week tab's day by day drop lists and picks.
+        # What you chose (Live/choices.py; the server keeps them): who upgrades may drop (AI
+        # Suggestions) and the Weekly planner tab's picks.
         self.choices = {"upgrade_drops": [], "days": {}}
         self.drop_popup = None             # an open OK-to-drop list: (window, close)
 
@@ -298,7 +300,7 @@ class PlanWindow:
         config = league_module.load(self.league.rules)
         self.slot_rows = [slot for slot, count in config.active_slots.items() for _ in range(count)]
         self.slot_order, self.accepts = config.slot_order(), config.accepts
-        self.book = None                   # your week shown on the Week tab (weekbook.Week), or None
+        self.book = None                   # your week shown on the Weekly planner tab (weekbook.Week), or None
         scored = set(scoring.skaters) | set(scoring.goalies)
         self.stat_keys = [k for k in draft_board.STAT_HEADINGS if k == "gp" or k in scored]
         stat_columns = [(k, draft_board.STAT_HEADINGS[k], 48) for k in self.stat_keys]
@@ -306,19 +308,24 @@ class PlanWindow:
                                                ("mean", "Exp. pts", 80), ("sd", "SD", 60),
                                                ("p", "P(plays/starts)", 110), ("puck", "Puck", 90),
                                                ("flag", "Flag", 70), ("lock", "", 40)] + stat_columns)
-        self.moves = self._table("Moves", [("kind", "Move", 110), ("add", "Add", 260), ("add_rate", "pts/g", 70),
-                                           ("drop", "Drop", 260), ("drop_rate", "pts/g", 70), ("note", "Note", 200)])
-        self.options = self._build_upgrade([("rank", "#", 36), ("kind", "Move", 90), ("add", "Add", 230),
-                                               ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
-                                               ("add_games", "Games", 60),
-                                               ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
-                                               ("drop_games", "Games", 60), ("gain", "Gain", 70),
-                                               ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 150)])
-        # Plans and slots opened on the Week tab, this week's and next week's apart: ("plan", label)
-        # and ("slot", label, index). Plan A starts open.
+        # The AI Suggestions tab: today's moves, the upgrades and the week's plans, one above the
+        # other (`_build_suggestions`).
+        moves_pane, upgrade_pane, plans_pane = self._build_suggestions()
+        self.moves = sheets.Table(moves_pane, [("kind", "Move", 110), ("add", "Add", 260), ("add_rate", "pts/g", 70),
+                                               ("drop", "Drop", 260), ("drop_rate", "pts/g", 70), ("note", "Note", 200)],
+                                  ROW_STYLES)
+        self.options = sheets.Table(upgrade_pane, [("rank", "#", 36), ("kind", "Move", 90), ("add", "Add", 230),
+                                                   ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
+                                                   ("add_games", "Games", 60),
+                                                   ("drop", "Drop", 230), ("drop_rate", "pts/g", 60),
+                                                   ("drop_games", "Games", 60), ("gain", "Gain", 70),
+                                                   ("bar", "Bar", 60), ("edge", "Edge", 60), ("note", "", 150)],
+                                    ROW_STYLES)
+        # Plans and slots opened in the week's plans, this week's and next week's apart:
+        # ("plan", label) and ("slot", label, index). Plan A starts open.
         self.week_open = {"this": {("plan", "A")}, "next": {("plan", "A")}}
-        self.week_rows = []                # Week tab row -> its plan's or slot's key (None: an option)
-        self.week = sheets.Table(self._build_week_bar(), [("plan", "Plan", 70), ("day", "Day", 110),
+        self.week_rows = []                # plans row -> its plan's, slot's or option's key, or None
+        self.week = sheets.Table(plans_pane, [("plan", "Plan", 70), ("day", "Day", 110),
                                          ("until", "Dropped", 70), ("team", "Team", 50),
                                          ("pos", "Pos", 60), ("kind", "Move", 90), ("add", "Add", 300),
                                          ("add_rate", "pts/g", 60), ("add_periph", "Periph", 60),
@@ -328,6 +335,7 @@ class PlanWindow:
                                          ("bar", "Bar", 60), ("edge", "Edge", 60),
                                          ("expected", "Exp.", 60), ("depth", "Options", 65)],
                                  ROW_STYLES, on_row_click=self._toggle_week_plan)
+        self._build_week()
         player_columns = [("player", "Player", 240), ("positions", "Pos", 80), ("status", "Status", 70),
                           ("rate", "Rate (pts/g)", 90), ("ros_points", "ROS pts", 70),
                           ("peripheral", "Periph %", 70),
@@ -373,14 +381,29 @@ class PlanWindow:
         on_sort = None if sort_as is None else (lambda key: self._sort(sort_as, key))
         return sheets.Table(frame, columns, ROW_STYLES, on_sort=on_sort, on_row_click=on_row_click)
 
-    def _build_upgrade(self, columns):
-        """The Upgrade tab: who upgrades may drop -- a dropdown of the roster and a Clear button --
-        above the pickups table. The list stays open while you tick; clicking outside it saves and
-        re-plans (`_drop_popup`)."""
+    def _build_suggestions(self):
+        """The AI Suggestions tab: the model's recommendations, three sections one above the other
+        (drag between them to resize) -- today's moves; the upgrades, under the upgrades' drop list
+        (a dropdown of the roster, a Clear button and Re-plan; the list stays open while you tick,
+        and clicking outside it saves and re-plans, `_drop_popup`); and the week's plans, under a
+        this week / next week switch. Returns the three sections' table frames."""
         frame = ttk.Frame(self.tabs)
-        self.tabs.add(frame, text="Upgrade")
-        bar = ttk.Frame(frame, padding=(0, 6, 0, 4))
-        bar.pack(fill="x")
+        self.tabs.add(frame, text="AI Suggestions")
+        split = ttk.PanedWindow(frame, orient="vertical")
+        split.pack(fill="both", expand=True)
+
+        def pane(title, weight):
+            box = ttk.Frame(split, padding=(0, 4, 0, 0))
+            split.add(box, weight=weight)
+            bar = ttk.Frame(box, padding=(0, 2, 0, 4))
+            bar.pack(fill="x")
+            ttk.Label(bar, text=title, font=("Segoe UI", 10, "bold")).pack(side="left", padx=(4, 10))
+            table = ttk.Frame(box)
+            table.pack(fill="both", expand=True)
+            return bar, table
+
+        bar, moves = pane("Today's moves", 1)
+        bar, upgrades = pane("Upgrades", 2)
         self.upgrade_menu_button = ttk.Button(bar, text="OK to drop for upgrades \u25be",
                                               command=self._open_upgrade_drops)
         self.upgrade_menu_button.pack(side="left", padx=6)
@@ -391,9 +414,28 @@ class PlanWindow:
         self.upgrade_clear.pack(side="left", padx=6)
         self.upgrade_replan = ttk.Button(bar, text="Re-plan", command=lambda: self.run("plan"))
         self.upgrade_replan.pack(side="left", padx=6)
-        table = ttk.Frame(frame)
-        table.pack(fill="both", expand=True)
-        return sheets.Table(table, columns, ROW_STYLES)
+        bar, plans = pane("Week plans", 3)
+        self.week_which = tk.StringVar(value="this")
+        self.week_switches = []            # (bar, [this week, next week]) -- here and on the Weekly planner tab
+        self._week_switch(bar)
+        ttk.Label(bar, text="Click a plan for its slots, a slot for its options, an option to pick him "
+                            "into your Weekly planner tab.", foreground="#6b7280").pack(side="right", padx=6)
+
+        def place_sashes(event):           # once laid out: the moves short, the plans the most room
+            height = split.winfo_height()
+            if height > 400:
+                split.sashpos(0, 150)
+                split.sashpos(1, 150 + (height - 150) * 2 // 5)
+                split.unbind("<Configure>")
+        split.bind("<Configure>", place_sashes)
+        return moves, upgrades, plans
+
+    def _week_switch(self, bar):
+        """A this week / next week switch in `bar` (shown only on the week's last day, when the
+        plan has next week's), on the shared `week_which`."""
+        buttons = [ttk.Radiobutton(bar, value=value, variable=self.week_which, command=self._fill_week)
+                   for value in ("this", "next")]
+        self.week_switches.append((bar, buttons))
 
     def _fill_upgrade_menu(self):
         """The upgrades' drop list's button and the line beside it."""
@@ -408,7 +450,7 @@ class PlanWindow:
 
     def _unplanned(self) -> bool:
         """Whether the upgrades' drop list saved differs from the one the plan shown was made on.
-        (The Week tab's picks need no plan: the window builds your week itself.)"""
+        (The Weekly planner tab's picks need no plan: the window builds your week itself.)"""
         made = (self.plan or {}).get("choices") or {}
         return (made.get("upgrade_drops") or []) != (self.choices.get("upgrade_drops") or [])
 
@@ -466,30 +508,21 @@ class PlanWindow:
         top.grab_set()                     # every click in the window comes here: outside closes
         self.drop_popup = (top, close)     # (a test can reach it)
 
-    def _build_week_bar(self):
-        """The Week tab: a Calendar / Plans switch, a this week / next week switch (shown only when
-        the plan has next week's plans: the week's last day) and a Clear button, above the
-        calendar or the plans table. Returns the plans table's frame."""
+    def _build_week(self):
+        """The Weekly planner tab: your calendar, under a this week / next week switch (`_week_switch`), the
+        picks' note and a Clear button."""
         frame = ttk.Frame(self.tabs)
-        self.tabs.add(frame, text="Week")
+        self.tabs.add(frame, text="Weekly planner")
         bar = ttk.Frame(frame, padding=(0, 6, 0, 4))
         bar.pack(fill="x")
-        self.week_view = tk.StringVar(value="calendar")
-        for value, text in (("calendar", "Calendar"), ("plans", "Plans")):
-            ttk.Radiobutton(bar, text=text, value=value, variable=self.week_view,
-                            command=self._fill_week).pack(side="left", padx=6)
-        ttk.Separator(bar, orient="vertical").pack(side="left", fill="y", padx=8)
-        self.week_which = tk.StringVar(value="this")
-        self.week_choices = []
-        for value in ("this", "next"):
-            button = ttk.Radiobutton(bar, value=value, variable=self.week_which, command=self._fill_week)
-            self.week_choices.append(button)
+        self._week_switch(bar)
         self.week_clear = ttk.Button(bar, text="Clear this week's picks", command=self._clear_week)
         self.week_clear.pack(side="right", padx=6)
         self.week_note = tk.StringVar()
         ttk.Label(bar, textvariable=self.week_note).pack(side="right", padx=6)
         # The calendar view: a grid of labels in a frame that scrolls.
         self.calendar_outer = ttk.Frame(frame)
+        self.calendar_outer.pack(fill="both", expand=True)
         canvas = tk.Canvas(self.calendar_outer, highlightthickness=0, background="white")
         scroll_y = ttk.Scrollbar(self.calendar_outer, orient="vertical", command=canvas.yview)
         scroll_x = ttk.Scrollbar(self.calendar_outer, orient="horizontal", command=canvas.xview)
@@ -501,8 +534,6 @@ class PlanWindow:
         canvas.create_window((0, 0), window=self.calendar, anchor="nw")
         self.calendar.bind("<Configure>", lambda event: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<MouseWheel>", lambda event: canvas.yview_scroll(-event.delta // 120, "units"))
-        self.week_table_frame = ttk.Frame(frame)
-        return self.week_table_frame
 
     def _build_matchup(self):
         frame = ttk.Frame(self.tabs, padding=8)
@@ -1162,7 +1193,7 @@ class PlanWindow:
         self.problem_var.set("\n".join(p["problems"]))
 
     def _fill_week(self):
-        """The Week tab, three levels deep. A plan's row: its schedule (one team slot per move), what
+        """The week plans (AI Suggestions), three levels deep. A plan's row: its schedule (one team slot per move), what
         it adds this week and its expected edge, the teams it leaves out. Under a plan clicked open,
         its slots: day, team, position, the best option and its drop. Under a slot clicked open, the
         players on that team who fit it, ranked by edge -- any of them buys the same nights; click
@@ -1171,19 +1202,17 @@ class PlanWindow:
         # Next week's plans exist on the week's last day only; any other day the switch is hidden
         # and this week shows.
         has_next = bool(p.get("next_week_plans"))
-        for button in self.week_choices:
-            button.pack_forget()
-        if has_next:
-            self.week_choices[0].configure(text=f"This week (week {p['week']})")
-            self.week_choices[1].configure(text=f"Next week (week {p['next_week']})")
-            for button in self.week_choices:
-                button.pack(side="left", padx=6, before=self.week_clear)
-        else:
+        for bar, buttons in self.week_switches:
+            for button in buttons:
+                button.pack_forget()
+            if has_next:
+                buttons[0].configure(text=f"This week (week {p['week']})")
+                buttons[1].configure(text=f"Next week (week {p['next_week']})")
+                for button in buttons:
+                    button.pack(side="left", padx=6)
+        if not has_next:
             self.week_which.set("this")
         which = self.week_which.get()
-        calendar = self.week_view.get() == "calendar"
-        (self.calendar_outer if calendar else self.week_table_frame).pack(fill="both", expand=True)
-        (self.week_table_frame if calendar else self.calendar_outer).pack_forget()
         self._build_book()
         self._fill_calendar()
         if which == "next":
@@ -1301,7 +1330,7 @@ class PlanWindow:
         return {q: (", ".join(labels), edge, drop) for q, (labels, edge, drop) in out.items()}
 
     def _fill_calendar(self):
-        """The Week tab's calendar: your week day by day, built here from your picks (weekbook) --
+        """The Weekly planner tab's calendar: your week day by day, built here from your picks (weekbook) --
         it starts empty, your roster. A column per day left this week: its lineup points and open
         slots, your picks that day (a cross takes one out; one that cannot go in says why, in red), then the league's lineup slots with who starts in each that night -- a rental in
         every slot he fills while held. Click an open slot or a rental's to pick who goes in it
@@ -1377,9 +1406,11 @@ class PlanWindow:
                                self._open_slot_picker(d, sl, who))
 
     def _open_slot_picker(self, day, slot, occupant):
-        """The slot picker: the free agents who play `day` and fit `slot` -- the plans' picks and
-        options that day first (best edge first, which plans in the Plans column), then the rest,
-        most points that night first -- each with the week's lineup points he adds. Beside them,
+        """The slot picker: the free agents who fit in `day`'s lineup -- he would start that night,
+        in any slot the lineup solve puts him (weekbook.free_agents_on; for a rental's slot, with
+        the rental gone) -- filtered by position with the buttons above them -- the plans' picks and options that day first (best edge first, which plans in the
+        Plans column), then the rest, most points that night first -- each with the week's lineup
+        points he adds. Beside them,
         who to drop for the one selected: anyone you hold then, the move's week gain with each, the
         plan's drop chosen for a plan's player, and an open spot while the roster has room. For a
         rental's slot (`occupant`), the drop is that rental. Add saves the pick."""
@@ -1387,14 +1418,14 @@ class PlanWindow:
         if book is None:
             return
         moves = self._my_moves()
-        found = book.free_agents_on(moves, day, slot)
+        found = book.free_agents_on(moves, day, occupant["player_id"] if occupant else None)
         recommended = self._recommended(day)
         found.sort(key=lambda f: (f["player_id"] not in recommended,
                                   -recommended[f["player_id"]][1] if f["player_id"] in recommended else -f["pts"],
                                   f["player"]))
         when = pd.Timestamp(day)
         top = tk.Toplevel(self.root)
-        top.title(f"Add on {when:%a %b} {when.day} -- {slot} slot")
+        top.title(f"Add on {when:%a %b} {when.day}")
         top.transient(self.root)
         top.geometry("1100x560")
         counts = book.effective_on(day)
@@ -1402,9 +1433,18 @@ class PlanWindow:
                   text=(f"{when:%a %b} {when.day}, {slot} slot"
                         + (f": replacing {occupant['player']} from this night" if occupant else ": open")
                         + (f" (adds count from {pd.Timestamp(counts):%a})" if counts != day else "")
-                        + ". Free agents who play that night and fit the slot: the plans' picks first"
+                        + ". Free agents who would start that night: the plans' picks first"
                           " (blue), then the most points that night. Week gain: the lineup points he"
                           " adds this week.")).pack(anchor="w")
+        # Position filter: All, or a position some of them play (a player shows under each of his).
+        positions = [q for q in POSITION_ORDER if any(q in f["positions"].split("/") for f in found)]
+        shown = tk.StringVar(value="All")
+        filters = ttk.Frame(top, padding=(8, 0, 8, 6))
+        filters.pack(fill="x")
+        ttk.Label(filters, text="Position:").pack(side="left", padx=(0, 6))
+        for value in ["All", *positions]:
+            ttk.Radiobutton(filters, text=value, value=value, variable=shown,
+                            command=lambda: fill_adds()).pack(side="left", padx=4)
         panes = ttk.PanedWindow(top, orient="horizontal")
         panes.pack(fill="both", expand=True, padx=8)
 
@@ -1427,13 +1467,26 @@ class PlanWindow:
         right, drops = tree_in((("player", "Drop", 210), ("gain", "Week gain", 80)))
         panes.add(left, weight=3)
         panes.add(right, weight=2)
-        for f in found:
-            plans = recommended.get(f["player_id"], ("",))[0]
-            adds.insert("", "end", iid=str(f["player_id"]), tags=("plan",) if plans else (),
-                        values=(plans, f["player"], f["positions"], f"{f['pts']:.2f}", f"{f['gain']:+.1f}",
-                                f["games"], f.get("status") if f.get("status") not in (None, "ACTIVE") else ""))
-        if not found:
-            ttk.Label(top, text="No free agent who fits this slot plays that night.", padding=8).pack()
+        empty = ttk.Label(top, padding=(8, 4))          # says when the filter leaves nobody
+
+        def fill_adds():
+            adds.delete(*adds.get_children())
+            drops.delete(*drops.get_children())
+            want = shown.get()
+            listed = [f for f in found if want == "All" or want in f["positions"].split("/")]
+            for f in listed:
+                plans = recommended.get(f["player_id"], ("",))[0]
+                adds.insert("", "end", iid=str(f["player_id"]), tags=("plan",) if plans else (),
+                            values=(plans, f["player"], f["positions"], f"{f['pts']:.2f}", f"{f['gain']:+.1f}",
+                                    f["games"], f.get("status") if f.get("status") not in (None, "ACTIVE") else ""))
+            empty.configure(text="" if listed else
+                            "No free agent who plays that night would start.")
+            if listed:
+                empty.pack_forget()
+            else:
+                empty.pack(before=panes, anchor="w")
+
+        fill_adds()
 
         def show_drops(event=None):
             drops.delete(*drops.get_children())
@@ -1591,7 +1644,7 @@ class PlanWindow:
         for r in players:
             place = ("IR" if r["on_ir"] else "lineup" if r["in_lineup"] else "bench") if where else \
                     ("on waivers" if r["on_waivers"] else "")
-            # Only injury colours: what the plan does with a player is on the Moves tab.
+            # Only injury colours: what the plan does with a player is in AI Suggestions.
             tags = (r["status"],) if r["status"] in STATUS_COLOURS else ()
             cells = {"player": r["player"], "positions": r["positions"], "status": r["status"] or "",
                      "rate": _num(r["rate"]), "ros_points": _num(r.get("ros_points"), 1),

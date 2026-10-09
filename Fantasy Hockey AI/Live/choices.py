@@ -1,8 +1,8 @@
 """What the user chose in the plan window, per league -- reports/<league>/choices.json, through the
 server's /choices:
 
-    {"upgrade_drops": [player id, ...],             the Upgrade tab: who an upgrade may drop
-     "days": {"2026-10-08": {"moves": [{"add": id, "drop": id or null}]}},   the Week tab's picks
+    {"upgrade_drops": [player id, ...],             AI Suggestions: who an upgrade may drop
+     "days": {"2026-10-08": {"moves": [{"add": id, "drop": id or null}]}},   the Weekly planner tab's picks
                                                     that day, with that drop or (null) into an open
                                                     spot: the window's own week (Live/weekbook.py),
                                                     never planned on (the user, 2026-10-08)

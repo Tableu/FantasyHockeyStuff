@@ -99,16 +99,21 @@ def run(view, params: streaming.StreamParams, horizon, source, slot_order, accep
     # Both before today's moves change the state.
     if alternatives > 0:
         out = TeamPlans(planner).plans(plan, alternatives)
-        # The live plan window (`view.week_workbench`, never a backtest): plan A carries what the
-        # window builds the Week tab's calendar from -- the user's own week, picked there and
-        # never planned on here (the user, 2026-10-08).
-        if getattr(view, "week_workbench", False):
-            recommended = {o["incoming"] for plan in out for m in plan["moves"]
-                           for o in [m, *m.get("options", [])]}
-            out[0]["workbench"] = planner.workbench(recommended)
     else:
         out = [planner.summary(plan, planner.first_pickup(plan))]
     return planner.execute(plan), out
+
+
+def workbench(view, params: streaming.StreamParams, horizon, source, slot_order, accepts, fieldable,
+              plans=()):
+    """The plan window's Weekly planner tab (WeekPlanner.workbench), on `view` -- the roster as it stands,
+    before any of the model's moves: the calendar is the user's own week, so it never assumes
+    the model's upgrades (the user, 2026-10-08). `plans` (run's): their picks and options are
+    always among the players. None when the week is not planned."""
+    if params.spots <= 0 or view.week is None:
+        return None
+    recommended = {o["incoming"] for plan in plans for m in plan["moves"] for o in [m, *m.get("options", [])]}
+    return WeekPlanner(view, params, horizon, source, slot_order, accepts, fieldable, 0.0).workbench(recommended)
 
 
 class WeekPlanner:
@@ -142,7 +147,7 @@ class WeekPlanner:
         pool = self.addable + self.claimable
         self.spots = streaming.spots(view, params, horizon, source, pool, eligibility,
                                      goalies=self.goalies)
-        # The user's picks in the live plan (Live/choices.py, the Week tab), never in a backtest:
+        # The user's picks in the live plan (Live/choices.py, the Weekly planner tab), never in a backtest:
         # pinned moves [(day, add, drop or None: an open spot)] put in before any the plan picks
         # (`seeded`).
         self.pinned = list(getattr(view, "pinned", None) or [])
