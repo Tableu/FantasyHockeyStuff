@@ -32,6 +32,10 @@ the first league served; plan_gui.py sends its own `--league`.
 | GET /jobs | The recent refreshes, newest first, without their lines |
 | GET /suggestions?week=this or next | The app's AI suggestions from the newest plan: today's moves, the upgrades, the week plans with your picks marked |
 | POST /choices/pick {"week", "label", "index", "player_id"} | A week plan's option picked into your week with the plan's drop (a chained rental's earlier pick with it), or taken back if picked; returns the suggestions as they now stand |
+| GET /week?week=this or next | The app's Weekly planner: your week from your picks on plan A's workbench -- each night's points, open slots, your picks (with why one is left out) and who starts in each slot |
+| GET /week/picker?day=&occupant= | The slot picker: the free agents who would start that night, the plans' picks first (occupant: the rental whose slot it is) |
+| GET /week/drops?day=&add=&occupant= | Who that pick may drop, each with the week's gain, and the one to select first (the plan's drop) |
+| POST /week/edit {"week", "action", "day", "add", "drop", "rental"} | pick, replace (a rental), unpick or clear; saved, returns the week as it now stands |
 | PUT /choices {"choices": {...}} | Replaces them; returns {league, choices}. Nothing re-plans until a refresh, or POST /refresh {"mode": "plan"}?league= (that league on its last read, about 2 s) |
 
 The live games calls are games.py's: the NHL's public feeds held in memory (nothing goes to the
@@ -62,7 +66,10 @@ league's scoring), with tonight's games and live points from `GET /tonight` (gam
 P2, the AI suggestions screen (`app/ai.js`): today's moves, the upgrades and the week plans from
 `GET /suggestions` (suggestions.py); an option tapped picks him into your week with the plan's drop
 (`POST /choices/pick`, Live/choices.py's pick_from_plan -- the window's click, moved there).
-Planner, Games and Matchup come in P3-P5. The app's files are served with `Cache-Control:
+P3, the Weekly planner (`app/planner.js`): your week from your picks on plan A's workbench (`GET
+/week`, week.py on Live/weekbook.py), the slot picker (`GET /week/picker`, `GET /week/drops`) and
+every change through `POST /week/edit` -- the window's picker logic, moved into weekbook.py and
+choices.py so both use it. Games and Matchup come in P4-P5. The app's files are served with `Cache-Control:
 no-cache`, so an edit shows on the next load.
 
 Testing it never uses port 8000 or a real league's name: run a test server on 8001 under a

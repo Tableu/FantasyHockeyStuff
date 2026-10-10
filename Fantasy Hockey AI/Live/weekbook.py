@@ -19,6 +19,25 @@ import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 from decisionlayer import slots as slots_module
 
 
+def recommended(plans, day) -> dict:
+    """{player id: (the plans that pick him on `day` -- "A", or "B alt" for a slot's other
+    option --, his best edge, the plan's drop)}: the slot picker lists these first. `plans`: the
+    week plans of the week shown. (Moved from plan_gui, 2026-10-10, for the app's server too.)"""
+    out = {}
+    for plan in plans:
+        for m in plan.get("moves", []):
+            if m["day"] != day:
+                continue
+            for o in m.get("options") or [{"player_id": m.get("add_id"), "edge": m["edge"]}]:
+                q = o.get("player_id")
+                if q is None:
+                    continue
+                tag = plan["label"] + ("" if q == m.get("add_id") else " alt")
+                labels, edge, drop = out.get(q, ([], o["edge"], m.get("drop_id")))
+                out[q] = (labels + [tag], max(edge, o["edge"]), drop)
+    return {q: (", ".join(labels), edge, drop) for q, (labels, edge, drop) in out.items()}
+
+
 class Week:
     def __init__(self, bench: dict, slot_order: list, accepts: dict):
         self.bench, self.slot_order, self.accepts = bench, slot_order, accepts
@@ -40,6 +59,12 @@ class Week:
         return max(day, moves_from) if day == self.today and moves_from else day
 
     # ---------- your picks, put in ----------
+
+    def picks(self, chosen: dict) -> list:
+        """Your picks (Live/choices.py) on this week's move days, put in (`place`)."""
+        days = set(self.move_days)
+        return self.place([(d, m["add"], m["drop"]) for d, c in chosen.get("days", {}).items()
+                           if d in days for m in c["moves"]])
 
     def place(self, picks) -> list:
         """Your picks [(day, add, drop or None)] put in by WeekPlanner.seeded's rules: [{"day" (the
@@ -180,6 +205,29 @@ class Week:
                         "games": sum(1 for n in f["nights"] if n >= start)})
         out.sort(key=lambda r: (-r["pts"], r["player"]))
         return out
+
+    def picker(self, moves, day, plans, without=None) -> list:
+        """The slot picker's list: `free_agents_on` (`without`: the rental whose slot it is),
+        the plans' picks and options that day first (best edge first), then the most points that
+        night -- each with "plans" (which, "" for none) and "plan_drop" (the plan's drop, or None)."""
+        found = self.free_agents_on(moves, day, without)
+        rec = recommended(plans, day)
+        found.sort(key=lambda f: (f["player_id"] not in rec,
+                                  -rec[f["player_id"]][1] if f["player_id"] in rec else -f["pts"],
+                                  f["player"]))
+        for f in found:
+            plans_, _, drop = rec.get(f["player_id"], ("", None, None))
+            f["plans"], f["plan_drop"] = plans_, drop
+        return found
+
+    def replace_gain(self, moves, day, add, rental):
+        """The week gain of `add` in place of your rental `rental` from `day`: picked the day the
+        rental was added, he takes the rental's move (and its drop); later, he drops the rental.
+        None when it would be left out."""
+        his = next((m for m in self.made(moves) if m["add"] == rental), None)
+        if his is not None and his["picked"] == day:
+            return self.gain([m for m in moves if m is not his], day, add, his["drop"])
+        return self.gain(moves, day, add, rental)
 
     def drops_for(self, moves, day, add) -> list:
         """Who a pick of `add` on `day` may drop: everyone held when it counts whose drop would be

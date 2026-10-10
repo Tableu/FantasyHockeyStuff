@@ -39,6 +39,13 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     POST /choices/pick {week, label, index, player_id}   a week plan's option picked into your week
                                with the plan's drop, or taken back (choices.pick_from_plan); returns
                                the suggestions as they now stand
+    GET  /week?week=           the app's Weekly planner: your week from your picks on plan A's
+                               workbench (week.py) -- each night's points, open slots, picks, slots
+    GET  /week/picker?day=&occupant=   the slot picker's free agents (plan picks first); occupant:
+                               the rental whose slot it is
+    GET  /week/drops?day=&add=&occupant=   who that pick may drop, each with the week's gain
+    POST /week/edit {week, action, day, add, drop, rental}   pick, replace, unpick or clear;
+                               saved (choices.py), returns the calendar as it now stands
     GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
@@ -77,6 +84,7 @@ import league as league_module  # noqa: E402
 import leagues  # noqa: E402
 import roster  # noqa: E402
 import suggestions  # noqa: E402
+import week as week_module  # noqa: E402
 import paths  # noqa: E402
 import planpass  # noqa: E402
 import simlayer  # noqa: E402
@@ -257,6 +265,15 @@ class Choices(BaseModel):
     choices: dict = {}
 
 
+class WeekEdit(BaseModel):
+    week: str = "this"
+    action: str                     # 'pick', 'replace', 'unpick' or 'clear' (week.edit)
+    day: str | None = None
+    add: int | None = None
+    drop: int | None = None         # a pick's drop; None: into an open spot
+    rental: int | None = None       # 'replace': the rental whose slot it is
+
+
 class Pick(BaseModel):
     week: str = "this"              # 'this' or 'next' (next week's plans, on the week's last day)
     label: str                      # the week plan, "A", "B", ...
@@ -269,9 +286,11 @@ def make_app(worker: Worker) -> FastAPI:
     store = live_games.FeedStore(LIVE / "reports" / "goals")
     threading.Thread(target=store.watch_loop, daemon=True).start()
     scoresets = {name: simlayer.load_scoreset(league.scoring) for name, league in worker.leagues.items()}
-    # Each league's lineup slots in its own order (C C LW LW ... G G), as the window's calendar.
-    slot_rows = {name: [slot for slot, count in league_module.load(league.rules).active_slots.items()
-                        for _ in range(count)] for name, league in worker.leagues.items()}
+    # Each league's lineup slots in its own order (C C LW LW ... G G), as the window's calendar,
+    # and the lineup solver's order and fits (weekbook.Week, as the window's).
+    configs = {name: league_module.load(league.rules) for name, league in worker.leagues.items()}
+    slot_rows = {name: [slot for slot, count in config.active_slots.items() for _ in range(count)]
+                 for name, config in configs.items()}
     views = {name: live_games.Games(lambda league=league: worker.newest_plan(league),
                                     scoresets[name], paths.players(), store)
              for name, league in worker.leagues.items()}
@@ -331,6 +350,42 @@ def make_app(worker: Worker) -> FastAPI:
     def put_choices(body: Choices, league: str | None = None):
         chosen = worker.league(league)
         return {"league": chosen.name, "choices": choices.save(chosen.name, body.choices, worker.day())}
+
+    def book(league, week):
+        chosen, path, plan = newest(league)
+        mine = choices.load(chosen.name, worker.day())
+        try:
+            return chosen, path, mine, week_module.Book(plan, mine, week, configs[chosen.name].slot_order(),
+                                                        configs[chosen.name].accepts)
+        except week_module.NoWeek as reason:
+            raise HTTPException(409, str(reason))
+
+    @app.get("/week")
+    def get_week(week: str = "this", league: str | None = None):
+        chosen, path, _, shown = book(league, week)
+        return {"league": chosen.name, "file": path.name, **shown.view(slot_rows[chosen.name])}
+
+    @app.get("/week/picker")
+    def get_picker(day: str, week: str = "this", occupant: int | None = None, league: str | None = None):
+        chosen, path, _, shown = book(league, week)
+        return {"league": chosen.name, **shown.picker(day, occupant)}
+
+    @app.get("/week/drops")
+    def get_drops(day: str, add: int, week: str = "this", occupant: int | None = None, league: str | None = None):
+        chosen, path, _, shown = book(league, week)
+        return {"league": chosen.name, **shown.drops(day, add, occupant)}
+
+    @app.post("/week/edit")
+    def edit_week(body: WeekEdit, league: str | None = None):
+        """Your week changed (week.edit): saved, and the calendar as it now stands."""
+        chosen, path, mine, shown = book(league, body.week)
+        try:
+            new = week_module.edit(mine, shown, body)
+        except ValueError as error:
+            raise HTTPException(422, str(error))
+        saved = choices.save(chosen.name, new, worker.day())
+        _, _, _, shown = book(league, body.week)
+        return {"league": chosen.name, "file": path.name, "choices": saved, **shown.view(slot_rows[chosen.name])}
 
     @app.get("/suggestions")
     def get_suggestions(week: str = "this", league: str | None = None):

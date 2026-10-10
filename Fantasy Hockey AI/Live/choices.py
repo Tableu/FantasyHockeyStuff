@@ -106,6 +106,23 @@ def unpin(chosen: dict, day: str, player_id: int):
     entry["moves"] = [m for m in entry["moves"] if m["add"] != player_id]
 
 
+def replace_rental(chosen: dict, day: str, rental: int, player_id: int):
+    """`player_id` in place of your rental `rental` from `day` on, in `chosen` (changed in place):
+    picked the same day the rental was added, the new player takes his move (and his drop);
+    later, he drops the rental."""
+    entry = day_choice(chosen, day)
+    his = next((m for m in entry["moves"] if m["add"] == rental), None)
+    if his is not None:
+        his["add"] = player_id
+    else:
+        entry["moves"].append({"add": player_id, "drop": rental})
+
+
+def clear_days(chosen: dict, days):
+    """Forget your picks on `days` (a week's move days), in `chosen` (changed in place)."""
+    chosen["days"] = {d: c for d, c in chosen.get("days", {}).items() if d not in set(days)}
+
+
 def plan_drop(plan: dict, index: int, chosen: dict):
     """Who slot `index` of week plan `plan` drops, for a pick in your week: its drop when you hold
     him then, else -- an earlier slot's rental -- whoever you picked in that slot, or (none picked)

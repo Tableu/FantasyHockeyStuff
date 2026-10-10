@@ -1306,29 +1306,8 @@ class PlanWindow:
         self.book = None if bench is None else weekbook.Week(bench, self.slot_order, self.accepts)
 
     def _my_moves(self) -> list:
-        """Your picks in the week shown, put in (weekbook.Week.place) -- [] without a workbench."""
-        if self.book is None:
-            return []
-        days = set(self.book.move_days)
-        return self.book.place([(d, m["add"], m["drop"]) for d, c in self.choices.get("days", {}).items()
-                                if d in days for m in c["moves"]])
-
-    def _recommended(self, day) -> dict:
-        """{player id: (the plans that pick him on `day` -- "A", or "B alt" for a slot's other
-        option --, his best edge, the plan's drop)}: the slot picker lists these first."""
-        out = {}
-        for plan in self._plans_shown():
-            for m in plan.get("moves", []):
-                if m["day"] != day:
-                    continue
-                for o in m.get("options") or [{"player_id": m.get("add_id"), "edge": m["edge"]}]:
-                    q = o.get("player_id")
-                    if q is None:
-                        continue
-                    tag = plan["label"] + ("" if q == m.get("add_id") else " alt")
-                    labels, edge, drop = out.get(q, ([], o["edge"], m.get("drop_id")))
-                    out[q] = (labels + [tag], max(edge, o["edge"]), drop)
-        return {q: (", ".join(labels), edge, drop) for q, (labels, edge, drop) in out.items()}
+        """Your picks in the week shown, put in (weekbook.Week.picks) -- [] without a workbench."""
+        return [] if self.book is None else self.book.picks(self.choices)
 
     def _fill_calendar(self):
         """The Weekly planner tab's calendar: your week day by day, built here from your picks (weekbook) --
@@ -1419,11 +1398,7 @@ class PlanWindow:
         if book is None:
             return
         moves = self._my_moves()
-        found = book.free_agents_on(moves, day, occupant["player_id"] if occupant else None)
-        recommended = self._recommended(day)
-        found.sort(key=lambda f: (f["player_id"] not in recommended,
-                                  -recommended[f["player_id"]][1] if f["player_id"] in recommended else -f["pts"],
-                                  f["player"]))
+        found = book.picker(moves, day, self._plans_shown(), occupant["player_id"] if occupant else None)
         when = pd.Timestamp(day)
         top = tk.Toplevel(self.root)
         top.title(f"Add on {when:%a %b} {when.day}")
@@ -1476,7 +1451,7 @@ class PlanWindow:
             want = shown.get()
             listed = [f for f in found if want == "All" or want in f["positions"].split("/")]
             for f in listed:
-                plans = recommended.get(f["player_id"], ("",))[0]
+                plans = f["plans"]
                 adds.insert("", "end", iid=str(f["player_id"]), tags=("plan",) if plans else (),
                             values=(plans, f["player"], f["positions"], f"{f['pts']:.2f}", f"{f['gain']:+.1f}",
                                     f["games"], f.get("status") if f.get("status") not in (None, "ACTIVE") else ""))
@@ -1496,11 +1471,7 @@ class PlanWindow:
                 return
             add = int(chosen[0])
             if occupant is not None:
-                his = next((m for m in book.made(moves) if m["add"] == occupant["player_id"]), None)
-                # Picked the day he was added, the new player takes his move; later, a move of its own.
-                gain = (book.gain([m for m in moves if m is not his], day, add, his["drop"])
-                        if his is not None and his["picked"] == day
-                        else book.gain(moves, day, add, occupant["player_id"]))
+                gain = book.replace_gain(moves, day, add, occupant["player_id"])
                 if gain is None:
                     drops.insert("", "end", iid="none", values=("(no drop fits: no moves left -- take a pick out)", ""))
                     return
@@ -1513,7 +1484,7 @@ class PlanWindow:
             for o in options:
                 drops.insert("", "end", iid="open" if o["player_id"] is None else str(o["player_id"]),
                              values=(o["player"], f"{o['gain']:+.1f}"))
-            plan_drop = recommended.get(add, (None, None, None))[2]
+            plan_drop = next(f["plan_drop"] for f in found if f["player_id"] == add)
             preferred = next((str(o["player_id"]) for o in options if o["player_id"] == plan_drop), None)
             if options:
                 drops.selection_set(preferred or ("open" if options[0]["player_id"] is None
@@ -1544,12 +1515,7 @@ class PlanWindow:
         """`player_id` in place of your rental `rental` from `day` on: picked the same day he was
         added, the new player takes his move (and his drop); later, he drops the rental."""
         new = copy.deepcopy(self.choices)
-        chosen = choices_module.day_choice(new, day)
-        his = next((m for m in chosen["moves"] if m["add"] == rental), None)
-        if his is not None:
-            his["add"] = player_id
-        else:
-            chosen["moves"].append({"add": player_id, "drop": rental})
+        choices_module.replace_rental(new, day, rental, player_id)
         self._save_choices(new)
 
     def _pin(self, day, player_id, drop=None):
@@ -1574,9 +1540,8 @@ class PlanWindow:
 
     def _clear_week(self):
         """Forget your picks in the week shown."""
-        days = set(self.book.move_days) if self.book is not None else set()
         new = copy.deepcopy(self.choices)
-        new["days"] = {d: c for d, c in new.get("days", {}).items() if d not in days}
+        choices_module.clear_days(new, self.book.move_days if self.book is not None else [])
         self._save_choices(new)
 
     def _save_choices(self, new, replan=False):

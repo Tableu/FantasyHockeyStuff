@@ -43,7 +43,7 @@ a { color: var(--you); }
 
 /* The phone frame: full screen on a phone, a centred column on a desktop. */
 .app {
-  max-width: 480px; margin: 0 auto; height: 100dvh;
+  max-width: 480px; margin: 0 auto; height: 100dvh; position: relative;
   display: flex; flex-direction: column; background: var(--ground); overflow: hidden;
   padding-top: env(safe-area-inset-top);
 }
@@ -198,3 +198,56 @@ button.plan .what { display: flex; flex-direction: column; gap: 2px; min-width: 
 button.plan .sched { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 button.plan .nums { display: flex; flex-direction: column; align-items: flex-end; font-family: var(--mono); font-size: 12px; }
 table.slots { background: var(--ground-2); }
+
+/* Weekly planner (planner.js), as the design's Weekly planner artboard */
+.week-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 8px; font-size: 12px; color: var(--text-2); }
+.btn.small { height: 32px; padding: 0 10px; font-size: 12px; flex: none; }
+table.cal { border-collapse: separate; border-spacing: 0; }
+table.cal th, table.cal td { border-bottom: 1px solid var(--rule); border-right: 1px solid #18223A; padding: 0; height: 32px; white-space: nowrap; text-align: left; font-size: 12px; }
+table.cal tr.sep th, table.cal tr.sep td { border-top: 1px solid var(--rule-strong); }
+table.cal .slot { position: sticky; left: 0; z-index: 1; background: var(--ground-2); color: var(--text-2); font-weight: 700; font-size: 10.5px; width: 44px; min-width: 44px; max-width: 44px; padding-left: 10px; border-right: 1px solid var(--rule); }
+table.cal thead th { background: var(--ground-3); height: 38px; padding: 0 6px; }
+table.cal thead th.slot { background: var(--ground-3); color: var(--text-3); padding-left: 10px; }
+table.cal .day { width: 116px; min-width: 116px; max-width: 116px; overflow: hidden; }
+table.cal thead .t { display: block; font-size: 11.5px; font-weight: 700; }
+table.cal thead .p { display: block; font-family: var(--mono); font-size: 9.5px; color: var(--text-3); font-weight: 400; }
+table.cal .picks-h { font-size: 9.5px; height: auto; vertical-align: top; padding-top: 6px; }
+table.cal td.picks { height: auto; vertical-align: top; padding: 2px 0; }
+.pick { display: flex; align-items: flex-start; gap: 2px; padding: 2px 0 2px 6px; font-size: 11px; color: #9FD0FF; white-space: normal; line-height: 1.25; }
+.pick > span { flex: 1; min-width: 0; }
+.pick.out { color: var(--bad); }
+.pick .why { font-size: 10.5px; }
+.pick button { flex: none; width: 28px; height: 28px; border: 0; background: none; color: var(--text-3); cursor: pointer; font-size: 12px; }
+.cellbtn { display: flex; flex-direction: column; justify-content: center; width: 100%; height: 31px; border: 0; padding: 0 6px; background: transparent; text-align: left; line-height: 1.15; color: var(--text); cursor: pointer; }
+.cellbtn.held { cursor: default; }
+.cellbtn .nm { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cellbtn .pt { font-family: var(--mono); font-size: 10px; color: var(--text-3); }
+table.cal td.open { background: #2A1418; }
+table.cal td.open .cellbtn { color: #FF9C9C; font-weight: 600; }
+table.cal td.open .pt { color: #B87A80; }
+table.cal td.rental { background: #1B3B66; }
+table.cal td.rental .cellbtn { color: #9FD0FF; font-weight: 600; }
+table.cal td.rental .pt { color: #9FD0FF; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 12px 8px; border-top: 1px solid var(--rule); font-size: 11px; color: var(--text-3); }
+
+/* The picker: a bottom sheet over the app */
+.scrim { position: absolute; inset: 0; z-index: 5; background: rgba(4, 7, 13, .6); }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; height: 82%; display: flex; flex-direction: column; background: var(--ground-2); border-top: 1px solid var(--rule-strong); border-radius: 12px 12px 0 0; box-shadow: 0 -10px 30px rgba(0, 0, 0, .5); padding-bottom: env(safe-area-inset-bottom); }
+.sheet-head { padding: 12px 12px 6px; display: flex; flex-direction: column; gap: 3px; }
+.sheet-head .title { font-size: 15px; font-weight: 700; }
+.sheet-head .sub { font-size: 11.5px; color: var(--text-3); line-height: 1.35; }
+.filters { display: flex; align-items: center; gap: 8px; padding: 2px 12px 8px; font-size: 11.5px; color: var(--text-3); }
+.filters .seg button { padding: 0 9px; }
+.adds { flex: 3; min-height: 0; overflow-y: auto; border-top: 1px solid var(--rule); }
+.adds table.list tr.sel td { background: #2A4F80; }
+.drops { flex: 2; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--rule-strong); }
+.drops-head { padding: 6px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.drops-head span { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.drop-list { flex: 1; min-height: 0; overflow-y: auto; }
+.drop-list button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 0 12px; border: 0; border-top: 1px solid var(--rule); background: transparent; color: var(--text); font-size: 13px; cursor: pointer; text-align: left; }
+.drop-list button[aria-checked="true"] { background: #13284A; }
+.drop-list .dot { flex: none; width: 14px; height: 14px; border-radius: 7px; border: 2px solid #4A5B7C; }
+.drop-list button[aria-checked="true"] .dot { border-color: #9FD0FF; background: #9FD0FF; }
+.drop-list .who { flex: 1; }
+.sheet-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--rule-strong); }
+.sheet-foot .btn { height: 40px; padding: 0 16px; }
