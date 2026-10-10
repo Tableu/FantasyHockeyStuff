@@ -1,0 +1,130 @@
+/* The design's look (Fantasy Hockey · phone app canvas): one dark theme, IBM Plex. */
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; font-display: swap; src: url(fonts/ibm-plex-mono-latin-400-normal.woff2) format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 500; font-display: swap; src: url(fonts/ibm-plex-mono-latin-500-normal.woff2) format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 600; font-display: swap; src: url(fonts/ibm-plex-mono-latin-600-normal.woff2) format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans Condensed'; font-weight: 400; font-display: swap; src: url(fonts/ibm-plex-sans-condensed-latin-400-normal.woff2) format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans Condensed'; font-weight: 500; font-display: swap; src: url(fonts/ibm-plex-sans-condensed-latin-500-normal.woff2) format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans Condensed'; font-weight: 600; font-display: swap; src: url(fonts/ibm-plex-sans-condensed-latin-600-normal.woff2) format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans Condensed'; font-weight: 700; font-display: swap; src: url(fonts/ibm-plex-sans-condensed-latin-700-normal.woff2) format('woff2'); }
+
+:root {
+  --outside: #06090F;
+  --ground: #0B111C;
+  --ground-2: #0F1624;
+  --ground-3: #131B2A;
+  --ground-sel: #131D2E;
+  --rule: #1F2A3D;
+  --rule-strong: #33425E;
+  --text: #E6EBF2;
+  --text-2: #AEB9CB;
+  --text-3: #8E9BB0;
+  --you: #6CC4FF;
+  --on-you: #06223A;
+  --opp: #F0924A;
+  --warn: #F2C14E;
+  --bad: #FF8A8A;
+  --good: #7DF0C4;
+  --live: #FF5A5F;
+  --sans: 'IBM Plex Sans Condensed', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--outside); }
+body { color: var(--text); font-family: var(--sans); font-size: 13.5px; -webkit-tap-highlight-color: transparent; }
+button { font-family: inherit; color: inherit; }
+a { color: var(--you); }
+.mono { font-family: var(--mono); }
+.dim { color: var(--text-3); }
+.warn { color: var(--warn); }
+.bad { color: var(--bad); }
+.good { color: var(--good); }
+
+/* The phone frame: full screen on a phone, a centred column on a desktop. */
+.app {
+  max-width: 480px; margin: 0 auto; height: 100dvh;
+  display: flex; flex-direction: column; background: var(--ground); overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+}
+.screen { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* Header */
+.top { display: flex; flex-direction: column; border-bottom: 1px solid var(--rule); flex: none; position: relative; }
+.top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 2px 12px; }
+.league-btn {
+  display: flex; align-items: center; gap: 6px; min-width: 0; height: 40px; padding: 0;
+  background: none; border: 0; font-size: 16px; font-weight: 700; cursor: pointer;
+}
+.league-btn .team { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.league-btn .day { font-weight: 400; font-size: 13px; color: var(--text-3); white-space: nowrap; }
+.refresh { display: flex; gap: 6px; flex: none; }
+.btn {
+  height: 36px; padding: 0 14px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--rule-strong); background: transparent;
+}
+.btn.primary { border: 0; background: var(--you); color: var(--on-you); font-weight: 700; }
+.btn:disabled { opacity: .55; cursor: default; }
+.fresh { padding: 0 12px 6px; font-family: var(--mono); font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.menu {
+  position: absolute; top: 46px; left: 8px; z-index: 5; min-width: 220px;
+  background: var(--ground-3); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+.menu button {
+  display: flex; flex-direction: column; align-items: flex-start; width: 100%; min-height: 44px; padding: 6px 10px;
+  background: none; border: 0; border-radius: 4px; text-align: left; cursor: pointer; font-size: 14px; font-weight: 600;
+}
+.menu button[aria-pressed="true"] { background: var(--ground-sel); color: var(--you); }
+.menu button span { font-size: 11.5px; font-weight: 400; color: var(--text-3); }
+
+/* A running refresh */
+.job { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--ground-2); border-bottom: 1px solid var(--rule); font-size: 12px; flex: none; }
+.job .line { flex: 1; min-width: 0; font-family: var(--mono); font-size: 11px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job .spin { width: 10px; height: 10px; border-radius: 5px; border: 2px solid var(--you); border-right-color: transparent; animation: spin .8s linear infinite; flex: none; }
+.job button { background: none; border: 0; color: var(--text-3); font-size: 12px; cursor: pointer; min-height: 32px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .job .spin { animation: none; } }
+
+/* Bottom nav */
+.tabs { display: flex; height: 44px; flex: none; border-top: 1px solid var(--rule); background: var(--ground-2); padding-bottom: env(safe-area-inset-bottom); box-sizing: content-box; }
+.tabs a {
+  flex: 1; display: flex; align-items: center; justify-content: center; text-decoration: none;
+  font-size: 13px; color: var(--text-3); border-left: 1px solid var(--rule);
+}
+.tabs a:first-child { border-left: 0; }
+.tabs a[aria-current="page"] { font-weight: 700; color: var(--text); background: var(--ground); border-top: 2px solid var(--you); margin-top: -1px; }
+
+/* Sections and simple tables (More tab) */
+.sec { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 12px 12px 6px; }
+.sec h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.sec .note { font-size: 11px; color: var(--text-3); }
+.empty { padding: 24px 16px; color: var(--text-3); font-size: 13px; line-height: 1.4; }
+.error { margin: 8px 12px; padding: 8px 10px; border: 1px solid #5A2228; background: #2A1216; color: var(--bad); border-radius: 4px; font-size: 12.5px; }
+
+table.kv, table.grid { border-collapse: collapse; width: 100%; }
+table.kv th, table.kv td, table.grid th, table.grid td { border-bottom: 1px solid var(--rule); padding: 0 12px; height: 32px; text-align: left; font-size: 12.5px; }
+table.kv th { font-weight: 500; color: var(--text-2); width: 40%; }
+table.kv td { font-family: var(--mono); }
+table.grid thead th { background: var(--ground-3); color: var(--text-3); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; height: 22px; }
+
+.choices { display: flex; flex-direction: column; border-top: 1px solid var(--rule); }
+.choice {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 6px 12px;
+  background: none; border: 0; border-bottom: 1px solid var(--rule); text-align: left; cursor: pointer; font-size: 14px;
+}
+.choice .sub { font-size: 11.5px; color: var(--text-3); }
+.choice[aria-pressed="true"] { background: var(--ground-sel); }
+.choice[aria-pressed="true"] .name { color: var(--you); font-weight: 700; }
+.choice .mark { font-size: 12px; color: var(--you); }
+
+.log-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; width: 100%; padding: 8px 12px; background: none; border: 0; border-bottom: 1px solid var(--rule); text-align: left; cursor: pointer; }
+.log-row .what { font-size: 13.5px; font-weight: 600; }
+.log-row .when { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); text-align: right; }
+.log-row .by { font-size: 11.5px; color: var(--text-3); grid-column: 1 / -1; }
+.log-row .err { font-size: 11.5px; color: var(--bad); grid-column: 1 / -1; white-space: normal; }
+.state-done { color: var(--good); }
+.state-failed { color: var(--bad); }
+.state-running { color: var(--you); }
+pre.lines { margin: 0; padding: 8px 12px; background: var(--ground-2); border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--text-2); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; }

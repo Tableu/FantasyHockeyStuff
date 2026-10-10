@@ -43,6 +43,26 @@ game has started) runs in the server unless --no-auto. From that last puck on, t
 tomorrow's: its moves, lineup and projections, since tonight has no lineup left to set. No login yet, so it listens on this PC only (in the container: --host 0.0.0.0, which
 compose publishes to 127.0.0.1 alone).
 
+## The phone app
+
+`app/` is the phone app (a PWA, plan `phone-app-pwa.md`), served by server.py at `/app/`: static
+files, no build step. Preact + htm are vendored in `app/vendor/` (htm 3.1.1's standalone build) and the IBM
+Plex fonts in `app/fonts/`, so nothing loads from a CDN. The app only shows what the API returns.
+
+Built so far (P0): the header (league, day, Quick / Full, how long ago each step ran, amber past
+2 h), a running refresh's progress lines, the bottom tabs, and the More tab (league switch,
+refresh log from `GET /jobs`, server status). Roster, Planner, AI, Games and Matchup come in P1-P5.
+
+Testing it never uses port 8000 or a real league's name: run a test server on 8001 under a
+temporary `Settings/leagues/<name>-test.json` (deleted after), e.g.
+
+    python server.py --league beagles-test --port 8001 --date 2026-09-29 \
+        --league-file ../Live/fixtures/beagles/fake_league.json --skip-snapshots --no-auto
+
+then open `http://127.0.0.1:8001/app/` in Chrome (DevTools device mode, 390x844). On an Android
+phone over USB: `chrome://inspect` -> Port forwarding 8001 -> localhost:8001, then open
+`http://localhost:8001/app/` on the phone; as `localhost` it can be installed without HTTPS.
+
 ## Running it
 
 Needs Docker Desktop (it installs WSL2).

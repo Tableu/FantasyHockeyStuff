@@ -18,8 +18,9 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                returns the job. A tap while a refresh runs joins it (a 'plan' is
                                queued behind it)
     GET  /jobs/{id}?after=n    the job's state and its progress lines after line n
-    GET  /status               the leagues served, the day, the running job, when each step last ran
-                               (the league's own read included), the league's newest plan
+    GET  /jobs                 the recent jobs, newest first, without their lines (the app's refresh log)
+    GET  /status               the leagues served (each with its team), the day, the running job, when
+                               each step last ran (the league's own read included), the league's newest plan
     GET  /games                today's games: score, clock, your players and your opponent's on each
     GET  /goals                every goal today, newest first, with the fantasy points it earned
     GET  /games/{id}?after=n   one game: line score, team stats, box score with fantasy points, plays
@@ -29,6 +30,7 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                choices: {upgrade_drops, days: {date: {moves}}}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
                                until a refresh (or a 'plan') -- the window says so
+    GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
 read, plan and saved plan files in a child process that exits after -- so the server's memory does
@@ -56,6 +58,7 @@ import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import seasonlayer  # noqa: E402,F401 -- puts Season/ on sys.path; see seasonlayer.py
@@ -66,6 +69,7 @@ import paths  # noqa: E402
 import planpass  # noqa: E402
 import simlayer  # noqa: E402
 
+APP = Path(__file__).resolve().parent / "app"     # the phone app's static files, served at /app/
 AUTO_CHECK_S = 60               # how often the auto window looks at the clock
 JOBS_KEPT = 20                  # finished jobs /jobs still answers for
 
@@ -297,6 +301,10 @@ def make_app(worker: Worker) -> FastAPI:
             raise HTTPException(404, f"no job {job_id}")
         return job.view(after)
 
+    @app.get("/jobs")
+    def get_jobs():
+        return [job.view(after=len(job.lines)) for job in reversed(list(worker.jobs.values()))]
+
     @app.get("/status")
     def status(league: str | None = None):
         chosen, planner, args = worker.league(league), worker.planner, worker.args
@@ -305,6 +313,7 @@ def make_app(worker: Worker) -> FastAPI:
         last = {**planner.last, **planner.league_last.get(chosen.name, {})} if today else {}
         return {
             "league": chosen.name, "leagues": list(worker.leagues), "day": worker.day().isoformat(),
+            "teams": {name: {"team": lg.team_name, "platform": lg.platform} for name, lg in worker.leagues.items()},
             "job": None if worker.current is None else worker.current.view(after=len(worker.current.lines)),
             "last": {step: iso(when) for step, when in last.items()},
             "plan_file": None if path is None else path.name,
@@ -313,6 +322,7 @@ def make_app(worker: Worker) -> FastAPI:
             "league_file": args.league_file,
         }
 
+    app.mount("/app", StaticFiles(directory=APP, html=True), name="app")
     return app
 
 
