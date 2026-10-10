@@ -49,4 +49,8 @@ export const api = {
   drops: (league, week, day, add, occupant) => call('GET', '/week/drops',
     { league, query: { week, day, add, ...(occupant ? { occupant } : {}) } }),
   weekEdit: (league, body) => call('POST', '/week/edit', { league, body }),
+  games: (league) => call('GET', '/games', { league }),
+  goals: (league) => call('GET', '/goals', { league }),
+  game: (league, id) => call('GET', `/games/${id}`, { league }),
+  lines: (league, id) => call('GET', `/games/${id}/lines`, { league }),
 };

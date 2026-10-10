@@ -1,18 +1,20 @@
 // The phone app's shell (plan P0): header with the league, the day, Quick / Full and how fresh each
 // step is; the running refresh's progress; the bottom tabs; the More tab. Roster is roster.js (P1),
-// AI is ai.js (P2), Planner is planner.js (P3); the other tabs' screens come in P4-P5. Everything shown comes from the plan server (api.js);
+// AI is ai.js (P2), Planner is planner.js (P3), Games and a game's screens are games.js (P4);
+// Matchup comes in P5. Everything shown comes from the plan server (api.js);
 // nothing is computed here.
-import { html, render, useState, useEffect, useRef, useCallback } from './vendor/htm-preact-3.1.1.mjs';
+import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundary } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 import { Roster } from './roster.js';
 import { Suggestions } from './ai.js';
 import { Planner } from './planner.js';
+import { Games, Game } from './games.js';
 
 const TABS = [
   ['roster', 'Roster'], ['planner', 'Planner'], ['ai', 'AI'],
   ['games', 'Games'], ['matchup', 'Matchup'], ['more', 'More'],
 ];
-const COMING = { games: 'P4', matchup: 'P5' };
+const COMING = { matchup: 'P5' };
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
 const STALE_MIN = 120;          // a step older than this shows amber
@@ -50,18 +52,21 @@ function clock(iso) {
   return iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—';
 }
 
-function useHashTab() {
+// The route: a tab (#/roster ...), or one game (#/game/<id>/<view>), which opens full screen.
+function useRoute() {
   const read = () => {
-    const tab = location.hash.replace(/^#\/?/, '');
-    return TABS.some(([id]) => id === tab) ? tab : 'roster';
+    const path = location.hash.replace(/^#\/?/, '');
+    const game = path.match(/^game\/(\d+)(?:\/(summary|box|plays|lines))?$/);
+    if (game) return { tab: 'games', game: Number(game[1]), view: game[2] || 'summary' };
+    return { tab: TABS.some(([id]) => id === path) ? path : 'roster' };
   };
-  const [tab, setTab] = useState(read);
+  const [route, setRoute] = useState(read);
   useEffect(() => {
-    const on = () => setTab(read());
+    const on = () => setRoute(read());
     addEventListener('hashchange', on);
     return () => removeEventListener('hashchange', on);
   }, []);
-  return tab;
+  return route;
 }
 
 function Freshness({ status, now }) {
@@ -121,6 +126,18 @@ function JobStrip({ job, onClose }) {
     <span class=${failed ? 'state-failed' : 'state-done'}>${failed ? 'Refresh failed' : 'Refresh done'}</span>
     <span class="line">${job.error || ''}</span>
     <button type="button" onClick=${onClose} aria-label="Close">Close</button></div>`;
+}
+
+// A screen that throws shows what went wrong and a way out, instead of leaving the app frozen
+// (Preact keeps the last good page and stops updating). Keyed by the route, so moving on resets it.
+function Guard({ children }) {
+  const [error, reset] = useErrorBoundary();
+  if (error) {
+    return html`<div class="error" role="alert">This screen hit an error: ${String(error.message || error)}.
+      <br /><button type="button" class="btn small" style="margin-top: 8px" onClick=${() => { reset(); location.reload(); }}>Reload</button>
+      ${' '}<a href="#/roster">Back to Roster</a></div>`;
+  }
+  return children;
 }
 
 function Tabs({ tab }) {
@@ -195,7 +212,8 @@ function More({ status, league, onLeague, version }) {
 }
 
 function App() {
-  const tab = useHashTab();
+  const route = useRoute();
+  const tab = route.tab;
   const [league, setLeague] = useState(() => store.get('fh.league'));
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
@@ -263,11 +281,23 @@ function App() {
   };
   const closeJob = () => { tracking.current = null; setJob(null); };
 
+  // One game: full screen, as the design's game screens -- no header, no tabs.
+  if (route.game && league) {
+    return html`<div class="app"><${Guard} key=${location.hash}><${Game} league=${league} gameId=${route.game} view=${route.view} /></${Guard}></div>`;
+  }
+  // Games: its own header (the day, live), as the design's Games screen.
+  if (tab === 'games' && league) {
+    return html`<div class="app">
+      <${JobStrip} job=${job} onClose=${closeJob} />
+      <${Guard} key="games"><${Games} league=${league} version=${version} /></${Guard}>
+      <${Tabs} tab=${tab} />
+    </div>`;
+  }
   return html`<div class="app">
     <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} />
     <${JobStrip} job=${job} onClose=${closeJob} />
     ${error && html`<div class="error" role="alert">${error}</div>`}
-    <main class="screen">
+    <main class="screen"><${Guard} key=${tab}>
       ${tab === 'more'
         ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} />`
         : tab === 'roster' && league
@@ -277,7 +307,7 @@ function App() {
             : tab === 'planner' && league
               ? html`<${Planner} league=${league} version=${version} />`
               : html`<${Coming} tab=${tab} />`}
-    </main>
+    </${Guard}></main>
     <${Tabs} tab=${tab} />
   </div>`;
 }

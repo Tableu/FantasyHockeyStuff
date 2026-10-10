@@ -499,7 +499,11 @@ class Games:
         names = {s["playerId"]: f"{s['firstName']['default'][:1]}. {s['lastName']['default']}"
                  for s in pbp.get("rosterSpots", [])}
         abbrev = {pbp["awayTeam"]["id"]: pbp["awayTeam"]["abbrev"], pbp["homeTeam"]["id"]: pbp["homeTeam"]["abbrev"]}
-        plays = [self._play(p, names, abbrev, owners) for p in pbp.get("plays", [])]
+        # Each goal's strength, for its power-play / shorthanded points (the play-by-play has none).
+        strengths = {((g.get("periodDescriptor") or {}).get("number"), g.get("timeInPeriod")): g.get("strength")
+                     for g in summary.get("goals", [])}
+        plays = [{**self._play(p, names, abbrev, owners), "fp": self._play_points(p, owners, strengths)}
+                 for p in pbp.get("plays", [])]
         return {
             "id": game_id, "state": box.get("gameState"),
             "period": (box.get("periodDescriptor") or {}).get("number"),
@@ -514,6 +518,36 @@ class Games:
             "last_sort": max((p["sort"] for p in plays), default=-1),
             "team": owners.names["me"], "opponent": owners.names["opp"],
         }
+
+    def _play_points(self, p, owners, strengths) -> dict:
+        """The fantasy points a play earned each owner -- {"me": 4.0} -- in the league's scoring: the
+        scorer's goal (and shot), the assists, a power-play or shorthanded point from the goal's
+        strength, a shot, hit, block or penalty minutes, and the goalie's save or goal against.
+        A goalie's win, loss and shutout come with the decision, in the box score, not here."""
+        d, kind = p.get("details") or {}, p.get("typeDescKey", "")
+        sk, gk = self.scoreset.skaters, self.scoreset.goalies
+        credit = []
+        if kind == "goal":
+            period = (p.get("periodDescriptor") or {}).get("number")
+            bonus = sk.get({"pp": "ppp", "sh": "shp"}.get(strengths.get((period, p.get("timeInPeriod"))), ""), 0)
+            credit += [(d.get("scoringPlayerId"), sk.get("goals", 0) + sk.get("shots", 0) + bonus),
+                       (d.get("assist1PlayerId"), sk.get("assists", 0) + bonus),
+                       (d.get("assist2PlayerId"), sk.get("assists", 0) + bonus),
+                       (d.get("goalieInNetId"), gk.get("goals_against", 0))]
+        elif kind == "shot-on-goal":
+            credit += [(d.get("shootingPlayerId"), sk.get("shots", 0)), (d.get("goalieInNetId"), gk.get("saves", 0))]
+        elif kind == "hit":
+            credit.append((d.get("hittingPlayerId"), sk.get("hits", 0)))
+        elif kind == "blocked-shot" and d.get("reason") != "teammate-blocked":   # a teammate's shot: no block
+            credit.append((d.get("blockingPlayerId"), sk.get("blocks", 0)))
+        elif kind == "penalty":
+            credit.append((d.get("committedByPlayerId"), sk.get("pim", 0) * (d.get("duration") or 0)))
+        out = defaultdict(float)
+        for player, points in credit:
+            owner = owners.of(player) if player else None
+            if owner and points:
+                out[owner] += points
+        return {owner: round(points, 2) for owner, points in out.items()}
 
     @staticmethod
     def _play(p, names, abbrev, owners) -> dict:
