@@ -118,6 +118,7 @@ from tkinter import ttk
 import pandas as pd
 
 import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import choices as choices_module
 import draft_board
 import league as league_module
 import leagues
@@ -1543,7 +1544,7 @@ class PlanWindow:
         """`player_id` in place of your rental `rental` from `day` on: picked the same day he was
         added, the new player takes his move (and his drop); later, he drops the rental."""
         new = copy.deepcopy(self.choices)
-        chosen = self._day_choice(new, day)
+        chosen = choices_module.day_choice(new, day)
         his = next((m for m in chosen["moves"] if m["add"] == rental), None)
         if his is not None:
             his["add"] = player_id
@@ -1551,57 +1552,25 @@ class PlanWindow:
             chosen["moves"].append({"add": player_id, "drop": rental})
         self._save_choices(new)
 
-    def _day_choice(self, choices, day) -> dict:
-        return choices.setdefault("days", {}).setdefault(day, {"moves": []})
-
-    def _pin(self, day, player_id, drop=None, choices=None):
+    def _pin(self, day, player_id, drop=None):
         """Pick a free agent on `day`, dropping `drop` -- None: into an open spot. Saved, and shown
-        at once. `choices`: add it to these (unsaved) instead."""
-        new = choices if choices is not None else copy.deepcopy(self.choices)
-        moves = self._day_choice(new, day)["moves"]
-        if all(m["add"] != player_id for m in moves):
-            moves.append({"add": player_id, "drop": drop})
-        if choices is None:
-            self._save_choices(new)
+        at once."""
+        new = copy.deepcopy(self.choices)
+        choices_module.pin(new, day, player_id, drop)
+        self._save_choices(new)
 
     def _unpin(self, day, player_id):
         new = copy.deepcopy(self.choices)
-        chosen = self._day_choice(new, day)
-        chosen["moves"] = [m for m in chosen["moves"] if m["add"] != player_id]
+        choices_module.unpin(new, day, player_id)
         self._save_choices(new)
 
     def _pick_from_plan(self, label, index, player_id):
         """A click on a plan's slot option: pick him on the slot's day with the plan's drop -- or,
-        picked already, take it back. A drop the plan only picks up earlier (a rental chain) is
-        that earlier slot's player you picked, or the plan's own pick there, picked with it."""
+        picked already, take it back (choices.pick_from_plan)."""
         plan = next((plan for plan in self._plans_shown() if plan["label"] == label), None)
         if plan is None:
             return
-        move = plan["moves"][index]
-        day = move["day"]
-        if any(m["add"] == player_id for m in self.choices.get("days", {}).get(day, {}).get("moves", [])):
-            self._unpin(day, player_id)
-            return
-        new = copy.deepcopy(self.choices)
-        self._pin(day, player_id, self._plan_drop(plan, index, new), choices=new)
-        self._save_choices(new)
-
-    def _plan_drop(self, plan, index, choices):
-        """Who slot `index` of `plan` drops, for a pick in your week: its drop when you hold him
-        then, else -- an earlier slot's rental -- whoever you picked in that slot, or (none picked)
-        that slot's pick, picked into `choices` with its own drop."""
-        drop = plan["moves"][index].get("drop_id")
-        earlier = next((i for i, m in enumerate(plan["moves"][:index]) if m.get("add_id") == drop), None)
-        if drop is None or earlier is None:
-            return drop
-        slot = plan["moves"][earlier]
-        options = {o.get("player_id") for o in slot.get("options") or []} | {drop}
-        mine = next((m["add"] for m in choices.get("days", {}).get(slot["day"], {}).get("moves", [])
-                     if m["add"] in options), None)
-        if mine is not None:
-            return mine
-        self._pin(slot["day"], drop, self._plan_drop(plan, earlier, choices), choices=choices)
-        return drop
+        self._save_choices(choices_module.pick_from_plan(self.choices, plan, index, player_id))
 
     def _clear_week(self):
         """Forget your picks in the week shown."""

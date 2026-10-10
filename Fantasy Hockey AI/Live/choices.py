@@ -19,6 +19,7 @@ Until 2026-10-08 each day also had an OK-to-drop list for the plan's own rentals
 picks each rental's drop with it (the window builds the week, Live/weekbook.py).
 """
 
+import copy
 import datetime as dt
 import json
 import os
@@ -76,3 +77,62 @@ def saved_on(chosen: dict):
     """The date the choices were last saved (a datetime.date), or None."""
     stamp = chosen.get("updated_at")
     return dt.datetime.fromisoformat(stamp).date() if stamp else None
+
+
+# ---------- your picks, edited (the plan window and the app's server) ----------
+# Moved from plan_gui.PlanWindow (2026-10-10) so the phone app's server edits picks the same way.
+
+def day_choice(chosen: dict, day: str) -> dict:
+    """`day`'s entry in `chosen`, made if it has none: {"moves": [...]}."""
+    return chosen.setdefault("days", {}).setdefault(day, {"moves": []})
+
+
+def picked(chosen: dict, day: str) -> set:
+    """The players picked on `day`."""
+    return {m["add"] for m in chosen.get("days", {}).get(day, {}).get("moves", [])}
+
+
+def pin(chosen: dict, day: str, player_id: int, drop=None):
+    """Pick a free agent on `day` in `chosen` (changed in place), dropping `drop` -- None: into an
+    open spot. Picked already: nothing changes."""
+    moves = day_choice(chosen, day)["moves"]
+    if all(m["add"] != player_id for m in moves):
+        moves.append({"add": player_id, "drop": drop})
+
+
+def unpin(chosen: dict, day: str, player_id: int):
+    """Take `player_id`'s pick on `day` out of `chosen` (changed in place)."""
+    entry = day_choice(chosen, day)
+    entry["moves"] = [m for m in entry["moves"] if m["add"] != player_id]
+
+
+def plan_drop(plan: dict, index: int, chosen: dict):
+    """Who slot `index` of week plan `plan` drops, for a pick in your week: its drop when you hold
+    him then, else -- an earlier slot's rental -- whoever you picked in that slot, or (none picked)
+    that slot's pick, picked into `chosen` with its own drop."""
+    drop = plan["moves"][index].get("drop_id")
+    earlier = next((i for i, m in enumerate(plan["moves"][:index]) if m.get("add_id") == drop), None)
+    if drop is None or earlier is None:
+        return drop
+    slot = plan["moves"][earlier]
+    options = {o.get("player_id") for o in slot.get("options") or []} | {drop}
+    mine = next((m["add"] for m in chosen.get("days", {}).get(slot["day"], {}).get("moves", [])
+                 if m["add"] in options), None)
+    if mine is not None:
+        return mine
+    pin(chosen, slot["day"], drop, plan_drop(plan, earlier, chosen))
+    return drop
+
+
+def pick_from_plan(chosen: dict, plan: dict, index: int, player_id: int) -> dict:
+    """A week plan's slot option chosen: `chosen` with him picked on the slot's day with the plan's
+    drop -- or, picked already, taken back. A drop the plan only picks up earlier (a rental chain)
+    is that earlier slot's player you picked, or the plan's own pick there, picked with it.
+    Returns a changed copy."""
+    new = copy.deepcopy(chosen)
+    day = plan["moves"][index]["day"]
+    if player_id in picked(new, day):
+        unpin(new, day, player_id)
+    else:
+        pin(new, day, player_id, plan_drop(plan, index, new))
+    return new

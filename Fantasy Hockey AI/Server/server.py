@@ -34,6 +34,11 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                choices: {upgrade_drops, days: {date: {moves}}}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
                                until a refresh (or a 'plan') -- the window says so
+    GET  /suggestions?week=    the app's AI suggestions from the newest plan: today's moves, the
+                               upgrades, the week plans ('this' or 'next') with your picks marked
+    POST /choices/pick {week, label, index, player_id}   a week plan's option picked into your week
+                               with the plan's drop, or taken back (choices.pick_from_plan); returns
+                               the suggestions as they now stand
     GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
@@ -71,6 +76,7 @@ import games as live_games  # noqa: E402
 import league as league_module  # noqa: E402
 import leagues  # noqa: E402
 import roster  # noqa: E402
+import suggestions  # noqa: E402
 import paths  # noqa: E402
 import planpass  # noqa: E402
 import simlayer  # noqa: E402
@@ -251,6 +257,13 @@ class Choices(BaseModel):
     choices: dict = {}
 
 
+class Pick(BaseModel):
+    week: str = "this"              # 'this' or 'next' (next week's plans, on the week's last day)
+    label: str                      # the week plan, "A", "B", ...
+    index: int                      # its slot
+    player_id: int                  # the option chosen
+
+
 def make_app(worker: Worker) -> FastAPI:
     app = FastAPI(title="Fantasy hockey plan server")
     store = live_games.FeedStore(LIVE / "reports" / "goals")
@@ -318,6 +331,27 @@ def make_app(worker: Worker) -> FastAPI:
     def put_choices(body: Choices, league: str | None = None):
         chosen = worker.league(league)
         return {"league": chosen.name, "choices": choices.save(chosen.name, body.choices, worker.day())}
+
+    @app.get("/suggestions")
+    def get_suggestions(week: str = "this", league: str | None = None):
+        chosen, path, plan = newest(league)
+        return {"league": chosen.name, "file": path.name,
+                **suggestions.suggestions_view(plan, choices.load(chosen.name, worker.day()), week)}
+
+    @app.post("/choices/pick")
+    def pick(body: Pick, league: str | None = None):
+        """A week plan's option picked into your week with the plan's drop, or taken back if picked
+        (choices.pick_from_plan, as the window's click); returns the suggestions as they now stand."""
+        chosen, path, plan = newest(league)
+        shown = next((p for p in suggestions.plans_shown(plan, body.week) if p["label"] == body.label), None)
+        if shown is None or not 0 <= body.index < len(shown.get("moves", [])):
+            raise HTTPException(404, f"no slot {body.index} in week plan {body.label} of {path.name}")
+        if body.player_id not in {o.get("player_id") for o in shown["moves"][body.index].get("options") or []}:
+            raise HTTPException(422, f"player {body.player_id} is not an option in that slot")
+        saved = choices.save(chosen.name, choices.pick_from_plan(choices.load(chosen.name, worker.day()), shown,
+                                                                 body.index, body.player_id), worker.day())
+        return {"league": chosen.name, "file": path.name, "choices": saved,
+                **suggestions.suggestions_view(plan, saved, body.week)}
 
     @app.post("/refresh")
     def refresh(body: Refresh, league: str | None = None):

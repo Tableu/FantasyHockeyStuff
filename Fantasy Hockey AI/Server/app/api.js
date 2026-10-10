@@ -41,4 +41,6 @@ export const api = {
   jobs: () => call('GET', '/jobs'),
   roster: (league) => call('GET', '/roster', { league }),
   tonight: (league) => call('GET', '/tonight', { league }),
+  suggestions: (league, week) => call('GET', '/suggestions', { league, query: { week } }),
+  pick: (league, body) => call('POST', '/choices/pick', { league, body }),
 };

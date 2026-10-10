@@ -162,3 +162,39 @@ table.roster tr.note td { text-align: left; height: auto; padding: 0; background
 table.roster tr.note td span { display: block; position: sticky; left: 0; max-width: min(100vw, 480px); box-sizing: border-box; padding: 6px 12px 8px; color: var(--text-2); font-size: 12px; }
 table.roster button.sort { padding: 0 2px; min-height: 36px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
 table.roster button.sort.on { color: var(--you); }
+
+/* AI suggestions (ai.js), as the design's AI suggestions artboard */
+.subtabs { position: sticky; top: 0; z-index: 2; display: flex; height: 40px; border-bottom: 1px solid var(--rule); background: var(--ground-2); }
+.subtabs button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; background: transparent; color: var(--text-3); font-size: 13px; font-weight: 500; cursor: pointer; }
+.subtabs button[aria-pressed="true"] { background: var(--ground); color: var(--text); font-weight: 700; box-shadow: inset 0 -2px 0 var(--you); }
+.badge { font-family: var(--mono); font-size: 10.5px; font-weight: 600; padding: 1px 5px; border-radius: 8px; background: #26334D; color: var(--text); }
+.badge.zero { background: #18223A; color: #6F7E98; }
+table.list { border-collapse: collapse; width: 100%; }
+table.list.fixed { table-layout: fixed; }
+table.list th, table.list td { border-bottom: 1px solid var(--rule); padding: 4px 5px; height: 30px; text-align: left; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
+table.list th:first-child, table.list td:first-child { padding-left: 12px; }
+table.list th:last-child, table.list td:last-child { padding-right: 12px; }
+table.list thead th { background: var(--ground-3); color: var(--text-3); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; height: 22px; padding-top: 0; padding-bottom: 0; }
+table.list .n { text-align: right; font-family: var(--mono); font-size: 12px; }
+table.list tr.hi td { background: #13284A; }
+table.list tr.mine td { background: #13284A; }
+table.list tr.opt td { background: var(--ground-2); }
+table.list tr.sub-note td { height: auto; padding-top: 0; color: var(--text-3); font-size: 11.5px; white-space: normal; }
+table.list .state { font-size: 11px; color: #9FD0FF; font-weight: 600; }
+table.list td.dim2 { color: var(--text-2); }
+table.list td.dim { color: var(--text-3); }
+.meta { font-weight: 400; color: var(--text-3); font-size: 11px; }
+.tag { font-size: 10.5px; font-weight: 700; padding: 2px 5px; border-radius: 3px; white-space: nowrap; }
+.link { max-width: 100%; min-height: 32px; padding: 0; border: 0; background: none; color: var(--text); font-size: 12.5px; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.link[aria-pressed="true"] { color: var(--you); font-weight: 600; }
+.link:disabled { opacity: .6; }
+.foot { margin: 8px 12px 12px; font-size: 11.5px; color: var(--text-3); line-height: 1.4; }
+.hint-line { padding: 0 12px 6px; font-size: 11px; color: var(--text-3); }
+.sec .seg button { height: 28px; padding: 0 9px; font-size: 12px; }
+button.plan { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px; align-items: center; width: 100%; min-height: 48px; padding: 7px 12px; border: 0; border-top: 1px solid var(--rule); background: transparent; color: var(--text); cursor: pointer; text-align: left; }
+button.plan.open { background: var(--ground-sel); }
+button.plan .label { font-size: 16px; font-weight: 700; }
+button.plan .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+button.plan .sched { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.plan .nums { display: flex; flex-direction: column; align-items: flex-end; font-family: var(--mono); font-size: 12px; }
+table.slots { background: var(--ground-2); }

@@ -30,6 +30,8 @@ the first league served; plan_gui.py sends its own `--league`.
 | GET /tonight | Every player you and your opponent hold: his game today and, once it starts, his box-score line with fantasy points; your lineup's live total |
 | GET /roster | The app's Roster screen from the newest plan: lineup as it stands (league slot order), bench, IR; tonight's projection, season FP, FP/g, ROS and stats, the plan's notes |
 | GET /jobs | The recent refreshes, newest first, without their lines |
+| GET /suggestions?week=this or next | The app's AI suggestions from the newest plan: today's moves, the upgrades, the week plans with your picks marked |
+| POST /choices/pick {"week", "label", "index", "player_id"} | A week plan's option picked into your week with the plan's drop (a chained rental's earlier pick with it), or taken back if picked; returns the suggestions as they now stand |
 | PUT /choices {"choices": {...}} | Replaces them; returns {league, choices}. Nothing re-plans until a refresh, or POST /refresh {"mode": "plan"}?league= (that league on its last read, about 2 s) |
 
 The live games calls are games.py's: the NHL's public feeds held in memory (nothing goes to the
@@ -57,7 +59,10 @@ Built so far: P0, the header (league, day, Quick / Full, how long ago each step 
 refresh log from `GET /jobs`, server status); P1, the Roster screen (`app/roster.js`): your lineup
 as it stands, bench and IR from `GET /roster` (roster.py: tonight's projection, the season in the
 league's scoring), with tonight's games and live points from `GET /tonight` (games.py, every 20 s).
-Planner, AI, Games and Matchup come in P2-P5. The app's files are served with `Cache-Control:
+P2, the AI suggestions screen (`app/ai.js`): today's moves, the upgrades and the week plans from
+`GET /suggestions` (suggestions.py); an option tapped picks him into your week with the plan's drop
+(`POST /choices/pick`, Live/choices.py's pick_from_plan -- the window's click, moved there).
+Planner, Games and Matchup come in P3-P5. The app's files are served with `Cache-Control:
 no-cache`, so an edit shows on the next load.
 
 Testing it never uses port 8000 or a real league's name: run a test server on 8001 under a
