@@ -1,14 +1,16 @@
 // The phone app's shell (plan P0): header with the league, the day, Quick / Full and how fresh each
-// step is; the running refresh's progress; the bottom tabs; the More tab. The other tabs' screens
-// come in P1-P5. Everything shown comes from the plan server (api.js); nothing is computed here.
+// step is; the running refresh's progress; the bottom tabs; the More tab. Roster is roster.js (P1);
+// the other tabs' screens come in P2-P5. Everything shown comes from the plan server (api.js);
+// nothing is computed here.
 import { html, render, useState, useEffect, useRef, useCallback } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
+import { Roster } from './roster.js';
 
 const TABS = [
   ['roster', 'Roster'], ['planner', 'Planner'], ['ai', 'AI'],
   ['games', 'Games'], ['matchup', 'Matchup'], ['more', 'More'],
 ];
-const COMING = { roster: 'P1', ai: 'P2', planner: 'P3', games: 'P4', matchup: 'P5' };
+const COMING = { ai: 'P2', planner: 'P3', games: 'P4', matchup: 'P5' };
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
 const STALE_MIN = 120;          // a step older than this shows amber
@@ -266,7 +268,9 @@ function App() {
     <main class="screen">
       ${tab === 'more'
         ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} />`
-        : html`<${Coming} tab=${tab} />`}
+        : tab === 'roster' && league
+          ? html`<${Roster} league=${league} version=${version} />`
+          : html`<${Coming} tab=${tab} />`}
     </main>
     <${Tabs} tab=${tab} />
   </div>`;

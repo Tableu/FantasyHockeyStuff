@@ -26,6 +26,10 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /games/{id}?after=n   one game: line score, team stats, box score with fantasy points, plays
                                after sortOrder n
     GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
+    GET  /tonight              every player you and your opponent hold: his game today, his live box
+                               line and fantasy points; your lineup's live total (games.py)
+    GET  /roster               the app's Roster screen from the newest plan: lineup as it stands,
+                               bench, IR, tonight's projection, season in the league's scoring (roster.py)
     GET  /choices              what you chose in the plan window (Live/choices.py): {league,
                                choices: {upgrade_drops, days: {date: {moves}}}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
@@ -64,7 +68,9 @@ from pydantic import BaseModel  # noqa: E402
 import seasonlayer  # noqa: E402,F401 -- puts Season/ on sys.path; see seasonlayer.py
 import choices  # noqa: E402
 import games as live_games  # noqa: E402
+import league as league_module  # noqa: E402
 import leagues  # noqa: E402
+import roster  # noqa: E402
 import paths  # noqa: E402
 import planpass  # noqa: E402
 import simlayer  # noqa: E402
@@ -227,6 +233,16 @@ class Worker:
         return None
 
 
+class AppFiles(StaticFiles):
+    """The app's files, revalidated on every load (an ETag answers 304 when unchanged), so an edit
+    shows at once instead of whenever the browser's guess of their freshness runs out."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 class Refresh(BaseModel):
     mode: str = "quick"
 
@@ -239,8 +255,12 @@ def make_app(worker: Worker) -> FastAPI:
     app = FastAPI(title="Fantasy hockey plan server")
     store = live_games.FeedStore(LIVE / "reports" / "goals")
     threading.Thread(target=store.watch_loop, daemon=True).start()
+    scoresets = {name: simlayer.load_scoreset(league.scoring) for name, league in worker.leagues.items()}
+    # Each league's lineup slots in its own order (C C LW LW ... G G), as the window's calendar.
+    slot_rows = {name: [slot for slot, count in league_module.load(league.rules).active_slots.items()
+                        for _ in range(count)] for name, league in worker.leagues.items()}
     views = {name: live_games.Games(lambda league=league: worker.newest_plan(league),
-                                    simlayer.load_scoreset(league.scoring), paths.players(), store)
+                                    scoresets[name], paths.players(), store)
              for name, league in worker.leagues.items()}
 
     def nhl(league, call, *args):
@@ -267,15 +287,27 @@ def make_app(worker: Worker) -> FastAPI:
     def get_lines(game_id: int, league: str | None = None):
         return nhl(league, "lines", game_id)
 
-    @app.get("/plan")
-    def get_plan(league: str | None = None):
+    @app.get("/tonight")
+    def get_tonight(league: str | None = None):
+        return nhl(league, "tonight")
+
+    def newest(league):
         chosen = worker.league(league)
         path = worker.newest_plan(chosen)
         if path is None:
             raise HTTPException(404, f"no {chosen.name} plan saved for {worker.day().isoformat()} yet")
+        return chosen, path, json.loads(path.read_text(encoding="utf-8"))
+
+    @app.get("/plan")
+    def get_plan(league: str | None = None):
+        chosen, path, plan = newest(league)
         return {"league": chosen.name, "file": path.name,
-                "saved_at": iso(dt.datetime.fromtimestamp(path.stat().st_mtime)),
-                "plan": json.loads(path.read_text(encoding="utf-8"))}
+                "saved_at": iso(dt.datetime.fromtimestamp(path.stat().st_mtime)), "plan": plan}
+
+    @app.get("/roster")
+    def get_roster(league: str | None = None):
+        chosen, path, plan = newest(league)
+        return {"league": chosen.name, "file": path.name, **roster.roster_view(plan, scoresets[chosen.name], slot_rows[chosen.name])}
 
     @app.get("/choices")
     def get_choices(league: str | None = None):
@@ -322,7 +354,7 @@ def make_app(worker: Worker) -> FastAPI:
             "league_file": args.league_file,
         }
 
-    app.mount("/app", StaticFiles(directory=APP, html=True), name="app")
+    app.mount("/app", AppFiles(directory=APP, html=True), name="app")
     return app
 
 

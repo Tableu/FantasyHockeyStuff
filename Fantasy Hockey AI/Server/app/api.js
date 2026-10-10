@@ -39,4 +39,6 @@ export const api = {
   refresh: (league, mode) => call('POST', '/refresh', { league, body: { mode } }),
   job: (id, after = 0) => call('GET', `/jobs/${encodeURIComponent(id)}`, { query: { after } }),
   jobs: () => call('GET', '/jobs'),
+  roster: (league) => call('GET', '/roster', { league }),
+  tonight: (league) => call('GET', '/tonight', { league }),
 };

@@ -128,3 +128,37 @@ table.grid thead th { background: var(--ground-3); color: var(--text-3); font-we
 .state-failed { color: var(--bad); }
 .state-running { color: var(--you); }
 pre.lines { margin: 0; padding: 8px 12px; background: var(--ground-2); border-bottom: 1px solid var(--rule); font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--text-2); white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; }
+
+/* Roster (roster.js), as the design's Roster artboard */
+.sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); background: var(--ground-2); }
+.sum > div { display: flex; flex-direction: column; padding: 6px 12px; border-right: 1px solid var(--rule); }
+.sum > div:last-child { border-right: 0; }
+.sum .k { font-size: 11px; color: var(--text-3); text-transform: uppercase; }
+.sum .v { font-family: var(--mono); font-size: 17px; font-weight: 600; }
+.you { color: var(--you); }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; }
+.seg { display: flex; border: 1px solid var(--rule-strong); border-radius: 4px; overflow: hidden; }
+.seg button { height: 30px; padding: 0 12px; border: 0; border-left: 1px solid var(--rule-strong); background: transparent; color: var(--text-3); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--text); color: var(--ground); }
+.table-scroll { overflow-x: auto; border-top: 1px solid var(--rule); }
+table.roster { border-collapse: separate; border-spacing: 0; }
+table.roster th, table.roster td { border-bottom: 1px solid var(--rule); padding: 0 6px; height: 32px; white-space: nowrap; text-align: right; font-family: var(--mono); font-size: 12.5px; background: var(--ground); }
+table.roster tr.sub th { background: var(--ground-3); color: var(--text-3); font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; height: 24px; }
+table.roster .stick { position: sticky; left: 0; z-index: 1; text-align: left; font-family: var(--sans); font-size: 13.5px; font-weight: 500; border-right: 1px solid var(--rule); width: 150px; min-width: 150px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
+table.roster .f { width: 46px; min-width: 46px; max-width: 46px; }
+table.roster .txt { text-align: left; font-family: var(--sans); font-size: 12.5px; }
+table.roster td.dim { color: var(--text-3); }
+table.roster td.warn { color: var(--warn); }
+table.roster td.you { color: var(--you); }
+table.roster td.dim2 { color: var(--text-2); }
+table.roster tr.sel th, table.roster tr.sel td { background: var(--ground-sel); }
+table.roster .slot { display: inline-block; width: 26px; color: var(--text-3); font-weight: 600; font-size: 12px; }
+table.roster .pname { padding: 0; min-height: 32px; background: none; border: 0; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text); }
+table.roster .pname.warn { color: var(--warn); }
+table.roster .pname.bad { color: var(--bad); }
+table.roster .flag { font-size: 10.5px; font-weight: 700; }
+table.roster tr.note td { text-align: left; height: auto; padding: 0; background: var(--ground-2); font-family: var(--sans); white-space: normal; }
+table.roster tr.note td span { display: block; position: sticky; left: 0; max-width: min(100vw, 480px); box-sizing: border-box; padding: 6px 12px 8px; color: var(--text-2); font-size: 12px; }
+table.roster button.sort { padding: 0 2px; min-height: 36px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
+table.roster button.sort.on { color: var(--you); }

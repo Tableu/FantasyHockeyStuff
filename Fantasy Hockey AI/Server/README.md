@@ -27,6 +27,9 @@ the first league served; plan_gui.py sends its own `--league`.
 | GET /games/{id}?after=n | One game: line score, team stats, box score with fantasy points, plays after sortOrder n |
 | GET /games/{id}/lines | Each team's lines, pairs and power-play / penalty-kill units as used |
 | GET /choices | What you chose in the plan window (Live/choices.py): {league, choices: {upgrade_drops, days: {date: {drops, moves}}}} |
+| GET /tonight | Every player you and your opponent hold: his game today and, once it starts, his box-score line with fantasy points; your lineup's live total |
+| GET /roster | The app's Roster screen from the newest plan: lineup as it stands (league slot order), bench, IR; tonight's projection, season FP, FP/g, ROS and stats, the plan's notes |
+| GET /jobs | The recent refreshes, newest first, without their lines |
 | PUT /choices {"choices": {...}} | Replaces them; returns {league, choices}. Nothing re-plans until a refresh, or POST /refresh {"mode": "plan"}?league= (that league on its last read, about 2 s) |
 
 The live games calls are games.py's: the NHL's public feeds held in memory (nothing goes to the
@@ -49,9 +52,13 @@ compose publishes to 127.0.0.1 alone).
 files, no build step. Preact + htm are vendored in `app/vendor/` (htm 3.1.1's standalone build) and the IBM
 Plex fonts in `app/fonts/`, so nothing loads from a CDN. The app only shows what the API returns.
 
-Built so far (P0): the header (league, day, Quick / Full, how long ago each step ran, amber past
+Built so far: P0, the header (league, day, Quick / Full, how long ago each step ran, amber past
 2 h), a running refresh's progress lines, the bottom tabs, and the More tab (league switch,
-refresh log from `GET /jobs`, server status). Roster, Planner, AI, Games and Matchup come in P1-P5.
+refresh log from `GET /jobs`, server status); P1, the Roster screen (`app/roster.js`): your lineup
+as it stands, bench and IR from `GET /roster` (roster.py: tonight's projection, the season in the
+league's scoring), with tonight's games and live points from `GET /tonight` (games.py, every 20 s).
+Planner, AI, Games and Matchup come in P2-P5. The app's files are served with `Cache-Control:
+no-cache`, so an edit shows on the next load.
 
 Testing it never uses port 8000 or a real league's name: run a test server on 8001 under a
 temporary `Settings/leagues/<name>-test.json` (deleted after), e.g.

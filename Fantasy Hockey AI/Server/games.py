@@ -18,6 +18,8 @@ database.
                    server notes when a goal first appears in score/now (watch_loop reads it every
                    cache window while games are on), and estimates it from puck drop for a goal it
                    could not have seen arrive (scored before it first looked at that game)
+    tonight()      every player you and your opponent hold: his game today and, once it starts,
+                   his box-score line with fantasy points (the app's Roster screen)
     game(id)       one game: line score, shots by period, team stats, box score with fantasy
                    points, the plays after a sortOrder
     lines(id)      each team's forward lines, defence pairs and special-teams units as used, from
@@ -258,6 +260,8 @@ class Owners:
         self.newest_plan, self.scoreset = newest_plan, scoreset
         self.key, self.by_nhl, self.names, self.teams = None, {}, {}, {}
         self.players_mtime, self.nhl_ids = None, {}
+        self.held = []                  # every owned player: {player_id, nhl_id, owner, team}
+        self.lineup = set()             # your lineup as it stands (the plan's lineup_now), player ids
 
     def _nhl_ids(self, players_path):
         mtime = players_path.stat().st_mtime
@@ -274,10 +278,12 @@ class Owners:
             return
         self.key, self.by_nhl, self.teams = key, {}, {"me": [], "opp": []}
         self.names = {"me": "you", "opp": "opponent"}
+        self.held, self.lineup = [], set()
         if path is None:
             return
         plan = json.loads(path.read_text(encoding="utf-8"))
         self.names = {"me": plan.get("team") or "you", "opp": plan.get("opponent") or "opponent"}
+        self.lineup = {s["player_id"] for s in plan.get("lineup_now", []) if s.get("player_id") is not None}
         ids = self._nhl_ids(players_path)
         for owner, roster in (("me", plan.get("roster", [])), ("opp", plan.get("opponent_roster", []))):
             for r in roster:
@@ -287,6 +293,9 @@ class Owners:
                 match = TEAM_SUFFIX.search(r.get("player", ""))
                 if match:
                     self.teams[owner].append(match.group(1))
+                if r.get("player_id") is not None:
+                    self.held.append({"player_id": int(r["player_id"]), "nhl_id": nhl, "owner": owner,
+                                      "team": match.group(1) if match else None})
 
     def of(self, nhl_id):
         return self.by_nhl.get(nhl_id)
@@ -344,6 +353,35 @@ class Games:
                 for player in [g["playerId"]] + [a["playerId"] for a in g.get("assists", [])]:
                     counts[player][key] += 1
         return counts
+
+    def _box_players(self, box, side, special, owners) -> list:
+        """One side's box score: each skater's and goalie's counts and fantasy points."""
+        team = box[side]["abbrev"]
+        stats = box.get("playerByGameStats", {}).get(side, {})
+        players = []
+        for group in ("forwards", "defense"):
+            for p in stats.get(group, []):
+                counts = {"goals": p.get("goals", 0), "assists": p.get("assists", 0),
+                          "points": p.get("points", 0), "shots": p.get("sog", 0),
+                          "hits": p.get("hits", 0), "blocks": p.get("blockedShots", 0),
+                          "pim": p.get("pim", 0), "plus_minus": p.get("plusMinus", 0),
+                          **special.get(p["playerId"], {"ppp": 0, "shp": 0})}
+                players.append({"id": p["playerId"], "name": p["name"]["default"], "team": team,
+                                "number": p.get("sweaterNumber"), "position": p.get("position"),
+                                "toi": p.get("toi"), "owner": owners.of(p["playerId"]),
+                                "fantasy": self._points(counts, False), **counts})
+        for p in stats.get("goalies", []):
+            decision = p.get("decision")
+            counts = {"saves": p.get("saves", 0), "goals_against": p.get("goalsAgainst", 0),
+                      "shots_against": p.get("shotsAgainst", 0),
+                      "wins": int(decision == "W"), "losses": int(decision == "L"),
+                      "ot_losses": int(decision == "O"),
+                      "shutouts": int(decision == "W" and p.get("goalsAgainst", 0) == 0)}
+            players.append({"id": p["playerId"], "name": p["name"]["default"], "team": team,
+                            "number": p.get("sweaterNumber"), "position": "G", "toi": p.get("toi"),
+                            "owner": owners.of(p["playerId"]), "decision": decision,
+                            "fantasy": self._points(counts, True), **counts})
+        return players
 
     # ---------- games list and goal feed ----------
 
@@ -409,6 +447,43 @@ class Games:
         return {"team": owners.names["me"], "opponent": owners.names["opp"],
                 "totals": {k: round(v, 2) for k, v in totals.items()}, "goals": rows}
 
+    def tonight(self) -> dict:
+        """Every player you and your opponent hold, by plan player id: his team's game today (or
+        None), and once it has started his box-score line with its fantasy points. `lineup_live`
+        is your lineup's points so far (the plan's lineup as it stands; bench points don't count).
+        Only the started games with someone held in them are fetched."""
+        data, owners = self.score_now(), self._owners()
+        games, held_teams = {}, {h["team"] for h in owners.held}
+        lines = {}
+        for g in data.get("games", []):
+            away, home = g["awayTeam"], g["homeTeam"]
+            period = g.get("periodDescriptor") or {}
+            base = {"id": g["id"], "state": g["gameState"], "start_utc": g["startTimeUTC"],
+                    "period": period.get("number"), "period_type": period.get("periodType"),
+                    "clock": (g.get("clock") or {}).get("timeRemaining"),
+                    "intermission": bool((g.get("clock") or {}).get("inIntermission"))}
+            games[away["abbrev"]] = {**base, "home": False, "vs": home["abbrev"],
+                                     "score": away.get("score"), "vs_score": home.get("score")}
+            games[home["abbrev"]] = {**base, "home": True, "vs": away["abbrev"],
+                                     "score": home.get("score"), "vs_score": away.get("score")}
+            if g["gameState"] in LIVE_STATES | FINAL_STATES and {away["abbrev"], home["abbrev"]} & held_teams:
+                box = self.game_feed(g["id"], "boxscore")
+                special = self._special_points(g.get("goals", []))
+                for side in ("awayTeam", "homeTeam"):
+                    for p in self._box_players(box, side, special, owners):
+                        if p["owner"]:
+                            lines[p["id"]] = p
+        players, live = {}, 0.0
+        for h in owners.held:
+            line = lines.get(h["nhl_id"]) if h["nhl_id"] is not None else None
+            in_lineup = h["owner"] == "me" and h["player_id"] in owners.lineup
+            if line and in_lineup:
+                live += line["fantasy"]
+            players[h["player_id"]] = {"owner": h["owner"], "in_lineup": in_lineup,
+                                       "game": games.get(h["team"]), "line": line}
+        return {"date": data.get("currentDate"), "team": owners.names["me"], "opponent": owners.names["opp"],
+                "lineup_live": round(live, 2), "players": players}
+
     # ---------- one game ----------
 
     def game(self, game_id: int, after: int = -1) -> dict:
@@ -418,35 +493,9 @@ class Games:
         rail = self.game_feed(game_id, "right-rail")
         pbp = self.game_feed(game_id, "play-by-play")
         special = self._special_points(summary.get("goals", []))
-        sides = {}
-        for side in ("awayTeam", "homeTeam"):
-            team = box[side]["abbrev"]
-            stats = box.get("playerByGameStats", {}).get(side, {})
-            players = []
-            for group in ("forwards", "defense"):
-                for p in stats.get(group, []):
-                    counts = {"goals": p.get("goals", 0), "assists": p.get("assists", 0),
-                              "points": p.get("points", 0), "shots": p.get("sog", 0),
-                              "hits": p.get("hits", 0), "blocks": p.get("blockedShots", 0),
-                              "pim": p.get("pim", 0), "plus_minus": p.get("plusMinus", 0),
-                              **special.get(p["playerId"], {"ppp": 0, "shp": 0})}
-                    players.append({"id": p["playerId"], "name": p["name"]["default"], "team": team,
-                                    "number": p.get("sweaterNumber"), "position": p.get("position"),
-                                    "toi": p.get("toi"), "owner": owners.of(p["playerId"]),
-                                    "fantasy": self._points(counts, False), **counts})
-            for p in stats.get("goalies", []):
-                decision = p.get("decision")
-                counts = {"saves": p.get("saves", 0), "goals_against": p.get("goalsAgainst", 0),
-                          "shots_against": p.get("shotsAgainst", 0),
-                          "wins": int(decision == "W"), "losses": int(decision == "L"),
-                          "ot_losses": int(decision == "O"),
-                          "shutouts": int(decision == "W" and p.get("goalsAgainst", 0) == 0)}
-                players.append({"id": p["playerId"], "name": p["name"]["default"], "team": team,
-                                "number": p.get("sweaterNumber"), "position": "G", "toi": p.get("toi"),
-                                "owner": owners.of(p["playerId"]), "decision": decision,
-                                "fantasy": self._points(counts, True), **counts})
-            sides[side] = {"abbrev": team, "score": box[side].get("score"), "sog": box[side].get("sog"),
-                           "players": players}
+        sides = {side: {"abbrev": box[side]["abbrev"], "score": box[side].get("score"),
+                        "sog": box[side].get("sog"), "players": self._box_players(box, side, special, owners)}
+                 for side in ("awayTeam", "homeTeam")}
         names = {s["playerId"]: f"{s['firstName']['default'][:1]}. {s['lastName']['default']}"
                  for s in pbp.get("rosterSpots", [])}
         abbrev = {pbp["awayTeam"]["id"]: pbp["awayTeam"]["abbrev"], pbp["homeTeam"]["id"]: pbp["homeTeam"]["abbrev"]}
