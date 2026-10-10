@@ -46,6 +46,9 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /week/drops?day=&add=&occupant=   who that pick may drop, each with the week's gain
     POST /week/edit {week, action, day, add, drop, rental}   pick, replace, unpick or clear;
                                saved (choices.py), returns the calendar as it now stands
+    GET  /matchup              the app's Matchup: the week's score, each day's points for you and your
+                               opponent, the league's week, from the platform (kept a minute), with
+                               the plan's projection and P(win) (matchup.py)
     GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
@@ -82,6 +85,7 @@ import choices  # noqa: E402
 import games as live_games  # noqa: E402
 import league as league_module  # noqa: E402
 import leagues  # noqa: E402
+import matchup as matchup_module  # noqa: E402
 import roster  # noqa: E402
 import suggestions  # noqa: E402
 import week as week_module  # noqa: E402
@@ -386,6 +390,22 @@ def make_app(worker: Worker) -> FastAPI:
         saved = choices.save(chosen.name, new, worker.day())
         _, _, _, shown = book(league, body.week)
         return {"league": chosen.name, "file": path.name, "choices": saved, **shown.view(slot_rows[chosen.name])}
+
+    matchups = matchup_module.Matchups()
+
+    @app.get("/matchup")
+    def get_matchup(league: str | None = None):
+        """The week's matchup: the platform's scores (kept a minute) and the newest plan's
+        projection and P(win) (matchup.py)."""
+        chosen = worker.league(league)
+        if not chosen.readable:
+            raise HTTPException(409, f"{chosen.name} has no platform to read its matchup from")
+        path = worker.newest_plan(chosen)
+        plan = json.loads(path.read_text(encoding="utf-8")) if path else None
+        try:
+            return {"league": chosen.name, **matchups.view(chosen, plan)}
+        except Exception as error:  # noqa: BLE001 -- the platform unreachable or changed: say so
+            raise HTTPException(502, f"{chosen.platform}: {type(error).__name__}: {error}")
 
     @app.get("/suggestions")
     def get_suggestions(week: str = "this", league: str | None = None):

@@ -21,6 +21,29 @@ class TeamRoster:
 
 
 @dataclasses.dataclass
+class WeekScore:
+    """One team's points in a scoring period so far (today's live points in), its opponent, and --
+    when the platform shows them (Fleaflicker) -- how many of its lineup slots are still to play,
+    in play and done."""
+    team_id: int
+    name: str
+    points: float
+    opponent_id: int | None
+    to_play: int | None = None
+    in_play: int | None = None
+    done: int | None = None
+
+
+@dataclasses.dataclass
+class Scoreboard:
+    """Every team's points in a scoring period (`scoreboard()`), and the period's first and last day."""
+    period: int
+    first_day: object              # dt.date
+    last_day: object
+    teams: list                    # WeekScore
+
+
+@dataclasses.dataclass
 class Matchup:
     """This scoring period's head-to-head: both teams' points so far."""
     period: int

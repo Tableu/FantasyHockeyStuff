@@ -1171,6 +1171,9 @@ class LiveRunner:
             "week": v.week, "moves_left": v.moves_left, "free_moves": state.free_moves,
             "moves_used_before": before["moves_used"],
             "matchup_z": round(z, 2), "p_win": round(statistics.NormalDist().cdf(z), 3),
+            # Each side's projected points still to come this week, night by night (the z's own
+            # projection, Decisions/managers.py _z), for the app's Matchup.
+            "matchup_projection": _matchup_projection(manager),
             "opponent": snapshot.teams[snapshot.opponent]["name"] if snapshot.opponent is not None else None,
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "options": choices, "week_plan": week_plan, "week_plans": week_plans,
@@ -1227,6 +1230,17 @@ class LiveRunner:
                 "games_left": v.games_remaining(p), "plays_tonight": tonight,
                 "in_lineup": lineup_ids is not None and p in lineup_ids, "on_ir": on_ir,
                 "on_waivers": bool(waivers), "plan": plan, "stats": self._season_stats(p)}
+
+
+def _matchup_projection(manager):
+    """{"me"/"opp": {"rest": points still to come this week, "nights": {date: points}}} from the
+    manager's last z, or None when it has none (no opponent, a plan made before any z)."""
+    last = getattr(manager, "_last_matchup", None)
+    if not last:
+        return None
+    return {side: {"rest": round(float(p["rest"]), 2),
+                   "nights": {pd.Timestamp(n).date().isoformat(): round(float(v), 2) for n, v in sorted(p["nights"].items())}}
+            for side, p in last.items()}
 
 
 def render(plan: dict) -> str:

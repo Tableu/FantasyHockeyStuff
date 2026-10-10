@@ -37,7 +37,7 @@ import pandas as pd
 import requests
 
 import livepaths
-from platforms.base import Matchup, PlayerIds, TeamRoster
+from platforms.base import Matchup, PlayerIds, Scoreboard, TeamRoster, WeekScore
 
 SEASON_API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fhl/seasons/{year}"
 API = SEASON_API + "/segments/0/leagues/{league_id}"
@@ -271,6 +271,53 @@ class Espn:
                                    points=float(game[me].get("totalPoints", 0.0)),
                                    opponent_points=float(other.get("totalPoints", 0.0)))
         return None
+
+    def _week(self, fresh=False):
+        """(the current matchup period, its first day, its last day, the scores) -- mMatchupScore
+        read again when `fresh` (the live scores change; the adapter keeps every other view). A
+        period is the Monday-to-Sunday week holding today, cut to the season (`move_period`)."""
+        if fresh:
+            self._cache.pop("mMatchupScore", None)
+        data = self._get("mMatchupScore")
+        status = self._get("mStatus")["status"]
+        latest = self._scoring_day(status["latestScoringPeriod"])
+        monday = latest - dt.timedelta(days=latest.weekday())
+        first = max(monday, self._scoring_day(status["firstScoringPeriod"]))
+        last = min(monday + dt.timedelta(days=6), self._scoring_day(status["finalScoringPeriod"]))
+        return data["status"]["currentMatchupPeriod"], first, last, data
+
+    def scoreboard(self) -> Scoreboard:
+        """Every team's points in the current matchup period, today's live in (totalPointsLive).
+        ESPN does not say how many slots are still to play."""
+        period, first, last, data = self._week(fresh=True)
+        names = self.teams()
+        teams = []
+        for game in data.get("schedule", []):
+            if game.get("matchupPeriodId") != period:
+                continue
+            for me, them in (("home", "away"), ("away", "home")):
+                side = game.get(me)
+                if not side:
+                    continue
+                teams.append(WeekScore(team_id=side["teamId"], name=names.get(side["teamId"], ""),
+                                       points=float(side.get("totalPointsLive", side.get("totalPoints", 0.0))),
+                                       opponent_id=(game.get(them) or {}).get("teamId")))
+        return Scoreboard(period=period, first_day=first, last_day=last, teams=teams)
+
+    def daily_points(self, team_id: int) -> dict:
+        """{day: (the team's points, its opponent's)} for each day of the current matchup period
+        that has begun, today's live -- pointsByScoringPeriod, every team's in one call."""
+        period, _, _, data = self._week(fresh=True)
+        for game in data.get("schedule", []):
+            if game.get("matchupPeriodId") != period:
+                continue
+            for me, them in (("home", "away"), ("away", "home")):
+                if (game.get(me) or {}).get("teamId") == team_id:
+                    mine = game[me].get("pointsByScoringPeriod") or {}
+                    theirs = (game.get(them) or {}).get("pointsByScoringPeriod") or {}
+                    return {self._scoring_day(int(sp)): (float(mine.get(sp, 0.0)), float(theirs.get(sp, 0.0)))
+                            for sp in sorted(set(mine) | set(theirs), key=int)}
+        return {}
 
     def moves_used(self, team_id: int, day=None, when=None) -> int:
         """Acquisitions in the matchup period a move made now counts toward (`move_period`): the

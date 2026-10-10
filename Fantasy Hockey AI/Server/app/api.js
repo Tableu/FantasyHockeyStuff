@@ -53,4 +53,5 @@ export const api = {
   goals: (league) => call('GET', '/goals', { league }),
   game: (league, id) => call('GET', `/games/${id}`, { league }),
   lines: (league, id) => call('GET', `/games/${id}/lines`, { league }),
+  matchup: (league) => call('GET', '/matchup', { league }),
 };

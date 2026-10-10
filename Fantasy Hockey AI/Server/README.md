@@ -30,6 +30,7 @@ the first league served; plan_gui.py sends its own `--league`.
 | GET /tonight | Every player you and your opponent hold: his game today and, once it starts, his box-score line with fantasy points; your lineup's live total |
 | GET /roster | The app's Roster screen from the newest plan: lineup as it stands (league slot order), bench, IR; tonight's projection, season FP, FP/g, ROS and stats, the plan's notes |
 | GET /jobs | The recent refreshes, newest first, without their lines |
+| GET /matchup | The week's matchup: the platform's scores (every team's week points, yours and your opponent's by day, slots to play on Fleaflicker; read at most once a minute) with the newest plan's projection and P(win) when the plan is this week's |
 | GET /suggestions?week=this or next | The app's AI suggestions from the newest plan: today's moves, the upgrades, the week plans with your picks marked |
 | POST /choices/pick {"week", "label", "index", "player_id"} | A week plan's option picked into your week with the plan's drop (a chained rental's earlier pick with it), or taken back if picked; returns the suggestions as they now stand |
 | GET /week?week=this or next | The app's Weekly planner: your week from your picks on plan A's workbench -- each night's points, open slots, your picks (with why one is left out) and who starts in each slot |
@@ -72,7 +73,10 @@ every change through `POST /week/edit` -- the window's picker logic, moved into 
 choices.py so both use it. P4, Games (`app/games.js`): today's games (`GET /games`) with the goal feed
 (`GET /goals`) in a sheet; a game full screen with its Summary, Box and Plays (`GET /games/{id}`, each
 play with the fantasy points it earned) and Lines (`GET /games/{id}/lines`), polled every 5 s while
-live. Matchup comes in P5. The app's files are served with `Cache-Control:
+live. P5, Matchup (`app/matchup.js`, `GET /matchup`, matchup.py): the week's score, P(win), tonight live
+against projected, the week day by day and the league's week -- the scores read from the platform
+(Live/platforms: `scoreboard`, `daily_points`, kept a minute), the projection the plan's own
+(`matchup_projection`, each side's nights from the z's projection in Decisions/managers.py). The app's files are served with `Cache-Control:
 no-cache`, so an edit shows on the next load.
 
 Testing it never uses port 8000 or a real league's name: run a test server on 8001 under a

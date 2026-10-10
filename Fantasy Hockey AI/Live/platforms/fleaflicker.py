@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
-from platforms.base import Matchup, TeamRoster
+from platforms.base import Matchup, Scoreboard, TeamRoster, WeekScore
 
 log = logging.getLogger("platforms.fleaflicker")
 
@@ -136,6 +136,7 @@ class Fleaflicker:
         self.league_id = int(league_id)
         self.season = season
         self._reused = {}                  # key -> (fetched at, value): see REUSE_SECONDS
+        self._days = {}                    # (game id, day ordinal) -> a past day's box score (daily_points)
 
     def _reuse(self, key, fetch):
         """`fetch()`, or its value from under REUSE_SECONDS ago."""
@@ -250,6 +251,53 @@ class Fleaflicker:
                     return Matchup(period=number, team_id=team_id, opponent_id=game[them]["id"],
                                    points=_score(game, me), opponent_points=_score(game, them))
         return None
+
+    def scoreboard(self) -> Scoreboard:
+        """Every team's points in the current period (FetchLeagueScoreboard), with each one's
+        lineup slots still to play, in play and done."""
+        raw = self._reuse("scoreboard", lambda: self._get("FetchLeagueScoreboard", season=self.season))
+        period = raw.get("schedulePeriod", {})
+        teams = []
+        for game in raw.get("games", []):
+            for me, them in (("home", "away"), ("away", "home")):
+                s = game.get(f"{me}Score") or {}
+                teams.append(WeekScore(team_id=game[me]["id"], name=game[me].get("name", ""),
+                                       points=_score(game, me), opponent_id=game[them]["id"],
+                                       to_play=s.get("yetToPlay", 0), in_play=s.get("inPlay", 0),
+                                       done=s.get("alreadyPlayed", 0)))
+        return Scoreboard(period=period.get("ordinal"), first_day=_day(period["low"]),
+                          last_day=_day(period["high"]), teams=teams)
+
+    def daily_points(self, team_id: int) -> dict:
+        """{day: (the team's points, its opponent's)} for each day of the current period that has
+        begun, today's live -- from the matchup's box score, one call a day (FetchLeagueBoxscore
+        with scoring_period: its pointsHome / pointsAway scoringPeriod). A day before today is final,
+        so it is kept and not fetched again."""
+        board = self._reuse("scoreboard", lambda: self._get("FetchLeagueScoreboard", season=self.season))
+        game = next((g for g in board.get("games", []) if team_id in (g["home"]["id"], g["away"]["id"])), None)
+        if game is None:
+            return {}
+        side = "Home" if game["home"]["id"] == team_id else "Away"
+        other = "Away" if side == "Home" else "Home"
+        now = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"])
+        today = now["scoringPeriod"]["ordinal"]
+        days = self._days
+        out = {}
+        for p in now.get("eligiblePeriods", []):
+            ordinal = p["ordinal"]
+            if ordinal > today:
+                continue
+            key = (game["id"], ordinal)
+            if ordinal == today:
+                raw = now
+            elif key in days:
+                raw = days[key]
+            else:
+                raw = days[key] = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"], scoring_period=ordinal)
+            points = lambda who: float(((raw.get(f"points{who}") or {}).get("scoringPeriod") or {})
+                                       .get("value", {}).get("value", 0.0))
+            out[_day(p)] = (points(side), points(other))
+        return out
 
     def transactions(self, since_ms: int | None = None, pages: int = 20) -> list:
         """Newest-first transactions, as {time_ms, type, team_id, player_id}, back to `since_ms`."""

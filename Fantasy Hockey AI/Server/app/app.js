@@ -1,7 +1,7 @@
 // The phone app's shell (plan P0): header with the league, the day, Quick / Full and how fresh each
 // step is; the running refresh's progress; the bottom tabs; the More tab. Roster is roster.js (P1),
-// AI is ai.js (P2), Planner is planner.js (P3), Games and a game's screens are games.js (P4);
-// Matchup comes in P5. Everything shown comes from the plan server (api.js);
+// AI is ai.js (P2), Planner is planner.js (P3), Games and a game's screens are games.js (P4),
+// Matchup is matchup.js (P5). Everything shown comes from the plan server (api.js);
 // nothing is computed here.
 import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundary } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
@@ -9,12 +9,12 @@ import { Roster } from './roster.js';
 import { Suggestions } from './ai.js';
 import { Planner } from './planner.js';
 import { Games, Game } from './games.js';
+import { Matchup } from './matchup.js';
 
 const TABS = [
   ['roster', 'Roster'], ['planner', 'Planner'], ['ai', 'AI'],
   ['games', 'Games'], ['matchup', 'Matchup'], ['more', 'More'],
 ];
-const COMING = { matchup: 'P5' };
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
 const STALE_MIN = 120;          // a step older than this shows amber
@@ -144,11 +144,6 @@ function Tabs({ tab }) {
   return html`<nav class="tabs" aria-label="Sheets">
     ${TABS.map(([id, label]) => html`<a href=${`#/${id}`} aria-current=${id === tab ? 'page' : undefined}>${label}</a>`)}
   </nav>`;
-}
-
-function Coming({ tab }) {
-  const label = TABS.find(([id]) => id === tab)[1];
-  return html`<div class="empty">The ${label} screen is built in ${COMING[tab]} of the plan.</div>`;
 }
 
 function RefreshLog({ version }) {
@@ -306,7 +301,9 @@ function App() {
             ? html`<${Suggestions} league=${league} version=${version} />`
             : tab === 'planner' && league
               ? html`<${Planner} league=${league} version=${version} />`
-              : html`<${Coming} tab=${tab} />`}
+              : tab === 'matchup' && league
+                ? html`<${Matchup} league=${league} version=${version} />`
+                : html`<div class="empty">Loading…</div>`}
     </${Guard}></main>
     <${Tabs} tab=${tab} />
   </div>`;

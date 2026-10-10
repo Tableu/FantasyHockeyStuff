@@ -329,3 +329,29 @@ table.list td.unit { font-weight: 600; color: var(--text-3); }
 .type-row span:nth-child(2) { flex: 1; }
 .type-menu .btn { margin-top: 6px; }
 .feed table.list td { white-space: nowrap; }
+
+/* Matchup (matchup.js), as the design's Matchup artboard */
+.week-score { padding: 12px 12px 10px; border-bottom: 1px solid var(--rule); background: var(--ground-2); }
+.ws-top { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); letter-spacing: .04em; text-transform: uppercase; }
+.ws-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 10px; margin-top: 8px; }
+.ws-side { display: flex; flex-direction: column; min-width: 0; }
+.ws-side.right { align-items: flex-end; text-align: right; }
+.ws-side .nm { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ws-side .pts { font-size: 30px; font-weight: 600; line-height: 1.05; }
+.ws-side .proj { font-size: 11px; color: var(--text-3); }
+.week-score .vs { font-size: 12px; color: var(--text-3); padding-bottom: 22px; }
+.ws-win { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.ws-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; }
+.ws-bar span:first-child { background: var(--you); }
+.ws-bar span:last-child { flex: 1; background: var(--opp); }
+.ws-foot { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; margin-top: 4px; }
+.tonight { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.tonight > div { padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; }
+.tonight > div:first-child { border-right: 1px solid var(--rule); }
+.tonight .k { font-size: 11px; color: var(--text-3); }
+.tonight .v { font-size: 20px; font-weight: 600; }
+.tonight .v .dim { font-size: 13px; color: var(--text-3); }
+.tonight .c { font-size: 11px; color: var(--text-2); }
+table.list.byday tr.live-row td { background: #111A2B; font-weight: 600; }
+table.list.byday tr.proj-row td { color: var(--text-3); font-style: italic; }
+table.list .strong { font-weight: 700; }
