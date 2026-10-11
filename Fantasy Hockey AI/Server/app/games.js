@@ -242,7 +242,7 @@ function Box({ game, league }) {
     <table class="list fixed box">
       <thead><tr><th scope="col">Skater</th>${SKATER_COLS.map(([key, label]) => html`<th scope="col" class="n"
         aria-sort=${sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}>
-        <button type="button" class=${`sort ${sort.key === key ? 'on' : ''}`} onClick=${() => tap(key)}>${label}</button></th>`)}</tr></thead>
+        <button type="button" class=${`sort ${sort.key === key ? 'on' : ''}`} onClick=${() => tap(key)}>${label}${sort.key === key ? (sort.desc ? '▾' : '▴') : ''}</button></th>`)}</tr></thead>
       <tbody>${skaters.map((p) => html`<tr class=${p.owner ? `tint-${p.owner}` : ''}>
         <th scope="row">${p.name}</th>
         ${SKATER_COLS.map(([key]) => html`<td class=${`n ${key === 'fantasy' ? 'strong' : ''}`}>${key === 'fantasy' ? f1(p.fantasy) : p[key]}</td>`)}

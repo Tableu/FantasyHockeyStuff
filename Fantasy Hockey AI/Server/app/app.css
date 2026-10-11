@@ -362,3 +362,5 @@ table.list .strong { font-weight: 700; }
 .pull { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; overflow: hidden; font-size: 12px; color: var(--text-3); }
 .logo-img { width: 26px; height: 26px; object-fit: contain; flex: none; }
 .logo-img.big { width: 44px; height: 44px; }
+/* The box score's sorted header carries its arrow past a narrow column's edge rather than clip it. */
+table.list.box thead th.n { overflow: visible; }
