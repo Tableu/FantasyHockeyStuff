@@ -4,7 +4,7 @@
 // Matchup is matchup.js (P5). Everything shown comes from the plan server (api.js);
 // nothing is computed here.
 import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundary } from './vendor/htm-preact-3.1.1.mjs';
-import { api } from './api.js';
+import { api, onStale } from './api.js';
 import { Roster } from './roster.js';
 import { Suggestions } from './ai.js';
 import { Planner } from './planner.js';
@@ -18,6 +18,7 @@ const TABS = [
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
 const STALE_MIN = 120;          // a step older than this shows amber
+const PULL_PX = 70;             // how far down a pull at the top of a screen must go to refresh
 const STATUS_EVERY_MS = 60000;  // follows the server's auto refreshes, as plan_gui does
 const JOB_EVERY_MS = 1000;
 
@@ -46,6 +47,68 @@ function age(min) {
   if (min < 60) return `${min}m`;
   if (min < 48 * 60) return `${Math.round(min / 60)}h`;
   return `${Math.round(min / 1440)}d`;
+}
+
+// The time the data shown was saved while the server is out of reach (api.js onStale), else null.
+function useStale() {
+  const [savedAt, setSavedAt] = useState(null);
+  useEffect(() => onStale(setSavedAt), []);
+  return savedAt;
+}
+
+function StaleBanner({ savedAt }) {
+  if (!savedAt) return null;
+  const at = new Date(savedAt);
+  const sameDay = at.toDateString() === new Date().toDateString();
+  const when = at.toLocaleString('en-US', sameDay ? { hour: 'numeric', minute: '2-digit' }
+    : { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  return html`<div class="stale" role="status">Offline · showing what was saved at ${when}</div>`;
+}
+
+// Pull down at the top of the screen to run `onPull` (Quick). Engages only on a mostly vertical
+// drag from the top, so a sideways swipe of a wide table still scrolls it. Returns how far it is
+// pulled, for the indicator.
+function usePull(ref, onPull, enabled) {
+  const [pull, setPull] = useState(0);
+  const latest = useRef(onPull);
+  latest.current = onPull;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !enabled) return undefined;
+    let start = null, dist = 0, engaged = false;
+    const down = (e) => {
+      start = el.scrollTop <= 0 && e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+      dist = 0; engaged = false;
+    };
+    const move = (e) => {
+      if (!start) return;
+      const dx = e.touches[0].clientX - start.x, dy = e.touches[0].clientY - start.y;
+      if (!engaged) {
+        if (Math.abs(dx) > 10 && Math.abs(dx) >= dy) { start = null; return; }   // a sideways swipe
+        if (dy < 10) return;
+        engaged = true;
+      }
+      dist = Math.max(0, dy);
+      setPull(Math.min(dist, PULL_PX * 1.6));
+      if (e.cancelable) e.preventDefault();
+    };
+    const up = () => {
+      if (engaged && dist >= PULL_PX) latest.current();
+      start = null; dist = 0; engaged = false;
+      setPull(0);
+    };
+    el.addEventListener('touchstart', down, { passive: true });
+    el.addEventListener('touchmove', move, { passive: false });
+    el.addEventListener('touchend', up);
+    el.addEventListener('touchcancel', up);
+    return () => {
+      el.removeEventListener('touchstart', down);
+      el.removeEventListener('touchmove', move);
+      el.removeEventListener('touchend', up);
+      el.removeEventListener('touchcancel', up);
+    };
+  }, [enabled]);
+  return pull;
 }
 
 function clock(iso) {
@@ -215,6 +278,8 @@ function App() {
   const [job, setJob] = useState(null);
   const [now, setNow] = useState(() => new Date());
   const [version, setVersion] = useState(0);     // bumps when a refresh ends: screens re-fetch
+  const savedAt = useStale();
+  const screen = useRef(null);
   const tracking = useRef(null);
 
   const loadStatus = useCallback(async (name) => {
@@ -275,6 +340,8 @@ function App() {
     }
   };
   const closeJob = () => { tracking.current = null; setJob(null); };
+  const pull = usePull(screen, () => refresh('quick'), !!league && !route.game && tab !== 'games'
+    && !(job && job.state === 'running'));
 
   // One game: full screen, as the design's game screens -- no header, no tabs.
   if (route.game && league) {
@@ -284,6 +351,7 @@ function App() {
   if (tab === 'games' && league) {
     return html`<div class="app">
       <${JobStrip} job=${job} onClose=${closeJob} />
+      <${StaleBanner} savedAt=${savedAt} />
       <${Guard} key="games"><${Games} league=${league} version=${version} /></${Guard}>
       <${Tabs} tab=${tab} />
     </div>`;
@@ -291,8 +359,12 @@ function App() {
   return html`<div class="app">
     <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} />
     <${JobStrip} job=${job} onClose=${closeJob} />
-    ${error && html`<div class="error" role="alert">${error}</div>`}
-    <main class="screen"><${Guard} key=${tab}>
+    <${StaleBanner} savedAt=${savedAt} />
+    ${error && !savedAt && html`<div class="error" role="alert">${error}</div>`}
+    <main class="screen" ref=${screen}>
+      ${pull > 0 && html`<div class="pull" style=${`height: ${pull}px`} aria-hidden="true">
+        <span>${pull >= PULL_PX ? 'Release to refresh (Quick)' : 'Pull to refresh'}</span></div>`}
+      <${Guard} key=${tab}>
       ${tab === 'more'
         ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} />`
         : tab === 'roster' && league

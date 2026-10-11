@@ -8,6 +8,14 @@ export class ApiError extends Error {
   }
 }
 
+// Whether the last data shown came from the app's saved copy (the server out of reach): every
+// listener hears the time it was saved, or null once an answer comes from the server again.
+const staleListeners = new Set();
+export function onStale(listener) {
+  staleListeners.add(listener);
+  return () => staleListeners.delete(listener);
+}
+
 async function call(method, path, { league, body, query } = {}) {
   const params = new URLSearchParams(query || {});
   if (league) params.set('league', league);
@@ -31,6 +39,8 @@ async function call(method, path, { league, body, query } = {}) {
     } catch (_) { /* not JSON */ }
     throw new ApiError(response.status, detail);
   }
+  const savedAt = response.headers.get('X-Saved-At');
+  staleListeners.forEach((listener) => listener(savedAt));
   return response.json();
 }
 

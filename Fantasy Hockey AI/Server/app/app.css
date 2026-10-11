@@ -355,3 +355,8 @@ table.list td.unit { font-weight: 600; color: var(--text-3); }
 table.list.byday tr.live-row td { background: #111A2B; font-weight: 600; }
 table.list.byday tr.proj-row td { color: var(--text-3); font-style: italic; }
 table.list .strong { font-weight: 700; }
+
+/* Offline and pull-to-refresh (P6) */
+.screen { overscroll-behavior-y: contain; }
+.stale { flex: none; padding: 6px 12px; background: #2B240E; color: #F2D88A; font-size: 12px; border-bottom: 1px solid #4A3F17; }
+.pull { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; overflow: hidden; font-size: 12px; color: var(--text-3); }

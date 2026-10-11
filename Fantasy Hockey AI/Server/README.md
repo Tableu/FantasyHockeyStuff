@@ -76,7 +76,11 @@ play with the fantasy points it earned) and Lines (`GET /games/{id}/lines`), pol
 live. P5, Matchup (`app/matchup.js`, `GET /matchup`, matchup.py): the week's score, P(win), tonight live
 against projected, the week day by day and the league's week -- the scores read from the platform
 (Live/platforms: `scoreboard`, `daily_points`, kept a minute), the projection the plan's own
-(`matchup_projection`, each side's nights from the z's projection in Decisions/managers.py). The app's files are served with `Cache-Control:
+(`matchup_projection`, each side's nights from the z's projection in Decisions/managers.py). P6, offline
+and install: the service worker (`app/sw.js`) keeps the last answer for each screen's data (status,
+plan, roster, suggestions, week, matchup, choices, the refresh log) and serves it when the server
+is out of reach, with an "Offline · showing what was saved at ..." banner; live game calls are never
+kept. Pull down at the top of a screen to run Quick. The app's files are served with `Cache-Control:
 no-cache`, so an edit shows on the next load.
 
 Testing it never uses port 8000 or a real league's name: run a test server on 8001 under a
