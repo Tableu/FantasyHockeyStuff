@@ -58,7 +58,19 @@ function usePoll(load, deps, live) {
   }, deps);
 }
 
-const Logo = ({ abbr, big }) => html`<span class=${`logo ${big ? 'big' : ''}`} role="img" aria-label=${`${abbr} logo`}>${abbr}</span>`;
+// A team's logo: the NHL's own, its dark-background version (assets.nhle.com, as the score feed
+// links them; the service worker keeps them for offline). The abbreviation in a circle if it
+// cannot load.
+const logoUrl = (abbr) => `https://assets.nhle.com/logos/nhl/svg/${abbr}_dark.svg`;
+
+function Logo({ abbr, big }) {
+  const [failed, setFailed] = useState(false);
+  if (failed || !abbr) {
+    return html`<span class=${`logo ${big ? 'big' : ''}`} role="img" aria-label=${`${abbr} logo`}>${abbr}</span>`;
+  }
+  return html`<img class=${`logo-img ${big ? 'big' : ''}`} src=${logoUrl(abbr)} alt=${`${abbr} logo`}
+    loading="lazy" decoding="async" onError=${() => setFailed(true)} />`;
+}
 
 // ---------- the games list and the goal feed ----------
 

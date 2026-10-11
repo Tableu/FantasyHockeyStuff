@@ -360,3 +360,5 @@ table.list .strong { font-weight: 700; }
 .screen { overscroll-behavior-y: contain; }
 .stale { flex: none; padding: 6px 12px; background: #2B240E; color: #F2D88A; font-size: 12px; border-bottom: 1px solid #4A3F17; }
 .pull { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; overflow: hidden; font-size: 12px; color: var(--text-3); }
+.logo-img { width: 26px; height: 26px; object-fit: contain; flex: none; }
+.logo-img.big { width: 44px; height: 44px; }

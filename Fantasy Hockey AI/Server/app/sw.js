@@ -3,8 +3,10 @@
 // too, each answer kept; with the server out of reach the last one is served, marked with
 // X-Saved-At (when it was fetched) so the app can say it is stale. Live game calls are never kept:
 // an old score is worse than none.
-const SHELL_CACHE = 'fh-shell-v7';
+const SHELL_CACHE = 'fh-shell-v8';
 const DATA_CACHE = 'fh-data-v1';
+const LOGO_CACHE = 'fh-logos-v1';   // the NHL's team logos (assets.nhle.com): kept, they rarely change
+const LOGOS = 'https://assets.nhle.com/logos/';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'api.js', 'roster.js', 'ai.js', 'planner.js', 'games.js', 'matchup.js',
   'manifest.webmanifest', 'vendor/htm-preact-3.1.1.mjs', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -22,7 +24,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => k !== SHELL_CACHE && k !== DATA_CACHE).map((k) => caches.delete(k))))
+    .then((keys) => Promise.all(keys.filter((k) => ![SHELL_CACHE, DATA_CACHE, LOGO_CACHE].includes(k)).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -57,8 +59,22 @@ async function data(request) {
   }
 }
 
+// A logo from the cache when it has one, else fetched and kept.
+async function logo(request) {
+  const cache = await caches.open(LOGO_CACHE);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const response = await fetch(request);
+  if (response.ok || response.type === 'opaque') cache.put(request, response.clone());
+  return response;
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  if (event.request.method === 'GET' && event.request.url.startsWith(LOGOS)) {
+    event.respondWith(logo(event.request));
+    return;
+  }
   if (event.request.method !== 'GET' || url.origin !== location.origin) return;
   if (url.pathname.startsWith('/app/')) {
     event.respondWith(shell(event.request));
