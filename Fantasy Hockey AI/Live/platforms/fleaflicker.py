@@ -131,6 +131,9 @@ class Fleaflicker:
     platform = "fleaflicker"
     platform_name = "Fleaflicker"       # its name in platform_ids.parquet
     week_turns_over = "6:00 AM Eastern (3:00 AM Pacific)"    # a period's first instant (period_at)
+    # matchup()'s points include today's live points (ESPN's stop at yesterday): the snapshot takes
+    # today's out (today_points) so the model sees the week as it was tuned on.
+    week_points_include_today = True
 
     def __init__(self, league_id: int, season=None):
         self.league_id = int(league_id)
@@ -268,17 +271,39 @@ class Fleaflicker:
         return Scoreboard(period=period.get("ordinal"), first_day=_day(period["low"]),
                           last_day=_day(period["high"]), teams=teams)
 
+    def _my_game(self, team_id: int):
+        """(the team's fantasy game this period, "Home" or "Away" for its side), or (None, None)."""
+        board = self._reuse("scoreboard", lambda: self._get("FetchLeagueScoreboard", season=self.season))
+        game = next((g for g in board.get("games", []) if team_id in (g["home"]["id"], g["away"]["id"])), None)
+        if game is None:
+            return None, None
+        return game, "Home" if game["home"]["id"] == team_id else "Away"
+
+    @staticmethod
+    def _day_points(box, side) -> tuple:
+        """(the side's points, the other's) on the day a FetchLeagueBoxscore answer is for."""
+        other = "Away" if side == "Home" else "Home"
+        points = lambda who: float(((box.get(f"points{who}") or {}).get("scoringPeriod") or {})
+                                   .get("value", {}).get("value", 0.0))
+        return points(side), points(other)
+
+    def today_points(self, team_id: int):
+        """(the platform's current day, the team's points on it, its opponent's) -- live, one box
+        score -- or None when the team has no game this period."""
+        game, side = self._my_game(team_id)
+        if game is None:
+            return None
+        box = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"])
+        return (_day(box["scoringPeriod"]), *self._day_points(box, side))
+
     def daily_points(self, team_id: int) -> dict:
         """{day: (the team's points, its opponent's)} for each day of the current period that has
         begun, today's live -- from the matchup's box score, one call a day (FetchLeagueBoxscore
         with scoring_period: its pointsHome / pointsAway scoringPeriod). A day before today is final,
         so it is kept and not fetched again."""
-        board = self._reuse("scoreboard", lambda: self._get("FetchLeagueScoreboard", season=self.season))
-        game = next((g for g in board.get("games", []) if team_id in (g["home"]["id"], g["away"]["id"])), None)
+        game, side = self._my_game(team_id)
         if game is None:
             return {}
-        side = "Home" if game["home"]["id"] == team_id else "Away"
-        other = "Away" if side == "Home" else "Home"
         now = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"])
         today = now["scoringPeriod"]["ordinal"]
         days = self._days
@@ -294,9 +319,7 @@ class Fleaflicker:
                 raw = days[key]
             else:
                 raw = days[key] = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"], scoring_period=ordinal)
-            points = lambda who: float(((raw.get(f"points{who}") or {}).get("scoringPeriod") or {})
-                                       .get("value", {}).get("value", 0.0))
-            out[_day(p)] = (points(side), points(other))
+            out[_day(p)] = self._day_points(raw, side)
         return out
 
     def transactions(self, since_ms: int | None = None, pages: int = 20) -> list:

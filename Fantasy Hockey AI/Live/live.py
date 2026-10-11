@@ -209,11 +209,22 @@ class LeagueSnapshot:
                 log.warning("%s shows %d move(s) used this week; the transaction list counts %d -- "
                             "using %d", adapter.platform, used, teams[me]["moves_used"], used)
                 teams[me]["moves_used"] = used
+        # The week's points through yesterday, as the model is tuned on: the simulator decides a
+        # night before it is played, and ESPN's matchup stops at yesterday. Fleaflicker's includes
+        # today's live points, which the plan's projection of tonight -- every player whose team
+        # plays today, started or not -- would count again (2026-10-10: P(win) 41% for 44%). Taken
+        # out only while the platform's day is the plan's day: a plan for tomorrow, or next week's
+        # on a Sunday night, keeps today's, final by then.
+        my_points = matchup.points if matchup else 0.0
+        their_points = matchup.opponent_points if matchup else 0.0
+        if matchup is not None and getattr(adapter, "week_points_include_today", False):
+            today = adapter.today_points(my_team_id)
+            if today is not None and today[0] == pd.Timestamp(day).date():
+                my_points, their_points = my_points - today[1], their_points - today[2]
         return cls(teams=teams, me=me, opponent=opponent, moves_free=moves_free,
                    move_limit=move_limit, week_days=week_days, period_end=period_end,
                    turns_over=getattr(adapter, "week_turns_over", None),
-                   my_week_points=matchup.points if matchup else 0.0,
-                   opponent_week_points=matchup.opponent_points if matchup else 0.0,
+                   my_week_points=my_points, opponent_week_points=their_points,
                    lineup=lineup, waivers=waivers,
                    source=f"{adapter.platform} league {adapter.league_id}"
                           + (f" (season {adapter.season})" if adapter.season else ""))
