@@ -393,8 +393,9 @@ table.list.box thead th.n { overflow: visible; }
   .choice:hover, .log-row:hover, button.plan:hover { background: var(--ground-3); }
 }
 
-/* The PC layout (layout.js WIDE_PX): the sidebar, then the header and the screen. */
-.app.wide { flex-direction: row; max-width: 1600px; }
+/* The PC layout (layout.js WIDE_PX): the sidebar, then the header and the screen, across the whole
+   window -- a 1600 px cap left 160 px bars at 1920 and 480 px at 2560. */
+.app.wide { flex-direction: row; max-width: none; }
 .app.wide > .col { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--rule); }
 .sidebar { flex: none; width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; background: var(--ground-2); }
 .sidebar .brand { padding: 4px 12px 16px; font-size: 17px; font-weight: 700; }
@@ -408,6 +409,9 @@ table.list.box thead th.n { overflow: visible; }
 
 /* Roster: tonight's columns, then the season's, split by a line. */
 table.roster .sep { border-left: 1px solid var(--rule-strong); }
+/* On a PC the table spans the screen: the stat columns share the width instead of stopping at 46 px. */
+.app.wide table.roster { width: 100%; }
+.app.wide table.roster .f { max-width: none; }
 
 /* Planner: the calendar beside the picker, each scrolling on its own. */
 .split { display: flex; height: 100%; }

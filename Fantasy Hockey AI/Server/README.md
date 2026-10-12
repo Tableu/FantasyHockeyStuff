@@ -87,7 +87,7 @@ On a PC (a window at least 1024 px wide, `app/layout.js`) the same files lay out
 Fantasy Hockey PC design canvas: the tabs become a sidebar; Roster shows tonight's and the season's
 columns together; the Planner's picker is a panel beside the calendar; AI shows today's moves and
 the upgrades beside the week plans; Games puts the list, the chosen game and the goal feed side by
-side; Matchup and More use two columns. Content stops at 1600 px; 600–1023 px is the phone layout
+side; Matchup and More use two columns. Content fills the window; 600–1023 px is the phone layout
 across the window. Esc closes the picker, the goal feed and the menus.
 
 Testing it never uses port 8000 or a real league's name: run a test server on 8001 under a
