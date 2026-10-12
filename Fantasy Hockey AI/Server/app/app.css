@@ -312,7 +312,7 @@ table.list.box th[scope="row"] { font-weight: 500; overflow: hidden; text-overfl
 table.list.box th.n { width: 26px; }
 table.list.box th.n:nth-child(4), table.list.box th.n:nth-child(5), table.list.box th.n:nth-child(6) { width: 38px; }
 table.list.box th.n:nth-last-child(2) { width: 50px; }
-table.list.box th.n:last-child { width: 46px; }
+table.list.box th.n:last-child { width: 52px; }
 table.list.box td.strong { font-weight: 600; }
 table.list button.sort { padding: 0; min-height: 22px; border: 0; background: none; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
 table.list button.sort.on { color: var(--you); }

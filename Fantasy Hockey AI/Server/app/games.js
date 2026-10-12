@@ -10,8 +10,8 @@ const DONE = new Set(['OFF', 'FINAL']);
 const LIVE_EVERY_MS = 5000;
 const IDLE_EVERY_MS = 60000;
 const ORD = { 1: '1st', 2: '2nd', 3: '3rd' };
-const f1 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(1));
-const signed = (x) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(1);
+const f2 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(2));
+const signed = (x) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(2);
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
@@ -90,7 +90,7 @@ function GoalFeed({ goals, open, onToggle }) {
         <button type="button" class="feed-toggle" aria-expanded=${open} onClick=${onToggle}
           aria-label=${open ? 'Close the goal feed' : 'Open the goal feed'}>
           <span class="grip"></span>
-          <span class="feed-title">Goals · FP <span class="you">You ${f1(goals.totals.me)}</span> · <span class="opp">Opp ${f1(goals.totals.opp)}</span>
+          <span class="feed-title">Goals · FP <span class="you">You ${f2(goals.totals.me)}</span> · <span class="opp">Opp ${f2(goals.totals.opp)}</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style=${`margin-left: auto; transform: rotate(${open ? 180 : 0}deg)`}><path d="m6 15 6-6 6 6"></path></svg></span>
         </button>
         ${open && html`<div class="seg" role="group" aria-label="Filter goals">
@@ -101,7 +101,7 @@ function GoalFeed({ goals, open, onToggle }) {
       <div class="feed-body">
         ${!rows.length ? html`<p class="foot">${goals.goals.length ? 'No fantasy goals yet.' : 'No goals yet today.'}</p>` : html`
         <table class="list fixed">
-          <colgroup><col style="width: 76px" /><col style="width: 42px" /><col /><col style="width: 34px" /><col style="width: 50px" /><col style="width: 42px" /></colgroup>
+          <colgroup><col style="width: 76px" /><col style="width: 42px" /><col /><col style="width: 34px" /><col style="width: 58px" /><col style="width: 42px" /></colgroup>
           ${open && html`<thead><tr><th scope="col">Time</th><th scope="col">Tm</th>
             <th scope="col">Scorer · assists</th><th scope="col">Str</th>
             <th scope="col" class="n">FP</th><th scope="col"><span class="sr">Clip</span></th></tr></thead>`}
@@ -245,7 +245,7 @@ function Box({ game, league }) {
         <button type="button" class=${`sort ${sort.key === key ? 'on' : ''}`} onClick=${() => tap(key)}>${label}${sort.key === key ? (sort.desc ? '▾' : '▴') : ''}</button></th>`)}</tr></thead>
       <tbody>${skaters.map((p) => html`<tr class=${p.owner ? `tint-${p.owner}` : ''}>
         <th scope="row">${p.name}</th>
-        ${SKATER_COLS.map(([key]) => html`<td class=${`n ${key === 'fantasy' ? 'strong' : ''}`}>${key === 'fantasy' ? f1(p.fantasy) : p[key]}</td>`)}
+        ${SKATER_COLS.map(([key]) => html`<td class=${`n ${key === 'fantasy' ? 'strong' : ''}`}>${key === 'fantasy' ? f2(p.fantasy) : p[key]}</td>`)}
       </tr>`)}</tbody>
     </table>
     <table class="list fixed box">
@@ -254,7 +254,7 @@ function Box({ game, league }) {
         <th scope="row">${p.name}${p.decision ? html` <span class="meta">${p.decision}</span>` : ''}</th>
         <td class="n">${p.shots_against}</td><td class="n">${p.saves}</td><td class="n">${p.goals_against}</td>
         <td class="n">${p.shots_against ? (p.saves / p.shots_against).toFixed(3).replace(/^0/, '') : ''}</td>
-        <td class="n strong">${f1(p.fantasy)}</td></tr>`)
+        <td class="n strong">${f2(p.fantasy)}</td></tr>`)
         : html`<tr><td colspan="6" class="dim">Not in yet.</td></tr>`}</tbody>
     </table>
     <p class="foot">FP under your league's scoring. Tap a column header to sort.</p>`;
@@ -307,8 +307,8 @@ function Plays({ game }) {
     </div>`}
     ${!shown.length ? html`<p class="foot">No plays of this kind yet.</p>` : html`
     <table class="list fixed plays">
-      <thead><tr><th scope="col" style="width: 48px">Time</th><th scope="col" style="width: 40px">Tm</th>
-        <th scope="col" style="width: 54px">Event</th><th scope="col">Detail</th><th scope="col" class="n" style="width: 50px">FP</th></tr></thead>
+      <thead><tr><th scope="col" style="width: 56px">Time</th><th scope="col" style="width: 40px">Tm</th>
+        <th scope="col" style="width: 54px">Event</th><th scope="col">Detail</th><th scope="col" class="n" style="width: 62px">FP</th></tr></thead>
       <tbody>${periods.map((per) => html`
         <tr class="per"><td colspan="5">${per.name} period</td></tr>
         ${per.plays.map((p) => { const fp = p.fp || {}; return html`<tr class=${p.owners.length ? `tint-${p.owners.includes('me') ? 'me' : 'opp'}` : ''}>

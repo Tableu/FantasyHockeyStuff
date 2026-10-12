@@ -82,7 +82,7 @@ class Matchups:
             "days_left": (board.last_day - today).days if today else None,
             "you": side(me, tonight and tonight["you"], tonight and tonight["you_proj"]),
             "opp": side(opp, tonight and tonight["opp"], tonight and tonight["opp_proj"]) if opp else None,
-            "projected": {"you": round(proj[0], 1), "opp": round(proj[1], 1)} if has_projection else None,
+            "projected": {"you": round(proj[0], 2), "opp": round(proj[1], 2)} if has_projection else None,
             "p_win": plan.get("p_win") if same_week else None,
             "plan_file_day": (plan or {}).get("game_date"),
             "days": days, "league": league_rows, "has_projection": has_projection,

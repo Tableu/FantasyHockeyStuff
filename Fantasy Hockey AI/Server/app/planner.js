@@ -7,8 +7,8 @@ import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 
 const TEAM = /\s*\(([A-Z]{2,3})\)\s*$/;
-const f1 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(1));
-const sg = (x) => (x === null || x === undefined ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(1));
+const f2 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(2));
+const sg = (x) => (x === null || x === undefined ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(2));
 
 function short(full) {
   if (!full) return '';
@@ -84,14 +84,14 @@ function Sheet({ league, week, sheet, onClose, onDone }) {
           ? html`<p class="foot">No free agent who plays that night would start.</p>`
           : html`<table class="list fixed">
             <thead><tr><th scope="col" style="width: 54px">Plans</th><th scope="col">Player</th>
-              <th scope="col" class="n" style="width: 44px">Pts</th><th scope="col" class="n" style="width: 50px">Week</th>
+              <th scope="col" class="n" style="width: 50px">Pts</th><th scope="col" class="n" style="width: 58px">Week</th>
               <th scope="col" class="n" style="width: 48px">Left</th></tr></thead>
             <tbody>${shown.map((f) => html`
               <tr class=${sel && sel.player_id === f.player_id ? 'sel' : f.plans ? 'mine' : ''}>
                 <td class="state">${f.plans}</td>
                 <td><button type="button" class="link" aria-pressed=${!!sel && sel.player_id === f.player_id}
                   onClick=${() => choosePlayer(f)}>${short(f.player)}${f.status && f.status !== 'ACTIVE' ? ` [${f.status}]` : ''}${' '}<span class="meta">${f.positions} · ${teamOf(f.player)}</span></button></td>
-                <td class="n">${f1(f.pts)}</td><td class="n good">${sg(f.gain)}</td><td class="n dim">${f.games}</td>
+                <td class="n">${f2(f.pts)}</td><td class="n good">${sg(f.gain)}</td><td class="n dim">${f.games}</td>
               </tr>`)}</tbody></table>`}
       </div>
       <div class="drops">
@@ -171,7 +171,7 @@ export function Planner({ league, version }) {
       <table class="cal">
         <thead><tr><th scope="col" class="slot">Slot</th>
           ${data.nights.map((n) => html`<th scope="col" class="day"><span class="t">${dayTitle(n.day)}</span>
-            <span class="p">${f1(n.points)} pts · <span class=${n.open ? 'bad' : ''}>${n.open} open</span></span></th>`)}
+            <span class="p">${f2(n.points)} pts · <span class=${n.open ? 'bad' : ''}>${n.open} open</span></span></th>`)}
         </tr></thead>
         <tbody>
           <tr><th scope="row" class="slot picks-h">Picks</th>
@@ -197,10 +197,10 @@ export function Planner({ league, version }) {
                 return html`<td class="day rental"><button type="button" class="cellbtn" disabled=${busy}
                   aria-label=${`${dayTitle(n.day)} ${slot}: ${c.player}, your pickup, tap to replace`}
                   onClick=${() => setSheet({ day: n.day, slot, occupant: c })}>
-                  <span class="nm">${short(c.player)} ⇄</span><span class="pt">${f1(c.pts)}</span></button></td>`;
+                  <span class="nm">${short(c.player)} ⇄</span><span class="pt">${f2(c.pts)}</span></button></td>`;
               }
               return html`<td class="day"><div class="cellbtn held" title=${c.player}>
-                <span class="nm">${short(c.player)}</span><span class="pt">${f1(c.pts)}</span></div></td>`;
+                <span class="nm">${short(c.player)}</span><span class="pt">${f2(c.pts)}</span></div></td>`;
             })}
           </tr>`)}
         </tbody>

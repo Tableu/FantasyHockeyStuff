@@ -250,6 +250,13 @@ class Worker:
                 return files[-1]
         return None
 
+    def games_plan(self, league):
+        """The newest plan for today, whose games the live views show: once they have all started
+        the plan's day is tomorrow, which can be a new week with a new opponent, and tonight's
+        owners are still this week's (the user, 2026-10-11). None saved today, the newest plan."""
+        files = planpass.saved_plans(league, self.today())
+        return files[-1] if files else self.newest_plan(league)
+
 
 class AppFiles(StaticFiles):
     """The app's files, revalidated on every load (an ETag answers 304 when unchanged), so an edit
@@ -295,7 +302,7 @@ def make_app(worker: Worker) -> FastAPI:
     configs = {name: league_module.load(league.rules) for name, league in worker.leagues.items()}
     slot_rows = {name: [slot for slot, count in config.active_slots.items() for _ in range(count)]
                  for name, config in configs.items()}
-    views = {name: live_games.Games(lambda league=league: worker.newest_plan(league),
+    views = {name: live_games.Games(lambda league=league: worker.games_plan(league),
                                     scoresets[name], paths.players(), store)
              for name, league in worker.leagues.items()}
 

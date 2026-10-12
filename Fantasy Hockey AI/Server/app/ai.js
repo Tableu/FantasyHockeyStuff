@@ -14,8 +14,7 @@ const store = {
   set(key, value) { try { localStorage.setItem(key, value); } catch (_) { /* private window */ } },
 };
 
-const sg = (x) => (x === null || x === undefined ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(1));
-const f1 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(1));
+const sg = (x) => (x === null || x === undefined ? '' : (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(2));
 const f2 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(2));
 
 // "Yaroslav Askarov (SJS)" -> {name: "Y. Askarov", team: "SJS"}
@@ -62,15 +61,15 @@ function Upgrades({ data }) {
     <div class="sec"><h2>Upgrades</h2><span class="note">gain over the pricing window · edge = gain − bar</span></div>
     <table class="list fixed">
       <thead><tr><th scope="col">Add</th><th scope="col" style="width: 30%">Drop</th>
-        <th scope="col" class="n" style="width: 50px">Gain</th><th scope="col" class="n" style="width: 42px">Bar</th>
-        <th scope="col" class="n" style="width: 56px">Edge</th></tr></thead>
+        <th scope="col" class="n" style="width: 58px">Gain</th><th scope="col" class="n" style="width: 50px">Bar</th>
+        <th scope="col" class="n" style="width: 60px">Edge</th></tr></thead>
       <tbody>${data.upgrades.map((u) => {
         const add = short(u.add), drop = short(u.drop);
         return html`<tr class=${u.clears ? 'hi' : ''}>
           <td><b>${add.name}</b>${u.in_plan && html` <span class="tag" style="background: #123A2C; color: #7DF0C4">plan</span>`}
             <br /><span class="meta">${add.team} · ${f2(u.add_rate)}/g · ${u.add_games} gp</span></td>
           <td class="dim2">${u.drop ? drop.name : '(open spot)'}</td>
-          <td class="n">${sg(u.gain)}</td><td class="n dim">${f1(u.bar)}</td>
+          <td class="n">${sg(u.gain)}</td><td class="n dim">${f2(u.bar)}</td>
           <td class=${`n ${u.clears ? 'good' : 'dim'}`}>${sg(u.edge)}</td>
         </tr>`;
       })}</tbody>
@@ -106,8 +105,8 @@ function Plans({ data, week, onWeek, onPick, busy }) {
           </button>
           ${isOpen && html`<table class="list fixed slots">
             <thead><tr><th scope="col" style="width: 84px">Day · slot</th><th scope="col">Best → drop</th>
-              <th scope="col" class="n" style="width: 50px">Gain</th><th scope="col" class="n" style="width: 42px">Bar</th>
-              <th scope="col" class="n" style="width: 56px">Edge</th></tr></thead>
+              <th scope="col" class="n" style="width: 58px">Gain</th><th scope="col" class="n" style="width: 50px">Bar</th>
+              <th scope="col" class="n" style="width: 60px">Edge</th></tr></thead>
             <tbody>${pl.slots.map((s) => {
               const skey = `${key}:${s.index}`;
               const sOpen = open.has(skey);
@@ -119,7 +118,7 @@ function Plans({ data, week, onWeek, onPick, busy }) {
                     ? html`<button type="button" class="link" aria-expanded=${sOpen} onClick=${() => flip(skey)}>
                         ${sOpen ? '▾' : '▸'} <b>${short(s.add).name}</b>${from} <span class="meta">→ ${s.drop ? short(s.drop).name : 'open spot'}</span></button>`
                     : html`<b>${short(s.add).name}</b>${from} <span class="meta">→ ${s.drop ? short(s.drop).name : 'open spot'}</span>`}</td>
-                  <td class="n">${sg(s.gain)}</td><td class="n dim">${f1(s.bar)}</td><td class="n">${sg(s.edge)}</td>
+                  <td class="n">${sg(s.gain)}</td><td class="n dim">${f2(s.bar)}</td><td class="n">${sg(s.edge)}</td>
                 </tr>
                 ${sOpen && s.options.map((o) => html`
                   <tr class=${o.picked ? 'mine' : 'opt'}>
@@ -128,7 +127,7 @@ function Plans({ data, week, onWeek, onPick, busy }) {
                       onClick=${() => onPick(pl.label, s.index, o.player_id)}
                       aria-label=${`${o.picked ? 'Take back' : 'Pick'} ${o.add}`}>
                       ${o.rank}. ${short(o.add).name}${o.status && o.status !== 'ACTIVE' ? ` [${o.status}]` : ''}${' '}<span class="meta">${o.positions}${o.from !== s.from ? ` · from ${weekday(o.from)}` : ''}</span></button></td>
-                    <td class="n dim2">${sg(o.gain)}</td><td class="n dim">${f1(o.bar)}</td><td class="n dim2">${sg(o.edge)}</td>
+                    <td class="n dim2">${sg(o.gain)}</td><td class="n dim">${f2(o.bar)}</td><td class="n dim2">${sg(o.edge)}</td>
                   </tr>`)}
                 ${sOpen && s.near.map((n) => html`
                   <tr class="opt"><td class="state dim">other team</td>

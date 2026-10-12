@@ -14,7 +14,6 @@ const store = {
   set(key, value) { try { localStorage.setItem(key, value); } catch (_) { /* private window */ } },
 };
 
-const f1 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(1));
 const f2 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(2));
 
 // The plan's puck times are UTC without a zone ("2026-10-10 23:00:00").
@@ -51,8 +50,8 @@ function tonightCells(row, live, goalie) {
     }
   }
   const cells = [
-    { text: f1(row.xpts), cls: 'f', weight: 600 },
-    { text: line ? f1(line.fantasy) : '', cls: 'f you', weight: 600 },
+    { text: f2(row.xpts), cls: 'f', weight: 600 },
+    { text: line ? f2(line.fantasy) : '', cls: 'f you', weight: 600 },
     { text: prob, cls: `f ${probWarn ? 'warn' : 'dim'}` },
     { text: gameLabel(row, game), cls: 'txt dim2' },
   ];
@@ -67,7 +66,7 @@ function tonightCells(row, live, goalie) {
 function seasonCells(row, columns) {
   const s = row.season || {};
   const cells = [
-    { text: s.gp ? f1(s.fp) : '', cls: 'f' },
+    { text: s.gp ? f2(s.fp) : '', cls: 'f' },
     { text: s.fp_per_game === null ? '' : f2(s.fp_per_game), cls: 'f', weight: 600 },
     { text: row.ros === null || row.ros === undefined ? '' : Math.round(row.ros), cls: 'f' },
   ];
@@ -188,7 +187,7 @@ export function Roster({ league, version }) {
   if (!data) return html`<div class="empty">Loading…</div>`;
   // Live points belong to today's games; once the plan is tomorrow's, they don't apply to it.
   const live = tonight && tonight.date === data.day ? tonight.players : null;
-  const liveTotal = live ? f1(tonight.lineup_live) : '—';
+  const liveTotal = live ? f2(tonight.lineup_live) : '—';
   // Season: the whole roster in two groups, as the design, so a sort ranks everyone you hold.
   const all = data.groups.flatMap((g) => g.rows);
   const groups = view === 'season'
@@ -197,7 +196,7 @@ export function Roster({ league, version }) {
     : data.groups;
   return html`
     <div class="sum">
-      <div><span class="k">Proj tonight</span><span class="v">${f1(data.proj_tonight)}</span></div>
+      <div><span class="k">Proj tonight</span><span class="v">${f2(data.proj_tonight)}</span></div>
       <div><span class="k">Live</span><span class="v you">${liveTotal}</span></div>
       <div><span class="k">Next puck</span><span class="v">${data.next_puck ? puckTime(data.next_puck) : '—'}</span></div>
     </div>

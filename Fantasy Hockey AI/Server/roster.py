@@ -28,7 +28,7 @@ def season(stats: dict, weights: dict, goalie: bool) -> dict:
     for a goalie save percentage."""
     stats = dict(stats or {})
     gp = stats.get("gp") or 0
-    fp = round(sum(w * stats.get(k, 0) for k, w in weights.items()), 1) if gp else 0.0
+    fp = round(sum(w * stats.get(k, 0) for k, w in weights.items()), 2) if gp else 0.0
     out = {**stats, "fp": fp, "fp_per_game": round(fp / gp, 2) if gp else None}
     if goalie:
         faced = stats.get("saves", 0) + stats.get("goals_against", 0)
@@ -101,7 +101,7 @@ def roster_view(plan: dict, scoreset, slot_rows: list) -> dict:
     return {
         "day": plan.get("game_date"), "games_today": plan.get("games_today", True),
         "team": plan.get("team"), "file_generated_at": plan.get("generated_at"),
-        "proj_tonight": round(sum(s["mean"] for s in tonight), 1),
+        "proj_tonight": round(sum(s["mean"] for s in tonight), 2),
         "next_puck": ahead[0] if ahead else None, "empty_slots": empty,
         "columns": {"skater": [c for c in columns if c[0] not in GOALIE_KEYS],
                     "goalie": [["gp", "GP"]] + [c for c in columns if c[0] in GOALIE_KEYS]},
