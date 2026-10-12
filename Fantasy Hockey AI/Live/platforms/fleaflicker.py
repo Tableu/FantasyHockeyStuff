@@ -22,10 +22,11 @@ import html
 import json
 import logging
 import re
+import threading
 import time
 import urllib.request
 import zoneinfo
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import pandas as pd
 
@@ -40,9 +41,13 @@ EASTERN = zoneinfo.ZoneInfo("America/New_York")
 # One league read asks for the schedule and the transaction list once per team; they are fetched
 # once and reused for this long (an adapter lives for one read in the plan window, but the draft
 # tools keep theirs). Team rosters are fetched this many at a time: Fleaflicker answers a burst
-# with 403 Forbidden for a while (2026-09-27: ~280 transaction pages in a row did it).
+# with 403 Forbidden for a while (2026-09-27: ~280 transaction pages in a row did it; 2026-10-12:
+# six league reads back to back, ~125 calls in ~40 s, then a seventh at 5 at a time).
 REUSE_SECONDS = 60
 ROSTER_WORKERS = 3
+# A league read's other answers (schedule, transactions, the matchup, the team page, today's box
+# score) are fetched this many at a time alongside the rosters (prefetch): ~2.5 s one after another.
+PREFETCH_WORKERS = 2
 # The team page's own count, e.g. "Acquisitions Week 4 /6": moves used this week and this week's
 # limit. The API has neither (FetchRoster, FetchLeagueRules: checked 2026-10-01).
 TEAM_PAGE = "https://www.fleaflicker.com/nhl/leagues/{league}/teams/{team}"
@@ -138,17 +143,43 @@ class Fleaflicker:
     def __init__(self, league_id: int, season=None):
         self.league_id = int(league_id)
         self.season = season
-        self._reused = {}                  # key -> (fetched at, value): see REUSE_SECONDS
+        self._reused = {}                  # key -> (fetched at, Future): see REUSE_SECONDS
+        self._reuse_lock = threading.Lock()
         self._days = {}                    # (game id, day ordinal) -> a past day's box score (daily_points)
 
     def _reuse(self, key, fetch):
-        """`fetch()`, or its value from under REUSE_SECONDS ago."""
-        hit = self._reused.get(key)
-        if hit is not None and time.monotonic() - hit[0] < REUSE_SECONDS:
-            return hit[1]
-        value = fetch()
-        self._reused[key] = (time.monotonic(), value)
-        return value
+        """`fetch()`, or its value from under REUSE_SECONDS ago -- or, while another thread is
+        fetching it (prefetch), that fetch's answer when it comes. A failed fetch is not kept."""
+        with self._reuse_lock:
+            hit = self._reused.get(key)
+            if hit is not None and time.monotonic() - hit[0] < REUSE_SECONDS:
+                mine = None
+            else:
+                mine = Future()
+                hit = self._reused[key] = (time.monotonic(), mine)
+        if mine is None:
+            return hit[1].result()
+        try:
+            mine.set_result(fetch())
+        except BaseException as error:
+            with self._reuse_lock:
+                if self._reused.get(key) is hit:
+                    del self._reused[key]
+            mine.set_exception(error)
+        return mine.result()
+
+    def prefetch(self, my_team_id: int, day: dt.date, when: dt.datetime | None = None) -> None:
+        """Starts fetching, PREFETCH_WORKERS at a time, what a league read asks for after the
+        rosters (LeagueSnapshot.from_platform): the schedule and the transaction list, the
+        matchup, the team page, today's box score. The read's own calls then take them from
+        `_reuse`, waiting for any still on its way. Returns at once."""
+        pool = ThreadPoolExecutor(max_workers=PREFETCH_WORKERS)
+        for task in (lambda: self.moves_used(my_team_id, day, when=when),
+                     lambda: self.matchup(my_team_id, day),
+                     lambda: self.acquisitions(my_team_id),
+                     lambda: self.today_points(my_team_id)):
+            pool.submit(task)       # a failure here is the read's own call's to report
+        pool.shutdown(wait=False)
 
     def _get(self, endpoint, **params):
         return _get(endpoint, league_id=self.league_id, **params)
@@ -203,8 +234,10 @@ class Fleaflicker:
         """[(number, first day, last day, start, end)]: `start` the instant the period begins
         (6:00 AM Eastern on its first day), `end` the instant after its last day (UTC)."""
         def fetch():
-            return period_rows(self._get("FetchLeagueScoreboard", season=self.season))
-        # Asked once per team's move count and per period lookup: 17-45 fetches a read, now one.
+            return period_rows(self._reuse("scoreboard", lambda: self._get("FetchLeagueScoreboard",
+                                                                           season=self.season)))
+        # Asked once per team's move count and per period lookup: 17-45 fetches a read, now one
+        # -- the same answer scoreboard() and today_points() read.
         return self._reuse(("periods", self.season), fetch)
 
     def period_at(self, when: dt.datetime):
@@ -228,6 +261,9 @@ class Fleaflicker:
     def acquisitions(self, team_id: int):
         """(moves used this week, this week's limit) as the team's page shows them, or None when the
         page cannot be read or does not show them. Read live, never from a past `season`."""
+        return self._reuse(("acquisitions", team_id), lambda: self._acquisitions(team_id))
+
+    def _acquisitions(self, team_id: int):
         url = TEAM_PAGE.format(league=self.league_id, team=team_id)
         try:
             request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -245,8 +281,9 @@ class Fleaflicker:
     def matchup(self, team_id: int, day: dt.date | None = None) -> Matchup | None:
         """The team's game in the period containing `day` (default: the platform's current one)."""
         period = self.period_of(day) if day else None
-        raw = self._get("FetchLeagueScoreboard", season=self.season,
-                        scoring_period=None if period is None else _scoring_period(self, period))
+        scoring_period = None if period is None else _scoring_period(self, period)
+        raw = self._reuse(("scoreboard", scoring_period), lambda: self._get(
+            "FetchLeagueScoreboard", season=self.season, scoring_period=scoring_period))
         number = raw.get("schedulePeriod", {}).get("ordinal")
         for game in raw.get("games", []):
             for me, them in (("home", "away"), ("away", "home")):
@@ -293,7 +330,8 @@ class Fleaflicker:
         game, side = self._my_game(team_id)
         if game is None:
             return None
-        box = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"])
+        box = self._reuse(("boxscore", game["id"]),
+                          lambda: self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"]))
         return (_day(box["scoringPeriod"]), *self._day_points(box, side))
 
     def daily_points(self, team_id: int) -> dict:

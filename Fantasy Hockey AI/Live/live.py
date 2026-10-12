@@ -166,6 +166,8 @@ class LeagueSnapshot:
         when = None if now is None else now.replace(tzinfo=dt.timezone.utc)
 
         ids = platforms.PlayerIds(adapter.platform)
+        if hasattr(adapter, "prefetch"):      # the rest of the read, fetched alongside the rosters
+            adapter.prefetch(my_team_id, day, when)
         teams, me, unmatched = [], None, []
         for index, team in enumerate(adapter.rosters()):
             roster, missing = ids.resolve(team.roster)
