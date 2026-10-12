@@ -31,7 +31,8 @@
     "lazy": true,
     "min_gain": 0.0,
     "prune": true,
-    "restarts": 0
+    "restarts": 0,
+    "replacement_depth": "best"
   },
   "rung3_streamer": {
     "horizon_weeks": 1

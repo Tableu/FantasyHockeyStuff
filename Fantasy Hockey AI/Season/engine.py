@@ -18,6 +18,7 @@ solver, the draft rule, rung 3's estimator (`decisionlayer.py`). Everything else
 """
 
 import logging
+import math
 import os
 import sys
 from collections import defaultdict
@@ -972,6 +973,8 @@ class Season:
     # The window a move is judged over, in matchup weeks after the current one. Fixed and shared by
     # every rung, so hit rates compare -- it is an accounting convention, not any manager's horizon.
     MOVE_ACCOUNTING_WEEKS = 1
+    # A roster's regulars: its best this-many players by rest-of-season value when a rental drops one.
+    REGULAR_RANK = 13
 
     def _move_quality(self, team_index) -> dict:
         """Did this team's moves pay? Realized points of the player added minus the player dropped.
@@ -981,7 +984,7 @@ class Season:
         is graded against zero. This is the decision-level metric for transactions: a rung can lose
         points by picking badly or by moving too often, and a hit rate separates the two.
         """
-        gains, rentals, drop_tail = [], [], []
+        gains, rentals, drop_tail, regulars = [], [], [], 0
         for move in self.state.transactions:
             if move["team"] != team_index:
                 continue
@@ -1000,6 +1003,9 @@ class Season:
             dropped = (sum(self.outcomes.score(d, move["dropped"]) for d in days)
                        if move["dropped"] is not None else 0.0)
             (rentals if rental else gains).append(added - dropped)
+            # A rental that dropped a regular: one of the roster's REGULAR_RANK best by
+            # rest-of-season value (the replacement-scarcity plan's measure).
+            regulars += bool(rental and (move.get("drop_rank") or math.inf) <= self.REGULAR_RANK)
             if rental and move["dropped"] is not None:
                 # What the dropped streamer went on to score next week: should be ~replacement.
                 nxt = self.calendar.weeks[min(week, len(self.calendar.weeks) - 1)]
@@ -1016,4 +1022,5 @@ class Season:
         rhit, rper = summary(rentals)
         return {"move_hit_rate": hit, "realized_gain_per_move": per,
                 "rentals": len(rentals), "rental_hit_rate": rhit, "rental_gain": rper,
-                "rental_drop_next_week": float(np.mean(drop_tail)) if drop_tail else float("nan")}
+                "rental_drop_next_week": float(np.mean(drop_tail)) if drop_tail else float("nan"),
+                "regular_drops": regulars}

@@ -28,7 +28,9 @@ commitment.
 What may be dropped: streaming.py's spots (skaters below replacement over the rest of the season),
 a player the plan itself picked up on an earlier night (so rentals chain), or nobody into an open
 spot. The drop cost is streaming.py's: his value after this week minus the best free agent's at his
-positions -- about zero for a real spot, large for a regular. Goalies are not streamed.
+positions -- about zero for a real spot, large for a regular. Goalies are not streamed. With
+`replacement_depth` "expected", the free agent we would get back instead (`streaming.Replacement`),
+each of the roster's own players the plan drops using up the top of the pool for the next.
 
 Free agents can be added on any night they play. A player on waivers can only be claimed today,
 and pays from the day he clears. Moves today cost what the league charges today (nothing before
@@ -162,7 +164,9 @@ class WeekPlanner:
             if line:
                 self.spots = [p for p in self.spots if not streaming.is_goalie(eligibility, p)
                               or (view.ros_rate(p) or 0.0) < params.starter_share * line]
-        self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True)
+        self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True,
+                                           depth=params.replacement_depth)
+        self.own = set(self.roster)
         self.horizon = horizon
 
         self._nights, self._next, self._memo, self._cost, self._plays = {}, {}, {}, {}, {}
@@ -263,14 +267,22 @@ class WeekPlanner:
         out += [(p, self.today, claims[p]) for p in best]
         return out
 
-    def drop_cost(self, player_id) -> float:
+    def drop_cost(self, player_id, moves=()) -> float:
+        """His value after this week minus his replacement's. With `replacement_depth` "expected",
+        the roster's own players `moves` already drop have used up the top of the pool first
+        (`Replacement.claimed`), so each further drop is priced against the pool behind them."""
         if player_id is None:
             return 0.0
-        if player_id not in self._cost:
-            self._cost[player_id] = max(0.0, streaming.value_after_week(
+        key = player_id
+        if self.after.depth != "best":
+            key = (player_id, tuple(m["outgoing"] for m in moves
+                                    if m["outgoing"] in self.own and m["outgoing"] != player_id))
+        if key not in self._cost:
+            taken = self.after.claimed(key[1]) if isinstance(key, tuple) else ()
+            self._cost[key] = max(0.0, streaming.value_after_week(
                 self.view, player_id, self.horizon, self.source)
-                - self.after.at(self.eligibility.get(player_id, frozenset())))
-        return self._cost[player_id]
+                - self.after.at(self.eligibility.get(player_id, frozenset()), exclude=taken))
+        return self._cost[key]
 
     # ---------- the roster a plan holds ----------
 
@@ -617,13 +629,13 @@ class WeekPlanner:
         if later is not None:
             rewired = next(m for m in trial if m["outgoing"] == outgoing)
             rewired["outgoing"] = incoming
-            rewired["drop_cost"] = self.drop_cost(incoming)
+            rewired["drop_cost"] = self.drop_cost(incoming, moves)
             rewired["bar"] = (rewired["drop_cost"] + self.params.margin
                               * self.sd(rewired["incoming"], incoming, rewired["effective"]))
         late = day == self.today and self.late
         new = {"day": day, "effective": effective, "kind": kind, "incoming": incoming,
                "outgoing": outgoing, "for_next_week": late and self.next_weight > 0.0,
-               "drop_cost": self.drop_cost(incoming if later is not None else outgoing)}
+               "drop_cost": self.drop_cost(incoming if later is not None else outgoing, moves)}
         new["bar"] = new["drop_cost"] + self.params.margin * self.sd(incoming, outgoing, effective)
         new["gain"] = self.delta(moves, trial + [new], effective, (incoming, outgoing), late=late)
         return trial + [new]
@@ -676,7 +688,8 @@ class WeekPlanner:
                                             today=self.today)
                 else:
                     self.state.add(self.view.team_index, incoming, self.today, drop=outgoing,
-                                   reason="rental")
+                                   reason="rental",
+                                   drop_rank=streaming.roster_rank(self.view, outgoing, self.source))
             except Exception as error:                 # noqa: BLE001 - state raises IllegalMove
                 log.debug("team %d could not stream %s: %s", self.view.team_index, incoming, error)
                 m["failed"] = True

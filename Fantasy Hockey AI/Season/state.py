@@ -159,8 +159,10 @@ class LeagueState:
         self.owner[player_id] = team_index
         team.assert_legal()
 
-    def add(self, team_index: int, player_id, today, drop=None, reason="add") -> None:
-        """Acquire a free agent. Costs one move; the accompanying drop does not."""
+    def add(self, team_index: int, player_id, today, drop=None, reason="add",
+            drop_rank=None) -> None:
+        """Acquire a free agent. Costs one move; the accompanying drop does not. `drop_rank`: the
+        drop's rank on the roster by rest-of-season value, recorded when given (a rental's)."""
         team = self.teams[team_index]
         if player_id not in self.pool:
             raise IllegalMove(f"{player_id} is not a free agent (held by "
@@ -173,6 +175,8 @@ class LeagueState:
             raise IllegalMove(f"team {team_index} has {team.moves_left} move(s) left and this "
                               f"add costs {cost}")
         self._acquire(team_index, player_id, today, drop, reason, cost)
+        if drop_rank is not None:
+            self.transactions[-1]["drop_rank"] = drop_rank
 
     def _move_cost(self, action: str, drop=None) -> int:
         """What an action spends from the weekly budget, with its accompanying drop if any."""

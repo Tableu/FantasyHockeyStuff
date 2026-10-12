@@ -17,7 +17,10 @@
   "auth": null,
   "overrides": {
     "schedule": {
-      "min_first_week_games": 20
+      "min_first_week_games": 20,
+      "regular_season_weeks_by_season": {
+        "2025-26": 22
+      }
     }
   },
   "draft_window": {}

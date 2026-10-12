@@ -236,7 +236,8 @@ class Context:
                              win=teams["matchup_wins"] / teams["weeks"],
                              playoff=teams["made_playoffs"].astype(float))
                 .set_index(["replication", "seat"])
-                [["rung", "pts", "win", "playoff", "moves_spent", "rentals", "move_hit_rate"]])
+                [["rung", "pts", "win", "playoff", "moves_spent", "rentals", "move_hit_rate",
+                  "regular_drops", "rental_drop_next_week"]])
 
     def base(self, replications) -> pd.DataFrame:
         """The shipped league at this many drafts, each draft played once and cached (`seats`)."""

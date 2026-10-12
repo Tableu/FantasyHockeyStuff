@@ -80,10 +80,15 @@ class StreamParams:
     restarts: int               # week mode: when the plan leaves moves unspent, rebuild it up to this
                                 # many times without one of its held pickups' team-days, keeping a
                                 # rebuild worth more (WeekPlanner._restart); 0 = off
+    replacement_depth: str      # what a drop is priced against: "best" = the best eligible free
+                                # agent; "expected" = the one we would get back (`Replacement`)
 
     def __post_init__(self):
         if self.mode not in MODES:
             raise ValueError(f"streaming mode {self.mode!r}; use one of {MODES}")
+        if self.replacement_depth not in DEPTHS:
+            raise ValueError(f"streaming replacement_depth {self.replacement_depth!r}; "
+                             f"use one of {DEPTHS}")
 
     def describe(self) -> str:
         return (f"k={self.spots} r={self.reserve} lam={self.lam:g} ms={self.margin:g}"
@@ -96,13 +101,24 @@ class StreamParams:
                 f"{' lazy' if self.mode == 'week' and self.lazy else ''}"
                 f"{f' mg={self.min_gain:g}' if self.mode == 'week' and self.min_gain else ''}"
                 f"{' prune' if self.mode == 'week' and self.prune else ''}"
-                f"{f' rs={self.restarts}' if self.mode == 'week' and self.restarts else ''}")
+                f"{f' rs={self.restarts}' if self.mode == 'week' and self.restarts else ''}"
+                f"{' rep=exp' if self.replacement_depth == 'expected' else ''}")
 
 
 # How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
 # as the week's moves expire (below); "week" plans the rest of the week's moves together and makes
 # only today's (weekplan.py).
 MODES = ("daily", "week")
+
+# What a drop is priced against (`Replacement`): the best eligible free agent, or the expected one.
+DEPTHS = ("best", "expected")
+
+# P(the free agent at this rank of the pool is still free a week later), rank 1, 2, ... (the last
+# value for every rank beyond): 12088, 2024-25, the day's free skaters ranked on their real points
+# over the next 30 days (Season/wire_depletion.py, ~/.claude/plans/replacement-scarcity.md step 1:
+# rank 1 0.49, ranks 2-3 0.62, 4-5 0.73, 6-10 0.72; the simulator's rung-8 opponents 0.54 / 0.67 /
+# 0.76 / 0.76). A week: a drop is priced on his value after this week, bought back next week.
+WEEK_SURVIVAL = (0.49, 0.62, 0.62, 0.73, 0.73, 0.72)
 
 
 def _week_share_left(view) -> float:
@@ -126,21 +142,80 @@ def value_after_week(view, player_id, weeks, source) -> float:
 
 
 class Replacement:
-    """The best free agent at a set of positions, over a window -- memoized per night."""
+    """The free agent a drop at a set of positions is priced against, over a window -- memoized
+    per night.
 
-    def __init__(self, view, pool, weeks, source, eligibility, after_week):
+    `depth` "best": the best eligible free agent. Every skater below him cost 0 to drop, however
+    thin the pool behind him: espn-la, 2026-10-11, Lafreniere (118.7 rest of season) and Martone
+    (101.6) were both rented away against Rust (129.4), who could be added once and never was.
+
+    `depth` "expected": the free agent we would get back. Opponents take the top of the pool first
+    (`WEEK_SURVIVAL`, by his rank in the pool), so the replacement is the best eligible free agent
+    still there a week from now, in expectation:
+
+        E = sum_k v_k s_k prod_{j<k} (1 - s_j)       over the eligible free agents, best first
+
+    `exclude` takes free agents out first: the ones the plan's other drops use up (`claimed`)."""
+
+    def __init__(self, view, pool, weeks, source, eligibility, after_week, depth="best"):
         self.eligibility = eligibility
+        self.depth = depth
         value = value_after_week if after_week else valuation.player_value
         self.values = sorted(((value(view, p, weeks, source), p) for p in pool), reverse=True)
+        # His rank in the pool among skaters, or among goalies: the survival curve's rank.
+        self.rank, seen = {}, {True: 0, False: 0}
+        for _, p in self.values:
+            goalie = is_goalie(eligibility, p)
+            seen[goalie] += 1
+            self.rank[p] = seen[goalie]
         self._memo = {}
 
     def at(self, positions, exclude=()) -> float:
         key = (frozenset(positions), frozenset(exclude))
         if key not in self._memo:
-            self._memo[key] = next((v for v, p in self.values
-                                    if p not in exclude
-                                    and self.eligibility.get(p, frozenset()) & positions), 0.0)
+            eligible = ((v, p) for v, p in self.values
+                        if p not in exclude and self.eligibility.get(p, frozenset()) & positions)
+            if self.depth == "best":
+                self._memo[key] = next((v for v, _ in eligible), 0.0)
+            else:
+                total, missing = 0.0, 1.0
+                for v, p in eligible:
+                    s = WEEK_SURVIVAL[min(self.rank[p], len(WEEK_SURVIVAL)) - 1]
+                    total += missing * s * v
+                    missing *= 1.0 - s
+                    if missing < 1e-6:
+                        break
+                self._memo[key] = total
         return self._memo[key]
+
+    def claimed(self, drops) -> frozenset:
+        """The free agents `drops` use up, in order: each the best eligible one not already used.
+        A free agent can be added once, so a second drop at the same positions is priced against
+        the pool behind the first's. Nothing with depth "best" (each drop against the best)."""
+        if self.depth == "best":
+            return frozenset()
+        used = set()
+        for d in drops:
+            positions = self.eligibility.get(d, frozenset())
+            top = next((p for _, p in self.values
+                        if p not in used and self.eligibility.get(p, frozenset()) & positions), None)
+            if top is not None:
+                used.add(top)
+        return frozenset(used)
+
+
+def roster_rank(view, player_id, source):
+    """His rank on the roster by rest-of-season value (1 = the best), or None for no player: the
+    backtest's record of how often a rental drops a regular (Season/engine.py). Unknown players
+    count as 0."""
+    if player_id is None:
+        return None
+
+    def value(p):
+        return (valuation.player_value(view, p, None, source)
+                if valuation.known(view, p, source) else 0.0)
+    mine = value(player_id)
+    return 1 + sum(1 for p in view.roster if p != player_id and value(p) > mine)
 
 
 def is_goalie(eligibility, player_id) -> bool:
@@ -164,7 +239,8 @@ def spots(view, params, horizon, source, pool, eligibility, goalies=False) -> li
     # rest of season), and Hanifin below Letang on seven straight days with a HIGHER rate. A short
     # schedule gap is what a rental exploits, not what makes a player replaceable.
     horizon = None
-    replacement = Replacement(view, pool, horizon, source, eligibility, after_week=False)
+    replacement = Replacement(view, pool, horizon, source, eligibility, after_week=False,
+                              depth=params.replacement_depth)
     scored = []
     for p in view.roster:
         if (is_goalie(eligibility, p) and not goalies) or not valuation.known(view, p, source):
@@ -217,14 +293,18 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
 
         rates = {p: valuation.rate(view, p, source) for p in roster + candidates}
         nights = valuation.RosterNights(view, roster, rates, 0, slot_order, eligibility, accepts)
-        after = Replacement(view, pool, horizon, source, eligibility, after_week=True)
+        after = Replacement(view, pool, horizon, source, eligibility, after_week=True,
+                            depth=params.replacement_depth)
+        # Today's earlier drops of the roster's own players have used up the top of the pool.
+        taken = after.claimed([d["outgoing"] for d in done
+                               if d["outgoing"] is not None and not d["outgoing_picked_up"]])
         cost = {}
         for o in outgoing_options:
             if o is None:
                 cost[o] = 0.0
             else:
                 cost[o] = max(0.0, value_after_week(view, o, horizon, source)
-                              - after.at(eligibility.get(o, frozenset())))
+                              - after.at(eligibility.get(o, frozenset()), exclude=taken))
 
         best = None
         for incoming in candidates:
@@ -246,11 +326,13 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
         _, gain, bar, floor, incoming, outgoing = best
         reserved.update({incoming, outgoing} - {None})
         claiming = view.on_waivers(incoming)
+        picked_up_today = any(d["incoming"] == outgoing for d in done)
         try:
             if claiming:
                 state.submit_claim(view.team_index, incoming, drop=outgoing, today=view.day)
             else:
-                state.add(view.team_index, incoming, view.day, drop=outgoing, reason="rental")
+                state.add(view.team_index, incoming, view.day, drop=outgoing, reason="rental",
+                          drop_rank=roster_rank(view, outgoing, source))
         except Exception as error:                     # noqa: BLE001 - state raises IllegalMove
             log.debug("team %d could not stream %s: %s", view.team_index, incoming, error)
             continue
@@ -260,7 +342,8 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
                      "drop_cost": floor, "spot": outgoing in holders,
                      "reserve": reserve_today(view, params), "moves_left": view.moves_left,
                      "incoming_games": len(nights.nights(incoming)),
-                     "outgoing_games": len(nights.nights(outgoing))})
+                     "outgoing_games": len(nights.nights(outgoing)),
+                     "outgoing_picked_up": picked_up_today})
         if claiming:
             # The claim resolves later; stop pricing against a roster that may change first.
             break

@@ -1,6 +1,6 @@
 {
   "name": "beagles",
-  "description": "Detected from fleaflicker league 12090 on 2026-10-07 (sync_league_settings.py); registry overrides: {\"schedule\": {\"min_first_week_games\": 20, \"regular_season_weeks_by_season\": {\"2024-25\": 24, \"2025-26\": 21}}}. Not held by these settings: a tied playoff matchup goes to the higher starter total, then the best single starter, then the bench (the harness: more regular-season points); week(s) [19] run two weeks on Fleaflicker (the harness's calendar splits them; the live plan reads the platform's weeks).",
+  "description": "Detected from fleaflicker league 12090 on 2026-10-12 (sync_league_settings.py); registry overrides: {\"schedule\": {\"min_first_week_games\": 20, \"regular_season_weeks_by_season\": {\"2024-25\": 24, \"2025-26\": 21}}}. Not held by these settings: a tied playoff matchup goes to the higher starter total, then the best single starter, then the bench (the harness: more regular-season points); week(s) [19] run two weeks on Fleaflicker (the harness's calendar splits them; the live plan reads the platform's weeks).",
   "teams": 14,
   "active_slots": {
     "C": 2,

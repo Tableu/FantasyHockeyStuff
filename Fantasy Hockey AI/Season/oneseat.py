@@ -132,6 +132,11 @@ def compare(base, alt, replications):
             "shipped_moves": float(base.loc[mine, "moves_spent"].mean()),
             "candidate_moves": float(alt.loc[mine, "moves_spent"].mean()),
             "opponent_moves": float(base.loc[rest, "moves_spent"].mean()),
+            # Rentals, and rentals that dropped one of the roster's 13 best by rest-of-season value
+            # (engine REGULAR_RANK), a season.
+            **{f"{side}_{m}": float(table.loc[mine, m].mean())
+               for side, table in (("shipped", base), ("candidate", alt))
+               for m in ("rentals", "regular_drops") if m in table},
             "replications": replications}
 
 
@@ -161,6 +166,11 @@ def summary(result) -> str:
                      f"{need[0.5]} for ±0.5 (one standard error)")
     lines.append(f"moves a season: shipped {result['shipped_moves']:.0f}, candidate "
                  f"{result['candidate_moves']:.0f}, opponents {result['opponent_moves']:.0f}")
+    if "shipped_regular_drops" in result:
+        lines.append(f"rentals a season: shipped {result['shipped_rentals']:.0f}, candidate "
+                     f"{result['candidate_rentals']:.0f}; of them dropping a regular (top 13): "
+                     f"shipped {result['shipped_regular_drops']:.1f}, candidate "
+                     f"{result['candidate_regular_drops']:.1f}")
     return "\n".join(lines)
 
 
