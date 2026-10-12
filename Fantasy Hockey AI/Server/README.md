@@ -48,7 +48,8 @@ the play-by-play's situation codes, which lag and misreport during a game. Fanta
 the newest plan and players.parquet's NHL ids.
 
 The refreshes are planpass.Planner's -- the same steps run_live.py takes -- and save the same plan files.
-The auto window (a quick refresh ~30 minutes before each group of games, and one once today's last
+The auto window (a refresh ~30 minutes before each group of games -- Full when the line charts
+are none today or over 4 h old (LINES_MAX_AGE), else Quick -- and one once today's last
 game has started) runs in the server unless --no-auto. From that last puck on, the plan is
 tomorrow's: its moves, lineup and projections, since tonight has no lineup left to set. No login yet, so it listens on this PC only (in the container: --host 0.0.0.0, which
 compose publishes to 127.0.0.1 alone).

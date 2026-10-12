@@ -57,8 +57,8 @@ Every call but the job's takes ?league=<name> (default: the first league served,
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
 read, plan and saved plan files in a child process that exits after -- so the server's memory does
 not grow with the leagues it plans -- and one league's failure (its platform down) leaves the
-others' plans. The auto window runs here: a quick refresh about 30 minutes before each group of games, once
-per group, for every league, and one more once today's last game has started -- the plan is then
+others' plans. The auto window runs here: a refresh about 30 minutes before each group of games, once
+per group -- Full when the line charts are none today or over 4 h old, else Quick -- for every league, and one more once today's last game has started -- the plan is then
 tomorrow's (moves, lineup and projections), since tonight has no lineup left to set. The live games' NHL feeds are fetched once for all leagues; each league
 sees them with its own rosters and scoring. Every call but /login, /logout and the app's files needs
 a session (the app's password) or plan_gui's key (auth.py; `python auth.py set-password` first).
@@ -99,6 +99,7 @@ import simlayer  # noqa: E402
 
 APP = Path(__file__).resolve().parent / "app"     # the phone app's static files, served at /app/
 AUTO_CHECK_S = 60               # how often the auto window looks at the clock
+LINES_MAX_AGE = dt.timedelta(hours=4)   # an auto window runs Full when the line charts are older
 JOBS_KEPT = 20                  # finished jobs /jobs still answers for
 
 
@@ -226,14 +227,28 @@ class Worker:
                        for f in planpass.saved_plans(league, self.day()))
         return all(saved_since(league) for league in self.leagues.values())
 
+    def lines_age(self) -> dt.timedelta | None:
+        """How old the line charts this server fetched today are; None: none today (or since a
+        restart, which forgets -- that window takes them again, ~15 s)."""
+        fetched = self.planner.last.get("lines") if self.planner is not None else None
+        if fetched is None or fetched.date() != dt.date.today():
+            return None
+        return dt.datetime.now() - fetched
+
     def auto_loop(self):
-        """A quick refresh ~30 minutes before each group of games, once per group."""
+        """A refresh ~30 minutes before each group of games, once per group: Full when the line
+        charts are stale (none today, or older than LINES_MAX_AGE -- most days the first window,
+        after the morning skates; a matinee day's later ones too), else Quick."""
         while True:
             try:
                 window = planpass.next_window(self.day(), self.now())
                 if window is not None and self.current is None and not self.planned_for(window):
                     self.windows_done.add(window)
-                    self.start("quick", by=f"auto: games at {window:%H:%M} UTC")
+                    age = self.lines_age()
+                    mode = "full" if age is None or age > LINES_MAX_AGE else "quick"
+                    why = ("" if mode == "quick" else " (no line charts today)" if age is None
+                           else f" (line charts {age.total_seconds() / 3600:.0f} h old)")
+                    self.start(mode, by=f"auto: games at {window:%H:%M} UTC{why}")
                 # Once today's last game starts, tomorrow's plan, once (or on a restart before
                 # any plan for tomorrow was saved).
                 day = self.day()

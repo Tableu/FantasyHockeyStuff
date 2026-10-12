@@ -53,7 +53,7 @@ WINDOW_LEAD = dt.timedelta(minutes=30)
 MODEL_FEATURES = paths.SIBLINGS / "ModelFeatures"
 PIPELINE = paths.SIBLINGS.parent / "pipeline"
 SNAPSHOT_KINDS = ("injuries", "lines", "goalies")
-# A quick refresh (the auto window, the Quick button) skips only the line charts. Injuries ride
+# A quick refresh (the Quick button, an auto window with fresh line charts) skips only the line charts. Injuries ride
 # along since the Fleaflicker listing reads its pages in parallel (~5 s instead of ~16 s), so a
 # late scratch posted as an injury reaches the next window's plan.
 QUICK_SNAPSHOT_KINDS = ("injuries", "goalies")
@@ -87,7 +87,15 @@ def snapshots(kinds=SNAPSHOT_KINDS, echo=print, force_goalies=False, injuries_ma
             command += ["--max-age", str(injuries_max_age)]
         if kind == "injuries" and injuries_targeted:
             command += ["--targeted"]
-        lines = _run(command, PIPELINE, echo, f"snapshot {kind}")
+        try:
+            lines = _run(command, PIPELINE, echo, f"snapshot {kind}")
+        except RuntimeError as error:
+            if kind != "lines":
+                raise
+            # A plan on the last line charts beats none (an auto window runs Full when they're
+            # stale); not recorded as fetched, so the next window tries again.
+            echo(f"{error}\nsnapshot lines: planning on the last line charts")
+            continue
         reused = [l for l in lines if ": skipped, last snapshot" in l]
         if reused:
             echo(f"snapshot {kind}: reused -- " + "; ".join(l.split(" INFO ")[-1] for l in reused))

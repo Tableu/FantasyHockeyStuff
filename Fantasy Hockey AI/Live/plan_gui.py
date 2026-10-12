@@ -11,10 +11,11 @@ the server's refreshes). The day, the league's source and rehearsal options (--d
 
     Full refresh    fresh injury, line-chart and goalie reports -> tonight's projections -> read the
                     league from its platform -> the shipped manager's plan
-    Quick refresh   injury and goalie reports -> tonight's projections -> the plan again (lineup
-                    news, late scratches) -- what the auto window runs
-    Auto window     the server's: a quick refresh about 30 minutes before each group of games
-                    (Fleaflicker locks each player at his own game), once per group
+    Quick refresh   the same without the line charts: injury and goalie reports -> tonight's
+                    projections -> read the league again -> the plan (lineup news, late scratches)
+    Auto window     the server's: a refresh about 30 minutes before each group of games
+                    (Fleaflicker locks each player at his own game), once per group -- Full when
+                    the line charts are none today or over 4 h old, else Quick
 
 On opening the window shows the server's newest plan (a full refresh there when it has none
 today); its buttons start the server's refreshes and stream their progress; every minute it looks
