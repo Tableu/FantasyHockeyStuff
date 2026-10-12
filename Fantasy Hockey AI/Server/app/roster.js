@@ -56,10 +56,11 @@ function tonightCells(row, live, goalie) {
     { text: prob, cls: `f ${probWarn ? 'warn' : 'dim'}` },
     { text: gameLabel(row, game), cls: 'txt dim2' },
   ];
-  const stats = !line ? (goalie ? ['', '', '', '', ''] : ['', '', '', '', '', ''])
+  // A goalie's five stats take the skaters' six columns (a blank before TOI), so the groups line up.
+  const stats = !line ? ['', '', '', '', '', '']
     : goalie
       ? [line.shots_against, line.saves, line.goals_against,
-         line.shots_against ? (line.saves / line.shots_against).toFixed(3).replace(/^0/, '') : '', line.toi]
+         line.shots_against ? (line.saves / line.shots_against).toFixed(3).replace(/^0/, '') : '', '', line.toi]
       : [line.goals, line.assists, line.shots, line.hits, line.blocks, line.toi];
   return cells.concat(stats.map((v) => ({ text: v === undefined || v === null ? '' : String(v) })));
 }
@@ -86,7 +87,7 @@ const TITLES = {
 function heads(view, goalie, columns) {
   const F = (label, strong) => ({ label, cls: 'f', strong });
   const tonight = () => [F('xPts', true), F('Live'), F('P%'), { label: 'Game', cls: 'txt' },
-    ...(goalie ? ['SA', 'SV', 'GA', 'SV%', 'TOI'] : ['G', 'A', 'SOG', 'HIT', 'BLK', 'TOI']).map((label) => ({ label }))];
+    ...(goalie ? ['SA', 'SV', 'GA', 'SV%', '', 'TOI'] : ['G', 'A', 'SOG', 'HIT', 'BLK', 'TOI']).map((label) => ({ label }))];
   const season = () => [{ ...F('FP'), key: 'fp' }, { ...F('FP/g', true), key: 'fp_per_game' }, { ...F('ROS'), key: 'ros' },
     ...columns.map(([key, label]) => ({ label, key })), ...(goalie ? [{ label: 'SV%', key: 'sv_pct' }] : [])];
   const cols = view === 'tonight' ? tonight() : view === 'season' ? season()
@@ -109,8 +110,14 @@ function sorted(rows, sort) {
   }).map(([row]) => row);
 }
 
-function Group({ group, view, columns, live, open, onToggle, sort, onSort }) {
-  const cols = heads(view, group.goalie, group.goalie ? columns.goalie : columns.skater);
+// The columns a group shows: skaters' and goalies' differ in number.
+const groupCols = (group, view, columns) => heads(view, group.goalie, group.goalie ? columns.goalie : columns.skater);
+
+// One group's rows in the shared table; `span` is the widest group's column count, so a group with
+// fewer columns (the goalies) is padded out to the table's edge.
+function Group({ group, view, columns, span, live, open, onToggle, sort, onSort }) {
+  const cols = groupCols(group, view, columns);
+  const pad = Array.from({ length: Math.max(0, span - cols.length) });
   const rows = view === 'tonight' ? group.rows : sorted(group.rows, sort);
   const head = (c) => {
     if (!c.key) return c.label;
@@ -118,11 +125,12 @@ function Group({ group, view, columns, live, open, onToggle, sort, onSort }) {
     return html`<button type="button" class=${`sort ${on ? 'on' : ''}`} onClick=${() => onSort(c.key)}
       aria-label=${`Sort by ${c.label}`}>${c.label}${on ? (sort.desc ? ' ▾' : ' ▴') : ''}</button>`;
   };
-  return html`<table class="roster"><tbody>
+  return html`<tbody>
     <tr class="sub">
       <th scope="colgroup" class="stick">${group.name}</th>
       ${cols.map((c) => html`<th scope="col" class=${c.cls || ''} style=${c.strong ? 'color: var(--text)' : ''} title=${c.title}
         aria-sort=${c.key && sort && sort.key === c.key ? (sort.desc ? 'descending' : 'ascending') : undefined}>${head(c)}</th>`)}
+      ${pad.map(() => html`<th aria-hidden="true"></th>`)}
     </tr>
     ${rows.map((row) => {
       const tonightRow = () => tonightCells(row, live && live[row.player_id], group.goalie);
@@ -139,10 +147,11 @@ function Group({ group, view, columns, live, open, onToggle, sort, onSort }) {
             ${row.flag && html` <span class=${`flag ${FLAG_CLASS[row.flag] || 'warn'}`}>${row.flag}</span>`}
           </th>
           ${cells.map((c) => html`<td class=${c.cls || ''} style=${c.weight ? `font-weight: ${c.weight}` : ''}>${c.text}</td>`)}
+          ${pad.map(() => html`<td></td>`)}
         </tr>
-        ${isOpen && html`<tr class="note"><td colspan=${cols.length + 1}><span>${row.player} · ${row.positions}: ${row.notes.join(' · ')}</span></td></tr>`}`;
+        ${isOpen && html`<tr class="note"><td colspan=${Math.max(span, cols.length) + 1}><span>${row.player} · ${row.positions}: ${row.notes.join(' · ')}</span></td></tr>`}`;
     })}
-  </tbody></table>`;
+  </tbody>`;
 }
 
 export function Roster({ league, version, wide }) {
@@ -205,6 +214,7 @@ export function Roster({ league, version, wide }) {
     ? [{ name: 'Skaters', goalie: false, rows: all.filter((r) => !r.goalie) },
        { name: 'Goalies', goalie: true, rows: all.filter((r) => r.goalie) }].filter((g) => g.rows.length)
     : data.groups;
+  const span = Math.max(...groups.map((g) => groupCols(g, shownView, data.columns).length));
   return html`
     <div class="sum">
       <div><span class="k">Proj tonight</span><span class="v">${f2(data.proj_tonight)}</span></div>
@@ -220,9 +230,9 @@ export function Roster({ league, version, wide }) {
     ${liveError && html`<div class="error" role="alert">Live points: ${liveError}</div>`}
     ${!data.games_today && html`<div class="empty">No NHL games on ${data.day}: the roster, no lineup to set.</div>`}
     ${data.empty_slots > 0 && data.games_today && html`<div class="error">${data.empty_slots} empty lineup slot${data.empty_slots > 1 ? 's' : ''} tonight</div>`}
-    <div class="table-scroll">
-      ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${shownView} columns=${data.columns}
+    <div class="table-scroll"><table class="roster">
+      ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${shownView} columns=${data.columns} span=${span}
         live=${live} open=${open} onToggle=${(id) => setOpen(open === id ? null : id)}
         sort=${sort} onSort=${sortBy} />`)}
-    </div>`;
+    </table></div>`;
 }
