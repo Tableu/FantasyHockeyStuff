@@ -49,6 +49,8 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /matchup              the app's Matchup: the week's score, each day's points for you and your
                                opponent, the league's week, from the platform (kept a minute), with
                                the plan's projection and P(win) (matchup.py)
+    POST /login {password}     a session cookie for the app (auth.py); 401 wrong, 429 too many tries
+    POST /logout               ends this phone's session
     GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
@@ -57,8 +59,8 @@ not grow with the leagues it plans -- and one league's failure (its platform dow
 others' plans. The auto window runs here: a quick refresh about 30 minutes before each group of games, once
 per group, for every league, and one more once today's last game has started -- the plan is then
 tomorrow's (moves, lineup and projections), since tonight has no lineup left to set. The live games' NHL feeds are fetched once for all leagues; each league
-sees them with its own rosters and scoring. No login yet: it listens on this PC only until it has
-one.
+sees them with its own rosters and scoring. Every call but /login, /logout and the app's files needs
+a session (the app's password) or plan_gui's key (auth.py; `python auth.py set-password` first).
 """
 
 import argparse
@@ -80,6 +82,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+import auth  # noqa: E402
 import seasonlayer  # noqa: E402,F401 -- puts Season/ on sys.path; see seasonlayer.py
 import choices  # noqa: E402
 import games as live_games  # noqa: E402
@@ -293,7 +296,8 @@ class Pick(BaseModel):
 
 
 def make_app(worker: Worker) -> FastAPI:
-    app = FastAPI(title="Fantasy hockey plan server")
+    app = FastAPI(title="Fantasy hockey plan server", docs_url=None, redoc_url=None, openapi_url=None)
+    auth.install(app, auth.Login())
     store = live_games.FeedStore(LIVE / "reports" / "goals")
     threading.Thread(target=store.watch_loop, daemon=True).start()
     scoresets = {name: simlayer.load_scoreset(league.scoring) for name, league in worker.leagues.items()}

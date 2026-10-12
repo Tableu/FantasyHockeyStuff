@@ -1,5 +1,5 @@
-// The plan server's API (Server/server.py), same origin as the app. Every call but the jobs'
-// takes ?league=.
+// The plan server's API (Server/server.py), same origin as the app. Every call but the jobs' and
+// the login's takes ?league=; the session cookie rides along (auth.py).
 
 export class ApiError extends Error {
   constructor(status, detail) {
@@ -14,6 +14,14 @@ const staleListeners = new Set();
 export function onStale(listener) {
   staleListeners.add(listener);
   return () => staleListeners.delete(listener);
+}
+
+// Whether the server wants a login (auth.py): every listener hears true on a 401 from any call
+// but the login itself.
+const authListeners = new Set();
+export function onAuth(listener) {
+  authListeners.add(listener);
+  return () => authListeners.delete(listener);
 }
 
 async function call(method, path, { league, body, query } = {}) {
@@ -31,6 +39,7 @@ async function call(method, path, { league, body, query } = {}) {
   } catch (error) {
     throw new ApiError(0, "Can't reach the server");
   }
+  if (response.status === 401 && path !== '/login') authListeners.forEach((listener) => listener(true));
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
     try {
@@ -45,6 +54,8 @@ async function call(method, path, { league, body, query } = {}) {
 }
 
 export const api = {
+  login: (password) => call('POST', '/login', { body: { password } }),
+  logout: () => call('POST', '/logout', { body: {} }),
   status: (league) => call('GET', '/status', { league }),
   refresh: (league, mode) => call('POST', '/refresh', { league, body: { mode } }),
   job: (id, after = 0) => call('GET', `/jobs/${encodeURIComponent(id)}`, { query: { after } }),

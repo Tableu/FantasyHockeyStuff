@@ -4,7 +4,7 @@
 // Matchup is matchup.js (P5). Everything shown comes from the plan server (api.js);
 // nothing is computed here.
 import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundary } from './vendor/htm-preact-3.1.1.mjs';
-import { api, onStale } from './api.js';
+import { api, onStale, onAuth } from './api.js';
 import { Roster } from './roster.js';
 import { Suggestions } from './ai.js';
 import { Planner } from './planner.js';
@@ -238,7 +238,37 @@ function RefreshLog({ version }) {
   })}</div>`;
 }
 
-function More({ status, league, onLeague, version }) {
+// The password screen (auth.py): shown whenever the server answers 401, until a login works.
+function Login({ onDone }) {
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!password || busy) return;
+    setBusy(true);
+    try {
+      await api.login(password);
+      setPassword('');
+      setError(null);
+      onDone();
+    } catch (err) {
+      setError(err.status === 0 ? "Can't reach the server" : err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return html`<div class="app"><form class="login" onSubmit=${submit}>
+    <h1>Fantasy Hockey</h1>
+    <label for="pw">Password</label>
+    <input id="pw" type="password" autocomplete="current-password" autofocus value=${password}
+      onInput=${(e) => setPassword(e.currentTarget.value)} />
+    ${error && html`<div class="error" role="alert">${error}</div>`}
+    <button type="submit" class="btn primary" disabled=${busy || !password}>${busy ? 'Logging in…' : 'Log in'}</button>
+  </form></div>`;
+}
+
+function More({ status, league, onLeague, version, onLogout }) {
   if (!status) return html`<div class="empty">Loading…</div>`;
   const teams = status.teams || {};
   const last = status.last || {};
@@ -266,7 +296,9 @@ function More({ status, league, onLeague, version }) {
     <div class="sec"><h2>Server</h2></div>
     <table class="kv"><tbody>
       ${rows.map(([k, v]) => html`<tr><th scope="row">${k}</th><td>${v}</td></tr>`)}
-    </tbody></table>`;
+    </tbody></table>
+    <div class="sec"><h2>This phone</h2></div>
+    <div style="padding: 0 12px 16px"><button type="button" class="btn" onClick=${onLogout}>Log out</button></div>`;
 }
 
 function App() {
@@ -278,8 +310,10 @@ function App() {
   const [job, setJob] = useState(null);
   const [now, setNow] = useState(() => new Date());
   const [version, setVersion] = useState(0);     // bumps when a refresh ends: screens re-fetch
+  const [locked, setLocked] = useState(false);   // the server wants a login (any 401)
   const savedAt = useStale();
   const screen = useRef(null);
+  useEffect(() => onAuth(() => setLocked(true)), []);
   const tracking = useRef(null);
 
   const loadStatus = useCallback(async (name) => {
@@ -340,9 +374,17 @@ function App() {
     }
   };
   const closeJob = () => { tracking.current = null; setJob(null); };
+  const loggedIn = () => { setLocked(false); setError(null); loadStatus(league); setVersion((v) => v + 1); };
+  // Logged out: the saved screens go too, so the phone keeps no league data without a login.
+  const logout = async () => {
+    try { await api.logout(); } catch (_) { /* out of reach: the copy still goes */ }
+    try { await caches.delete('fh-data-v1'); } catch (_) { /* no Cache API */ }
+    setLocked(true);
+  };
   const pull = usePull(screen, () => refresh('quick'), !!league && !route.game && tab !== 'games'
     && !(job && job.state === 'running'));
 
+  if (locked) return html`<${Login} onDone=${loggedIn} />`;
   // One game: full screen, as the design's game screens -- no header, no tabs.
   if (route.game && league) {
     return html`<div class="app"><${Guard} key=${location.hash}><${Game} league=${league} gameId=${route.game} view=${route.view} /></${Guard}></div>`;
@@ -366,7 +408,7 @@ function App() {
         <span>${pull >= PULL_PX ? 'Release to refresh (Quick)' : 'Pull to refresh'}</span></div>`}
       <${Guard} key=${tab}>
       ${tab === 'more'
-        ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} />`
+        ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} />`
         : tab === 'roster' && league
           ? html`<${Roster} league=${league} version=${version} />`
           : tab === 'ai' && league

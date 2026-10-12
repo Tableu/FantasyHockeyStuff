@@ -364,3 +364,12 @@ table.list .strong { font-weight: 700; }
 .logo-img.big { width: 44px; height: 44px; }
 /* The box score's sorted header carries its arrow past a narrow column's edge rather than clip it. */
 table.list.box thead th.n { overflow: visible; }
+
+/* The password screen (app.js Login). */
+.login { display: flex; flex-direction: column; gap: 10px; padding: 64px 24px 24px; }
+.login h1 { margin: 0 0 16px; font-size: 22px; font-weight: 700; }
+.login label { color: var(--text-2); font-size: 12.5px; }
+.login input { height: 44px; padding: 0 12px; border: 1px solid var(--rule-strong); border-radius: 4px; background: var(--ground-2); color: var(--text); font-family: var(--sans); font-size: 16px; }
+.login input:focus { outline: 2px solid var(--you); outline-offset: 1px; }
+.login .error { margin: 0; }
+.login .btn { height: 44px; margin-top: 6px; }

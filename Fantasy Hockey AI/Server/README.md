@@ -93,6 +93,22 @@ then open `http://127.0.0.1:8001/app/` in Chrome (DevTools device mode, 390x844)
 phone over USB: `chrome://inspect` -> Port forwarding 8001 -> localhost:8001, then open
 `http://localhost:8001/app/` on the phone; as `localhost` it can be installed without HTTPS.
 
+## Login
+
+The server is meant to be reached from the internet (plan: Phone App Remote Access), so every call
+but `/login`, `/logout` and the app's files (`/app/...`) needs a session or the key (auth.py):
+
+- **The phone** logs in with the password (`POST /login`) and gets a signed cookie for 90 days,
+  renewed once it has under 60 left; More -> Log out ends it and deletes the saved screens.
+  Five wrong passwords from one address in 15 minutes and it waits 15 minutes.
+- **plan_gui** sends the key as `Authorization: Bearer`, read from the same file.
+- **Settings:** `"plan-server"` in `Settings/secrets.json` (gitignored): the password's scrypt hash,
+  the session-signing secret and the key. Read again when the file changes, no restart needed.
+- **Setting the password:** `python auth.py set-password` (in this folder, on Windows or in the
+  container). A new password signs every phone out; the key stays. Until one is set every call
+  answers 503.
+- FastAPI's `/docs`, `/redoc` and `/openapi.json` are off.
+
 ## Running it
 
 Needs Docker Desktop (it installs WSL2).

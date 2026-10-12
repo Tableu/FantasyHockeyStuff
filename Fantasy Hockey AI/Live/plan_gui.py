@@ -172,11 +172,22 @@ class Server:
     def __init__(self, url, league):
         self.url, self.league = url.rstrip("/"), league
 
+    @staticmethod
+    def key() -> str | None:
+        """The server's key for this window (Server/auth.py), from Settings/secrets.json; read on
+        every call, so a key set while the window is open is used at once."""
+        if not leagues.SECRETS.exists():
+            return None
+        return (json.loads(leagues.SECRETS.read_text(encoding="utf-8")).get("plan-server") or {}).get("api_key")
+
     def _call(self, path, body=None, method=None):
         data = None if body is None else json.dumps(body).encode("utf-8")
         path += ("&" if "?" in path else "?") + "league=" + urllib.parse.quote(self.league)
-        request = urllib.request.Request(self.url + path, data=data, method=method,
-                                         headers={"Content-Type": "application/json"} if data else {})
+        headers = {"Content-Type": "application/json"} if data else {}
+        key = self.key()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        request = urllib.request.Request(self.url + path, data=data, method=method, headers=headers)
         with urllib.request.urlopen(request, timeout=SERVER_TIMEOUT_S) as response:
             return json.loads(response.read().decode("utf-8"))
 
