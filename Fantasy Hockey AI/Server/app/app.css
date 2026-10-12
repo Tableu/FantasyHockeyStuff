@@ -219,7 +219,7 @@ table.cal td.picks { height: auto; vertical-align: top; padding: 2px 0; }
 .pick .why { font-size: 10.5px; }
 .pick button { flex: none; width: 28px; height: 28px; border: 0; background: none; color: var(--text-3); cursor: pointer; font-size: 12px; }
 .cellbtn { display: flex; flex-direction: column; justify-content: center; width: 100%; height: 31px; border: 0; padding: 0 6px; background: transparent; text-align: left; line-height: 1.15; color: var(--text); cursor: pointer; }
-.cellbtn.held { cursor: default; }
+.cellbtn.held { cursor: pointer; }
 .cellbtn .nm { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cellbtn .pt { font-family: var(--mono); font-size: 10px; color: var(--text-3); }
 table.cal td.open { background: #2A1418; }
@@ -227,6 +227,7 @@ table.cal td.open .cellbtn { color: #FF9C9C; font-weight: 600; }
 table.cal td.open .pt { color: #B87A80; }
 table.cal td.rental { background: #1B3B66; }
 table.cal td.rental .cellbtn { color: #9FD0FF; font-weight: 600; }
+@media (hover: hover) { table.cal .cellbtn:not(:disabled):hover { background: var(--ground-3); } }
 table.cal td.rental .pt { color: #9FD0FF; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 12px 8px; border-top: 1px solid var(--rule); font-size: 11px; color: var(--text-3); }
 
@@ -420,6 +421,11 @@ table.roster .sep { border-left: 1px solid var(--rule-strong); }
 .app.wide table.cal { width: 100%; }
 .app.wide table.cal .day { width: auto; min-width: 116px; max-width: none; }
 table.cal td.chosen { box-shadow: inset 0 0 0 2px var(--you); }
+/* The bench: one row of counts, its players beneath it when opened. */
+table.cal .bench-toggle { padding: 0; min-height: 32px; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+table.cal tr.bench-h td, table.cal tr.bench th, table.cal tr.bench td { background: var(--ground-2); }
+table.cal .bench-sum { cursor: pointer; color: var(--text-2); }
+table.cal td.idle .cellbtn { color: var(--text-3); }
 
 /* AI suggestions: today's moves and the upgrades beside the week plans. */
 .ai-wide { display: grid; grid-template-columns: minmax(380px, 5fr) minmax(0, 7fr); align-items: start; }

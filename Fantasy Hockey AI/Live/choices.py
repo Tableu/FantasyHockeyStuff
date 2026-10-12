@@ -109,7 +109,8 @@ def unpin(chosen: dict, day: str, player_id: int):
 def replace_rental(chosen: dict, day: str, rental: int, player_id: int):
     """`player_id` in place of your rental `rental` from `day` on, in `chosen` (changed in place):
     picked the same day the rental was added, the new player takes his move (and his drop);
-    later, he drops the rental."""
+    later, he drops the rental. `rental` may be a rostered player too (the app's Weekly planner):
+    the new player then drops him."""
     entry = day_choice(chosen, day)
     his = next((m for m in entry["moves"] if m["add"] == rental), None)
     if his is not None:

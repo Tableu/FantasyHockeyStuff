@@ -41,8 +41,9 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                the suggestions as they now stand
     GET  /week?week=           the app's Weekly planner: your week from your picks on plan A's
                                workbench (week.py) -- each night's points, open slots, picks, slots
-    GET  /week/picker?day=&occupant=   the slot picker's free agents (plan picks first); occupant:
-                               the rental whose slot it is
+    GET  /week/picker?day=&occupant=&slot=   the slot picker's free agents (plan picks first);
+                               occupant: the rental or rostered player whose slot it is -- then
+                               the free agents at that slot's positions, priced on the swap
     GET  /week/drops?day=&add=&occupant=   who that pick may drop, each with the week's gain
     POST /week/edit {week, action, day, add, drop, rental}   pick, replace, unpick or clear;
                                saved (choices.py), returns the calendar as it now stands
@@ -285,7 +286,7 @@ class WeekEdit(BaseModel):
     day: str | None = None
     add: int | None = None
     drop: int | None = None         # a pick's drop; None: into an open spot
-    rental: int | None = None       # 'replace': the rental whose slot it is
+    rental: int | None = None       # 'replace': the rental (or rostered player) whose slot it is
 
 
 class Pick(BaseModel):
@@ -381,9 +382,10 @@ def make_app(worker: Worker) -> FastAPI:
         return {"league": chosen.name, "file": path.name, **shown.view(slot_rows[chosen.name])}
 
     @app.get("/week/picker")
-    def get_picker(day: str, week: str = "this", occupant: int | None = None, league: str | None = None):
+    def get_picker(day: str, week: str = "this", occupant: int | None = None, slot: str | None = None,
+                   league: str | None = None):
         chosen, path, _, shown = book(league, week)
-        return {"league": chosen.name, **shown.picker(day, occupant)}
+        return {"league": chosen.name, **shown.picker(day, occupant, slot)}
 
     @app.get("/week/drops")
     def get_drops(day: str, add: int, week: str = "this", occupant: int | None = None, league: str | None = None):

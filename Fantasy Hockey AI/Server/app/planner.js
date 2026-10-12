@@ -1,9 +1,11 @@
 // The Weekly planner (plan P3): your week built from your picks, from GET /week (the server puts
 // them in on plan A's workbench and solves each night's lineup, as the window does). Tap an open
-// slot (+) or one of your pickups (⇄) for the picker: the free agents who would start that night,
-// the plans' picks first (GET /week/picker), and who each may drop (GET /week/drops). Every change
-// goes through POST /week/edit and the calendar comes back as it now stands. On a PC (`wide`) the
-// picker is a panel beside the calendar instead of a sheet over it.
+// slot (+), one of your pickups (⇄) or a rostered player for the picker: the free agents who would
+// start that night (a rostered player swapped out is dropped from that night on, for good), the
+// plans' picks first (GET /week/picker), and who each may drop (GET /week/drops). Every change
+// goes through POST /week/edit and the calendar comes back as it now stands. The bench -- held but
+// not starting -- is one row of counts, its players shown beneath it only when opened. On a PC
+// (`wide`) the picker is a panel beside the calendar instead of a sheet over it.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 import { useEscape } from './layout.js';
@@ -38,7 +40,7 @@ function Sheet({ league, week, sheet, onClose, onDone, docked }) {
   const occupant = sheet.occupant;
 
   useEffect(() => {
-    api.picker(league, week, sheet.day, occupant && occupant.player_id)
+    api.picker(league, week, sheet.day, occupant && occupant.player_id, sheet.slot)
       .then(setList).catch((e) => setError(e.message));
   }, []);
 
@@ -73,8 +75,13 @@ function Sheet({ league, week, sheet, onClose, onDone, docked }) {
     <section class=${docked ? 'dock' : 'sheet'} role=${docked ? 'region' : 'dialog'} aria-label=${`Add on ${dayTitle(sheet.day)}`}>
       <div class="sheet-head">
         <span class="title">${dayTitle(sheet.day)} · ${sheet.slot} slot</span>
-        <span class="sub">${occupant ? `Replacing ${short(occupant.player)} from this night` : 'Open'}${counts}.
-          Free agents who would start that night: the plans' picks first, then the most points that night. Week: the lineup points he adds this week.</span>
+        <span class="sub">${occupant
+          ? (occupant.rental ? `Replacing ${short(occupant.player)} from this night`
+            : html`Swapping out ${short(occupant.player)} from this night: <span class="bad">he is dropped for good</span>, and the week gain does not count what he is worth after this week`)
+          : 'Open'}${counts}.
+          ${occupant
+            ? `Free agents who can play ${sheet.slot === 'BN' ? 'his positions' : `the ${sheet.slot} slot`} that night: the plans' picks first, then the most points that night. Week: the week's lineup points with the swap.`
+            : "Free agents who would start that night: the plans' picks first, then the most points that night. Week: the lineup points he adds this week."}</span>
       </div>
       ${error && html`<div class="error" role="alert">${error}</div>`}
       ${list && list.positions.length > 1 && html`
@@ -123,6 +130,7 @@ export function Planner({ league, version, wide }) {
   const [error, setError] = useState(null);
   const [sheet, setSheet] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [benchOpen, setBenchOpen] = useState(false);     // the bench rows: closed until opened
 
   useEffect(() => {
     let gone = false;
@@ -158,6 +166,18 @@ export function Planner({ league, version, wide }) {
     ? `${data.picks} pick${data.picks > 1 ? 's' : ''} · ${data.used} move${data.used === 1 ? '' : 's'} used, ${left} left`
     : `No picks yet · ${data.moves_left} move${data.moves_left === 1 ? '' : 's'} left this week`;
   const sheetKey = sheet && `${sheet.day}:${sheet.slot}:${sheet.occupant ? sheet.occupant.player_id : ''}`;
+  // A held player's cell -- your pickup (⇄, to replace) or a rostered player (to swap out) -- in
+  // slot row `row` (a lineup row's index, or `b<i>` for the bench's).
+  const heldCell = (n, slot, row, c, pts, extra = '') => {
+    const chosen = sheet && sheet.day === n.day && sheet.row === row ? ' chosen' : '';
+    const what = c.rental ? 'your pickup, tap to replace' : 'rostered, tap to swap for a rental';
+    return html`<td class=${`day${c.rental ? ' rental' : ''}${extra}${chosen}`}><button type="button"
+      class=${`cellbtn${c.rental ? '' : ' held'}`} disabled=${busy} title=${c.player}
+      aria-label=${`${dayTitle(n.day)} ${slot}: ${c.player}, ${what}`}
+      onClick=${() => setSheet({ day: n.day, slot, row, occupant: c })}>
+      <span class="nm">${short(c.player)}${c.rental ? ' ⇄' : ''}</span><span class="pt">${pts}</span></button></td>`;
+  };
+  const benchRows = Math.max(0, ...data.nights.map((n) => n.bench.length));
   const picker = sheet && html`<${Sheet} key=${sheetKey} league=${league} week=${week} sheet=${sheet} docked=${wide}
       onClose=${() => setSheet(null)} onDone=${(got) => { setData(got); setSheet(null); }} />`;
   const calendar = html`
@@ -200,23 +220,35 @@ export function Planner({ league, version, wide }) {
                   onClick=${() => setSheet({ day: n.day, slot, row: r, occupant: null })}>
                   <span class="nm">(open) +</span><span class="pt">tap to fill</span></button></td>`;
               }
-              if (c.rental) {
-                return html`<td class=${`day rental${chosen}`}><button type="button" class="cellbtn" disabled=${busy}
-                  aria-label=${`${dayTitle(n.day)} ${slot}: ${c.player}, your pickup, tap to replace`}
-                  onClick=${() => setSheet({ day: n.day, slot, row: r, occupant: c })}>
-                  <span class="nm">${short(c.player)} ⇄</span><span class="pt">${f2(c.pts)}</span></button></td>`;
-              }
-              return html`<td class="day"><div class="cellbtn held" title=${c.player}>
-                <span class="nm">${short(c.player)}</span><span class="pt">${f2(c.pts)}</span></div></td>`;
+              return heldCell(n, slot, r, c, f2(c.pts));
+            })}
+          </tr>`)}
+          ${benchRows > 0 && html`<tr class="sep bench-h">
+            <th scope="row" class="slot"><button type="button" class="bench-toggle" aria-expanded=${benchOpen}
+              aria-label=${benchOpen ? 'Hide the bench' : 'Show the bench'} onClick=${() => setBenchOpen(!benchOpen)}>${benchOpen ? '▾' : '▸'} BN</button></th>
+            ${data.nights.map((n) => {
+              const plays = n.bench.filter((c) => c.plays).length;
+              return html`<td class="day"><button type="button" class="cellbtn bench-sum" aria-expanded=${benchOpen}
+                onClick=${() => setBenchOpen(!benchOpen)}><span class="nm">${n.bench.length} on the bench</span>
+                <span class="pt">${plays} play${plays === 1 ? 's' : ''} that night</span></button></td>`;
+            })}
+          </tr>`}
+          ${benchRows > 0 && benchOpen && Array.from({ length: benchRows }, (_, i) => html`<tr class="bench">
+            <th scope="row" class="slot">BN</th>
+            ${data.nights.map((n) => {
+              const c = n.bench[i];
+              if (!c) return html`<td class="day"></td>`;
+              const pts = c.plays ? f2(c.pts) : (c.status && c.status !== 'ACTIVE' ? c.status : 'no game');
+              return heldCell(n, 'BN', `b${i}`, c, pts, c.plays ? '' : ' idle');
             })}
           </tr>`)}
         </tbody>
       </table>
     </div>
-    <div class="legend"><span><span style="color: #9FD0FF">■</span> your pickup ⇄</span><span><span style="color: #FF9C9C">■</span> open slot +</span><span>${wide ? 'Click' : 'Tap'} either to choose who goes in</span></div>`}`;
+    <div class="legend"><span><span style="color: #9FD0FF">■</span> your pickup ⇄</span><span><span style="color: #FF9C9C">■</span> open slot +</span><span>${wide ? 'Click' : 'Tap'} either, or a rostered player to swap him out, to choose who goes in</span></div>`}`;
   if (!wide) return html`${calendar}${picker}`;
   return html`<div class="split">
     <div class="split-main">${calendar}</div>
-    ${picker || html`<aside class="dock idle"><p class="foot">Click an open slot (+) or one of your pickups (⇄) to choose who goes in that night.</p></aside>`}
+    ${picker || html`<aside class="dock idle"><p class="foot">Click an open slot (+), one of your pickups (⇄) or a rostered player to choose who goes in that night.</p></aside>`}
   </div>`;
 }

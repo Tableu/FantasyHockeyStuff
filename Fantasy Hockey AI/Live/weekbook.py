@@ -178,12 +178,19 @@ class Week:
         new = next(m for m in trial if m["add"] == add)
         return self.week_points(trial, new["effective"]) - self.week_points(moves, new["effective"])
 
-    def free_agents_on(self, moves, night, without=None) -> list:
+    def free_agents_on(self, moves, night, without=None, positions=None) -> list:
         """The free agents who fit in `night`'s lineup -- added with nobody dropped (or with
         `without`, a rental being replaced, gone), he would start that night, in whichever slot
         the lineup solve puts him -- not picked up already: {"player_id", "player", "positions",
         "status", "pts" (that night), "games" (his nights left this week from then), "gain" (the
-        week's lineup points he adds, before any drop)}, most points first."""
+        week's lineup points he adds, before any drop)}, most points first.
+
+        `positions` (a player swapped out: the positions his slot takes): instead, every free agent
+        at those positions who plays that night, "gain" the week's points of the swap itself (him
+        in, `without` out; None when it cannot go in). "Would start" is the wrong test for a swap:
+        with a forward gone a bench forward takes his slot, so no free-agent forward weaker than
+        the bench "started", while D and goalies who would beat a starter there did -- an upgrade
+        that has nothing to do with the player swapped out (the user, 2026-10-12)."""
         picked = {m["add"] for m in self.made(moves)}
         start = self.effective_on(night)
         later = [n for n in self.nights if n >= start]
@@ -196,6 +203,13 @@ class Week:
             if (not f["free"] or q in picked or q in tonight or night not in f["values"]
                     or (f["clears"] and f["clears"] > night)):
                 continue
+            if positions is not None:
+                if self.eligibility.get(q, frozenset()) & positions:
+                    out.append({"player_id": q, "player": f["player"], "positions": f["positions"],
+                                "status": f.get("status"), "pts": f["values"][night],
+                                "gain": self.replace_gain(moves, night, q, without),
+                                "games": sum(1 for n in f["nights"] if n >= start)})
+                continue
             if self.night_points(night, tonight | {q}) <= tonight_points + 1e-9:
                 continue                     # he would not start that night
             # No drop: the nights he plays from when he counts, on the roster held then.
@@ -206,11 +220,12 @@ class Week:
         out.sort(key=lambda r: (-r["pts"], r["player"]))
         return out
 
-    def picker(self, moves, day, plans, without=None) -> list:
-        """The slot picker's list: `free_agents_on` (`without`: the rental whose slot it is),
+    def picker(self, moves, day, plans, without=None, positions=None) -> list:
+        """The slot picker's list: `free_agents_on` (`without`: the rental or rostered player whose
+        slot it is, `positions`: the positions that slot takes),
         the plans' picks and options that day first (best edge first), then the most points that
         night -- each with "plans" (which, "" for none) and "plan_drop" (the plan's drop, or None)."""
-        found = self.free_agents_on(moves, day, without)
+        found = self.free_agents_on(moves, day, without, positions)
         rec = recommended(plans, day)
         found.sort(key=lambda f: (f["player_id"] not in rec,
                                   -rec[f["player_id"]][1] if f["player_id"] in rec else -f["pts"],
@@ -222,8 +237,8 @@ class Week:
 
     def replace_gain(self, moves, day, add, rental):
         """The week gain of `add` in place of your rental `rental` from `day`: picked the day the
-        rental was added, he takes the rental's move (and its drop); later, he drops the rental.
-        None when it would be left out."""
+        rental was added, he takes the rental's move (and its drop); later, he drops the rental
+        -- as he drops a rostered player in `rental`'s place. None when it would be left out."""
         his = next((m for m in self.made(moves) if m["add"] == rental), None)
         if his is not None and his["picked"] == day:
             return self.gain([m for m in moves if m is not his], day, add, his["drop"])
