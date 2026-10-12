@@ -1,9 +1,11 @@
 // Games (plan P4): today's games from GET /games with the goal feed (GET /goals) in a sheet at the
 // bottom; a game opens full screen (#/game/<id>/<view>) with its Summary, Box, Plays (GET
 // /games/<id>) and Lines (GET /games/<id>/lines). Live, they poll every 5 s -- the server's feed
-// cache (about 20 s) is what bounds the calls to the NHL.
+// cache (about 20 s) is what bounds the calls to the NHL. On a PC (`wide`) the list, the chosen
+// game and the goal feed sit side by side: the game opens in the middle, the feed is a rail.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
+import { useEscape } from './layout.js';
 
 const LIVE = new Set(['LIVE', 'CRIT']);
 const DONE = new Set(['OFF', 'FINAL']);
@@ -74,8 +76,10 @@ function Logo({ abbr, big }) {
 
 // ---------- the games list and the goal feed ----------
 
-function GoalFeed({ goals, open, onToggle }) {
+function GoalFeed({ goals, open: opened, onToggle, rail }) {
   const [filter, setFilter] = useState('all');
+  const open = rail || opened;
+  useEscape(!rail && opened, onToggle);
   if (!goals) return null;
   const rows = goals.goals.filter((g) => filter === 'all' || g.scorer.owner || g.assists.some((a) => a.owner));
   const fp = (g) => {
@@ -84,15 +88,17 @@ function GoalFeed({ goals, open, onToggle }) {
     return by;
   };
   return html`
-    ${open && html`<div class="feed-scrim" onClick=${onToggle}></div>`}
-    <section class=${`feed ${open ? 'open' : ''}`} aria-label="Goal feed">
+    ${open && !rail && html`<div class="feed-scrim" onClick=${onToggle}></div>`}
+    <section class=${`feed ${open ? 'open' : ''} ${rail ? 'rail' : ''}`} aria-label="Goal feed">
       <div class="feed-bar">
-        <button type="button" class="feed-toggle" aria-expanded=${open} onClick=${onToggle}
+        ${rail ? html`<div class="feed-toggle">
+          <span class="feed-title">Goals · FP <span class="you">You ${f2(goals.totals.me)}</span> · <span class="opp">Opp ${f2(goals.totals.opp)}</span></span>
+        </div>` : html`<button type="button" class="feed-toggle" aria-expanded=${open} onClick=${onToggle}
           aria-label=${open ? 'Close the goal feed' : 'Open the goal feed'}>
           <span class="grip"></span>
           <span class="feed-title">Goals · FP <span class="you">You ${f2(goals.totals.me)}</span> · <span class="opp">Opp ${f2(goals.totals.opp)}</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style=${`margin-left: auto; transform: rotate(${open ? 180 : 0}deg)`}><path d="m6 15 6-6 6 6"></path></svg></span>
-        </button>
+        </button>`}
         ${open && html`<div class="seg" role="group" aria-label="Filter goals">
           <button type="button" aria-pressed=${filter === 'all'} onClick=${() => setFilter('all')}>All</button>
           <button type="button" aria-pressed=${filter === 'fantasy'} onClick=${() => setFilter('fantasy')}>Fantasy</button>
@@ -124,7 +130,24 @@ function GoalFeed({ goals, open, onToggle }) {
     </section>`;
 }
 
-export function Games({ league, version }) {
+function card(g, href, current) {
+  const done = DONE.has(g.state), started = done || LIVE.has(g.state);
+  const lead = started && g.away.score !== g.home.score ? (g.away.score > g.home.score ? 'away' : 'home') : null;
+  return html`<a class="game-card" href=${href} aria-current=${current ? 'page' : undefined}
+    aria-label=${`${g.away.abbrev} at ${g.home.abbrev}, ${stateLabel(g)}`}>
+    <div class="game-top">
+      <span class=${`state ${LIVE.has(g.state) ? 'live' : ''}`}>${LIVE.has(g.state) && !g.intermission && html`<span class="dot"></span>`}${stateLabel(g)}</span>
+    </div>
+    ${['away', 'home'].map((side) => html`<div class="game-team">
+      <${Logo} abbr=${g[side].abbrev} />
+      <span class="tn"><span class=${done && lead && lead !== side ? 'dim2' : ''}>${g[side].abbrev}</span>
+        ${started && g[side].sog !== null && html`<span class="sog">SOG: ${g[side].sog}</span>`}</span>
+      <span class=${`score ${done && lead && lead !== side ? 'dim2' : ''}`}>${started ? g[side].score : ''}</span>
+    </div>`)}
+  </a>`;
+}
+
+export function Games({ league, version, wide, selected, view }) {
   const [games, setGames] = useState(null);
   const [goals, setGoals] = useState(null);
   const [error, setError] = useState(null);
@@ -142,6 +165,25 @@ export function Games({ league, version }) {
   }, [league, version], (g) => !!g && g.games.some((x) => LIVE.has(x.state)));
 
   const live = games && games.games.some((x) => LIVE.has(x.state));
+  if (wide) {
+    // A game card keeps the view the open game shows, so moving between games stays on Box (say).
+    return html`<div class="games-wide">
+      <section class="games-list" aria-label="Today's games">
+        <header class="screen-head">
+          <span class="h">Games <span class="dim">${todayLabel()}</span></span>
+          ${live && html`<span class="live-tag"><span class="dot"></span>Live · 5s</span>`}
+        </header>
+        ${error && html`<div class="error" role="alert">${error}</div>`}
+        ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">No NHL games today.</div>`
+          : html`<div class="game-grid">${games.games.map((g) => card(g, `#/game/${g.id}/${view || 'summary'}`, g.id === selected))}</div>`}
+      </section>
+      <section class="game-pane" aria-label="Game">
+        ${selected ? html`<${Game} key=${selected} league=${league} gameId=${selected} view=${view} embedded />`
+          : html`<div class="empty">Choose a game for its summary, box score, plays and lines.</div>`}
+      </section>
+      <${GoalFeed} goals=${goals} rail />
+    </div>`;
+  }
   return html`
     <header class="screen-head">
       <span class="h">Games <span class="dim">${todayLabel()}</span></span>
@@ -151,22 +193,7 @@ export function Games({ league, version }) {
       ${error && html`<div class="error" role="alert">${error}</div>`}
       ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">No NHL games today.</div>` : html`
       <div class="game-grid">
-        ${games.games.map((g) => {
-          const done = DONE.has(g.state), started = done || LIVE.has(g.state);
-          const lead = started && g.away.score !== g.home.score ? (g.away.score > g.home.score ? 'away' : 'home') : null;
-          return html`<a class="game-card" href=${`#/game/${g.id}/summary`}
-            aria-label=${`${g.away.abbrev} at ${g.home.abbrev}, ${stateLabel(g)}`}>
-            <div class="game-top">
-              <span class=${`state ${LIVE.has(g.state) ? 'live' : ''}`}>${LIVE.has(g.state) && !g.intermission && html`<span class="dot"></span>`}${stateLabel(g)}</span>
-            </div>
-            ${['away', 'home'].map((side) => html`<div class="game-team">
-              <${Logo} abbr=${g[side].abbrev} />
-              <span class="tn"><span class=${done && lead && lead !== side ? 'dim2' : ''}>${g[side].abbrev}</span>
-                ${started && g[side].sog !== null && html`<span class="sog">SOG: ${g[side].sog}</span>`}</span>
-              <span class=${`score ${done && lead && lead !== side ? 'dim2' : ''}`}>${started ? g[side].score : ''}</span>
-            </div>`)}
-          </a>`;
-        })}
+        ${games.games.map((g) => card(g, `#/game/${g.id}/summary`, false))}
       </div>
       <p class="foot">Tap a game for its summary.</p>`}
     </main>
@@ -270,6 +297,7 @@ const CODE = Object.fromEntries(TYPES.map(([id, , code]) => [id, code]));
 function Plays({ game }) {
   const [scope, setScope] = useState('all');
   const [menu, setMenu] = useState(false);
+  useEscape(menu, () => setMenu(false));
   const [off, setOff] = useState(() => {
     try { return new Set(JSON.parse(store.get('fh.plays.off')) || []); } catch (_) { return new Set(); }
   });
@@ -369,7 +397,7 @@ function Lines({ gameId, league, live }) {
 
 const VIEWS = [['summary', 'Summary'], ['box', 'Box'], ['plays', 'Plays'], ['lines', 'Lines']];
 
-export function Game({ league, gameId, view }) {
+export function Game({ league, gameId, view, embedded }) {
   const [game, setGame] = useState(null);
   const [error, setError] = useState(null);
   usePoll(async () => {
@@ -381,11 +409,11 @@ export function Game({ league, gameId, view }) {
       : 'Not started');
   const lead = game && game.away.score !== game.home.score ? (game.away.score > game.home.score ? 'away' : 'home') : null;
   return html`
-    <header class="game-head">
+    ${!embedded && html`<header class="game-head">
       <a href="#/games" class="back" aria-label="Back to games"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></a>
       <span class="dim">${todayLabel()}${game ? ` · ${game.away.abbrev} @ ${game.home.abbrev}` : ''}</span>
       <span></span>
-    </header>
+    </header>`}
     ${error && html`<div class="error" role="alert">${error}</div>`}
     ${game && html`<section class="scoreboard" aria-label="Score">
       <div class="side"><${Logo} abbr=${game.away.abbrev} big /><span class="nm"><span class=${lead === 'home' ? 'dim2' : ''}>${game.away.abbrev}</span><span class="meta">Away</span></span></div>

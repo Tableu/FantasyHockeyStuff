@@ -1,6 +1,7 @@
 // The Roster screen (plan P1): your lineup as it stands, bench and IR from GET /roster (the newest
 // plan), with tonight's games and live points from GET /tonight. Tonight / Season switch the
-// columns (Season: tap a header to sort); tap a name for what the plan says about him.
+// columns (Season: tap a header to sort); tap a name for what the plan says about him. On a PC
+// (`wide`) the table has room for both: tonight's columns, then the season's, no switch.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 
@@ -75,14 +76,22 @@ function seasonCells(row, columns) {
   return cells;
 }
 
+// What a header's abbreviation stands for, shown on hover.
+const TITLES = {
+  xPts: 'Expected fantasy points tonight', Live: 'Fantasy points so far tonight', 'P%': 'Chance he plays tonight',
+  Game: "Tonight's game, or its score once it starts", FP: 'Fantasy points this season',
+  'FP/g': 'Fantasy points per game this season', ROS: 'Projected fantasy points for the rest of the season',
+};
+
 function heads(view, goalie, columns) {
   const F = (label, strong) => ({ label, cls: 'f', strong });
-  if (view === 'tonight') {
-    return [F('xPts', true), F('Live'), F('P%'), { label: 'Game', cls: 'txt' },
-      ...(goalie ? ['SA', 'SV', 'GA', 'SV%', 'TOI'] : ['G', 'A', 'SOG', 'HIT', 'BLK', 'TOI']).map((label) => ({ label }))];
-  }
-  return [{ ...F('FP'), key: 'fp' }, { ...F('FP/g', true), key: 'fp_per_game' }, { ...F('ROS'), key: 'ros' },
+  const tonight = () => [F('xPts', true), F('Live'), F('P%'), { label: 'Game', cls: 'txt' },
+    ...(goalie ? ['SA', 'SV', 'GA', 'SV%', 'TOI'] : ['G', 'A', 'SOG', 'HIT', 'BLK', 'TOI']).map((label) => ({ label }))];
+  const season = () => [{ ...F('FP'), key: 'fp' }, { ...F('FP/g', true), key: 'fp_per_game' }, { ...F('ROS'), key: 'ros' },
     ...columns.map(([key, label]) => ({ label, key })), ...(goalie ? [{ label: 'SV%', key: 'sv_pct' }] : [])];
+  const cols = view === 'tonight' ? tonight() : view === 'season' ? season()
+    : [...tonight(), ...season().map((c, i) => (i ? c : { ...c, cls: `${c.cls} sep` }))];
+  return cols.map((c) => ({ ...c, title: TITLES[c.label] }));
 }
 
 // A Season column's value for sorting: the season's stat, or ROS from the row.
@@ -102,7 +111,7 @@ function sorted(rows, sort) {
 
 function Group({ group, view, columns, live, open, onToggle, sort, onSort }) {
   const cols = heads(view, group.goalie, group.goalie ? columns.goalie : columns.skater);
-  const rows = view === 'season' ? sorted(group.rows, sort) : group.rows;
+  const rows = view === 'tonight' ? group.rows : sorted(group.rows, sort);
   const head = (c) => {
     if (!c.key) return c.label;
     const on = sort && sort.key === c.key;
@@ -112,13 +121,14 @@ function Group({ group, view, columns, live, open, onToggle, sort, onSort }) {
   return html`<table class="roster"><tbody>
     <tr class="sub">
       <th scope="colgroup" class="stick">${group.name}</th>
-      ${cols.map((c) => html`<th scope="col" class=${c.cls || ''} style=${c.strong ? 'color: var(--text)' : ''}
+      ${cols.map((c) => html`<th scope="col" class=${c.cls || ''} style=${c.strong ? 'color: var(--text)' : ''} title=${c.title}
         aria-sort=${c.key && sort && sort.key === c.key ? (sort.desc ? 'descending' : 'ascending') : undefined}>${head(c)}</th>`)}
     </tr>
     ${rows.map((row) => {
-      const cells = view === 'tonight'
-        ? tonightCells(row, live && live[row.player_id], group.goalie)
-        : seasonCells(row, group.goalie ? columns.goalie : columns.skater);
+      const tonightRow = () => tonightCells(row, live && live[row.player_id], group.goalie);
+      const seasonRow = () => seasonCells(row, group.goalie ? columns.goalie : columns.skater);
+      const cells = view === 'tonight' ? tonightRow() : view === 'season' ? seasonRow()
+        : [...tonightRow(), ...seasonRow().map((c, i) => (i ? c : { ...c, cls: `${c.cls} sep` }))];
       const isOpen = open === row.player_id && row.notes.length > 0;
       return html`
         <tr class=${isOpen ? 'sel' : ''}>
@@ -135,7 +145,7 @@ function Group({ group, view, columns, live, open, onToggle, sort, onSort }) {
   </tbody></table>`;
 }
 
-export function Roster({ league, version }) {
+export function Roster({ league, version, wide }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [tonight, setTonight] = useState(null);
@@ -187,10 +197,11 @@ export function Roster({ league, version }) {
   if (!data) return html`<div class="empty">Loading…</div>`;
   // Live points belong to today's games; once the plan is tomorrow's, they don't apply to it.
   const live = tonight && tonight.date === data.day ? tonight.players : null;
+  const shownView = wide ? 'both' : view;
   const liveTotal = live ? f2(tonight.lineup_live) : '—';
   // Season: the whole roster in two groups, as the design, so a sort ranks everyone you hold.
   const all = data.groups.flatMap((g) => g.rows);
-  const groups = view === 'season'
+  const groups = shownView === 'season'
     ? [{ name: 'Skaters', goalie: false, rows: all.filter((r) => !r.goalie) },
        { name: 'Goalies', goalie: true, rows: all.filter((r) => r.goalie) }].filter((g) => g.rows.length)
     : data.groups;
@@ -200,17 +211,17 @@ export function Roster({ league, version }) {
       <div><span class="k">Live</span><span class="v you">${liveTotal}</span></div>
       <div><span class="k">Next puck</span><span class="v">${data.next_puck ? puckTime(data.next_puck) : '—'}</span></div>
     </div>
-    <div class="bar">
+    ${!wide && html`<div class="bar">
       <div class="seg" role="group" aria-label="Columns">
         <button type="button" aria-pressed=${view === 'tonight'} onClick=${() => choose('tonight')}>Tonight</button>
         <button type="button" aria-pressed=${view === 'season'} onClick=${() => choose('season')}>Season</button>
       </div>
-    </div>
+    </div>`}
     ${liveError && html`<div class="error" role="alert">Live points: ${liveError}</div>`}
     ${!data.games_today && html`<div class="empty">No NHL games on ${data.day}: the roster, no lineup to set.</div>`}
     ${data.empty_slots > 0 && data.games_today && html`<div class="error">${data.empty_slots} empty lineup slot${data.empty_slots > 1 ? 's' : ''} tonight</div>`}
     <div class="table-scroll">
-      ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${view} columns=${data.columns}
+      ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${shownView} columns=${data.columns}
         live=${live} open=${open} onToggle=${(id) => setOpen(open === id ? null : id)}
         sort=${sort} onSort=${sortBy} />`)}
     </div>`;

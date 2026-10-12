@@ -373,3 +373,70 @@ table.list.box thead th.n { overflow: visible; }
 .login input:focus { outline: 2px solid var(--you); outline-offset: 1px; }
 .login .error { margin: 0; }
 .login .btn { height: 44px; margin-top: 6px; }
+
+/* Wider than a phone (a tablet, a narrow window): the phone layout across the window, so tables
+   stop truncating. */
+@media (min-width: 600px) {
+  .app { max-width: none; }
+  table.roster tr.note td span { max-width: min(100vw, 760px); }
+}
+.login { width: 100%; max-width: 420px; margin: 0 auto; }
+
+/* Mouse and keyboard: a focus ring on whatever the keyboard is on, hover on what can be clicked. */
+:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+@media (hover: hover) {
+  table.list tbody tr:not(.per):hover td, table.list tbody tr:not(.per):hover th { background: var(--ground-sel); }
+  table.roster tr:not(.sub):not(.note):hover th, table.roster tr:not(.sub):not(.note):hover td { background: var(--ground-sel); }
+  .btn:not(:disabled):hover { border-color: #4A5B7C; }
+  .btn.primary:not(:disabled):hover { filter: brightness(1.08); }
+  .game-card:hover { border-color: var(--rule-strong); }
+  .choice:hover, .log-row:hover, button.plan:hover { background: var(--ground-3); }
+}
+
+/* The PC layout (layout.js WIDE_PX): the sidebar, then the header and the screen. */
+.app.wide { flex-direction: row; max-width: 1600px; }
+.app.wide > .col { flex: 1; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--rule); }
+.sidebar { flex: none; width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; background: var(--ground-2); }
+.sidebar .brand { padding: 4px 12px 16px; font-size: 17px; font-weight: 700; }
+.sidebar a { display: flex; align-items: center; height: 40px; padding: 0 12px; border-radius: 4px; text-decoration: none; color: var(--text-2); font-size: 14.5px; font-weight: 500; }
+.sidebar a:hover { background: var(--ground-3); color: var(--text); }
+.sidebar a[aria-current="page"] { background: var(--ground-sel); color: var(--text); font-weight: 700; box-shadow: inset 3px 0 0 var(--you); }
+.app.wide .top-row { padding: 8px 16px 2px 20px; }
+.app.wide .fresh { padding: 0 20px 8px; }
+.app.wide .league-btn { font-size: 18px; }
+.screen.fill { overflow: hidden; }
+
+/* Roster: tonight's columns, then the season's, split by a line. */
+table.roster .sep { border-left: 1px solid var(--rule-strong); }
+
+/* Planner: the calendar beside the picker, each scrolling on its own. */
+.split { display: flex; height: 100%; }
+.split-main { flex: 1; min-width: 0; overflow: auto; }
+.dock { flex: none; width: 400px; min-height: 0; display: flex; flex-direction: column; background: var(--ground-2); border-left: 1px solid var(--rule-strong); }
+.app.wide table.cal { width: 100%; }
+.app.wide table.cal .day { width: auto; min-width: 116px; max-width: none; }
+table.cal td.chosen { box-shadow: inset 0 0 0 2px var(--you); }
+
+/* AI suggestions: today's moves and the upgrades beside the week plans. */
+.ai-wide { display: grid; grid-template-columns: minmax(380px, 5fr) minmax(0, 7fr); align-items: start; }
+.ai-left { border-right: 1px solid var(--rule); min-height: 100%; }
+.ai-wide .plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 0 12px; }
+.plan-block { min-width: 0; }
+
+/* Games: the list, the chosen game and the goal feed side by side. */
+.games-wide { display: flex; height: 100%; }
+.games-list { flex: none; width: 360px; overflow-y: auto; border-right: 1px solid var(--rule); padding-bottom: 12px; }
+.game-card[aria-current="page"] { border-color: var(--you); background: var(--ground-sel); }
+.game-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.game-pane .screen { flex: 1; min-height: 0; overflow-y: auto; }
+.feed.rail { position: static; flex: none; width: 360px; max-height: none; border-radius: 0; border-top: 0; border-left: 1px solid var(--rule); box-shadow: none; }
+
+/* Matchup (and More): two columns on a PC. */
+.app.wide .two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); align-items: start; }
+.app.wide .two-side { border-left: 1px solid var(--rule); min-height: 100%; }
+.app.wide .more { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "league log" "server log" "device log"; align-items: start; }
+.more-league { grid-area: league; }
+.more-server { grid-area: server; }
+.more-device { grid-area: device; }
+.more-log { grid-area: log; }
+.app.wide .more-log { border-left: 1px solid var(--rule); min-height: 100%; }

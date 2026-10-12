@@ -2,9 +2,11 @@
 // them in on plan A's workbench and solves each night's lineup, as the window does). Tap an open
 // slot (+) or one of your pickups (⇄) for the picker: the free agents who would start that night,
 // the plans' picks first (GET /week/picker), and who each may drop (GET /week/drops). Every change
-// goes through POST /week/edit and the calendar comes back as it now stands.
+// goes through POST /week/edit and the calendar comes back as it now stands. On a PC (`wide`) the
+// picker is a panel beside the calendar instead of a sheet over it.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
+import { useEscape } from './layout.js';
 
 const TEAM = /\s*\(([A-Z]{2,3})\)\s*$/;
 const f2 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(2));
@@ -25,7 +27,7 @@ function dayTitle(iso) {
 }
 const weekday = (iso) => dayTitle(iso).split(' ')[0];
 
-function Sheet({ league, week, sheet, onClose, onDone }) {
+function Sheet({ league, week, sheet, onClose, onDone, docked }) {
   const [list, setList] = useState(null);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('All');
@@ -63,11 +65,12 @@ function Sheet({ league, week, sheet, onClose, onDone }) {
     }
   };
 
+  useEscape(true, onClose);
   const shown = list ? list.adds.filter((f) => filter === 'All' || f.positions.split('/').includes(filter)) : [];
   const counts = list && list.counts_from !== sheet.day ? ` (adds count from ${weekday(list.counts_from)})` : '';
   return html`
-    <div class="scrim" onClick=${onClose}></div>
-    <section class="sheet" role="dialog" aria-label=${`Add on ${dayTitle(sheet.day)}`}>
+    ${!docked && html`<div class="scrim" onClick=${onClose}></div>`}
+    <section class=${docked ? 'dock' : 'sheet'} role=${docked ? 'region' : 'dialog'} aria-label=${`Add on ${dayTitle(sheet.day)}`}>
       <div class="sheet-head">
         <span class="title">${dayTitle(sheet.day)} · ${sheet.slot} slot</span>
         <span class="sub">${occupant ? `Replacing ${short(occupant.player)} from this night` : 'Open'}${counts}.
@@ -114,7 +117,7 @@ function Sheet({ league, week, sheet, onClose, onDone }) {
     </section>`;
 }
 
-export function Planner({ league, version }) {
+export function Planner({ league, version, wide }) {
   const [week, setWeek] = useState('this');
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -154,7 +157,10 @@ export function Planner({ league, version }) {
   const note = data.picks
     ? `${data.picks} pick${data.picks > 1 ? 's' : ''} · ${data.used} move${data.used === 1 ? '' : 's'} used, ${left} left`
     : `No picks yet · ${data.moves_left} move${data.moves_left === 1 ? '' : 's'} left this week`;
-  return html`
+  const sheetKey = sheet && `${sheet.day}:${sheet.slot}:${sheet.occupant ? sheet.occupant.player_id : ''}`;
+  const picker = sheet && html`<${Sheet} key=${sheetKey} league=${league} week=${week} sheet=${sheet} docked=${wide}
+      onClose=${() => setSheet(null)} onDone=${(got) => { setData(got); setSheet(null); }} />`;
+  const calendar = html`
     <div class="sec"><h2>Weekly planner</h2>
       ${data.has_next && html`<div class="seg" role="group" aria-label="Week">
         <button type="button" aria-pressed=${week === 'this'} onClick=${() => setWeek('this')}>Week ${data.week}</button>
@@ -187,16 +193,17 @@ export function Planner({ league, version }) {
             <th scope="row" class="slot">${slot}</th>
             ${data.nights.map((n) => {
               const c = n.cells[r];
+              const chosen = sheet && sheet.day === n.day && sheet.row === r ? ' chosen' : '';
               if (!c.player_id) {
-                return html`<td class="day open"><button type="button" class="cellbtn" disabled=${busy}
+                return html`<td class=${`day open${chosen}`}><button type="button" class="cellbtn" disabled=${busy}
                   aria-label=${`${dayTitle(n.day)} ${slot}: open, pick a free agent`}
-                  onClick=${() => setSheet({ day: n.day, slot, occupant: null })}>
+                  onClick=${() => setSheet({ day: n.day, slot, row: r, occupant: null })}>
                   <span class="nm">(open) +</span><span class="pt">tap to fill</span></button></td>`;
               }
               if (c.rental) {
-                return html`<td class="day rental"><button type="button" class="cellbtn" disabled=${busy}
+                return html`<td class=${`day rental${chosen}`}><button type="button" class="cellbtn" disabled=${busy}
                   aria-label=${`${dayTitle(n.day)} ${slot}: ${c.player}, your pickup, tap to replace`}
-                  onClick=${() => setSheet({ day: n.day, slot, occupant: c })}>
+                  onClick=${() => setSheet({ day: n.day, slot, row: r, occupant: c })}>
                   <span class="nm">${short(c.player)} ⇄</span><span class="pt">${f2(c.pts)}</span></button></td>`;
               }
               return html`<td class="day"><div class="cellbtn held" title=${c.player}>
@@ -206,7 +213,10 @@ export function Planner({ league, version }) {
         </tbody>
       </table>
     </div>
-    <div class="legend"><span><span style="color: #9FD0FF">■</span> your pickup ⇄</span><span><span style="color: #FF9C9C">■</span> open slot +</span><span>Tap either to choose who goes in</span></div>`}
-    ${sheet && html`<${Sheet} league=${league} week=${week} sheet=${sheet}
-      onClose=${() => setSheet(null)} onDone=${(got) => { setData(got); setSheet(null); }} />`}`;
+    <div class="legend"><span><span style="color: #9FD0FF">■</span> your pickup ⇄</span><span><span style="color: #FF9C9C">■</span> open slot +</span><span>${wide ? 'Click' : 'Tap'} either to choose who goes in</span></div>`}`;
+  if (!wide) return html`${calendar}${picker}`;
+  return html`<div class="split">
+    <div class="split-main">${calendar}</div>
+    ${picker || html`<aside class="dock idle"><p class="foot">Click an open slot (+) or one of your pickups (⇄) to choose who goes in that night.</p></aside>`}
+  </div>`;
 }

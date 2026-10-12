@@ -2,7 +2,8 @@
 // step is; the running refresh's progress; the bottom tabs; the More tab. Roster is roster.js (P1),
 // AI is ai.js (P2), Planner is planner.js (P3), Games and a game's screens are games.js (P4),
 // Matchup is matchup.js (P5). Everything shown comes from the plan server (api.js);
-// nothing is computed here.
+// nothing is computed here. A window WIDE_PX or wider (layout.js) gets the PC layout: the tabs as a
+// sidebar, and Games as a list, the chosen game and the goal feed side by side.
 import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundary } from './vendor/htm-preact-3.1.1.mjs';
 import { api, onStale, onAuth } from './api.js';
 import { Roster } from './roster.js';
@@ -10,6 +11,7 @@ import { Suggestions } from './ai.js';
 import { Planner } from './planner.js';
 import { Games, Game } from './games.js';
 import { Matchup } from './matchup.js';
+import { useWide, useEscape } from './layout.js';
 
 const TABS = [
   ['roster', 'Roster'], ['planner', 'Planner'], ['ai', 'AI'],
@@ -149,6 +151,7 @@ function Header({ status, league, onLeague, job, onRefresh, now }) {
   const leagues = (status && status.leagues) || [];
   const team = (teams[league] && teams[league].team) || league || 'Fantasy Hockey';
   const running = job && job.state === 'running';
+  useEscape(open, () => setOpen(false));
   return html`
     <header class="top">
       <div class="top-row">
@@ -203,8 +206,10 @@ function Guard({ children }) {
   return children;
 }
 
-function Tabs({ tab }) {
-  return html`<nav class="tabs" aria-label="Sheets">
+// The bottom tabs on a phone; on a PC (`side`) the same links as a sidebar.
+function Tabs({ tab, side }) {
+  return html`<nav class=${side ? 'sidebar' : 'tabs'} aria-label="Sheets">
+    ${side && html`<div class="brand">Fantasy Hockey</div>`}
     ${TABS.map(([id, label]) => html`<a href=${`#/${id}`} aria-current=${id === tab ? 'page' : undefined}>${label}</a>`)}
   </nav>`;
 }
@@ -281,7 +286,8 @@ function More({ status, league, onLeague, version, onLogout }) {
   ];
   if (status.skip_snapshots) rows.push(['Reports', 'scheduled snapshots']);
   if (status.league_file) rows.push(['League', `${status.league_file} (not the platform)`]);
-  return html`
+  return html`<div class="more">
+    <div class="more-league">
     <div class="sec"><h2>League</h2></div>
     <div class="choices" role="group" aria-label="League">
       ${status.leagues.map((name) => html`
@@ -291,14 +297,22 @@ function More({ status, league, onLeague, version, onLogout }) {
           ${name === league && html`<span class="mark">Shown</span>`}
         </button>`)}
     </div>
+    </div>
+    <div class="more-log">
     <div class="sec"><h2>Refresh log</h2><span class="note">tap one for its lines</span></div>
     <${RefreshLog} version=${version} />
+    </div>
+    <div class="more-server">
     <div class="sec"><h2>Server</h2></div>
     <table class="kv"><tbody>
       ${rows.map(([k, v]) => html`<tr><th scope="row">${k}</th><td>${v}</td></tr>`)}
     </tbody></table>
-    <div class="sec"><h2>This phone</h2></div>
-    <div style="padding: 0 12px 16px"><button type="button" class="btn" onClick=${onLogout}>Log out</button></div>`;
+    </div>
+    <div class="more-device">
+    <div class="sec"><h2>This device</h2></div>
+    <div style="padding: 0 12px 16px"><button type="button" class="btn" onClick=${onLogout}>Log out</button></div>
+    </div>
+  </div>`;
 }
 
 function App() {
@@ -311,6 +325,7 @@ function App() {
   const [now, setNow] = useState(() => new Date());
   const [version, setVersion] = useState(0);     // bumps when a refresh ends: screens re-fetch
   const [locked, setLocked] = useState(false);   // the server wants a login (any 401)
+  const wide = useWide();
   const savedAt = useStale();
   const screen = useRef(null);
   useEffect(() => onAuth(() => setLocked(true)), []);
@@ -381,10 +396,36 @@ function App() {
     try { await caches.delete('fh-data-v1'); } catch (_) { /* no Cache API */ }
     setLocked(true);
   };
-  const pull = usePull(screen, () => refresh('quick'), !!league && !route.game && tab !== 'games'
+  const pull = usePull(screen, () => refresh('quick'), !!league && !wide && !route.game && tab !== 'games'
     && !(job && job.state === 'running'));
 
   if (locked) return html`<${Login} onDone=${loggedIn} />`;
+  if (wide) {
+    // The PC layout: the sidebar, then the header and the screen. Games keeps its list, the chosen
+    // game and the goal feed side by side, each scrolling on its own, as the Planner does.
+    const games = tab === 'games' || !!route.game;
+    const fill = games || tab === 'planner';
+    return html`<div class="app wide">
+      <${Tabs} tab=${tab} side />
+      <div class="col">
+        <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} />
+        <${JobStrip} job=${job} onClose=${closeJob} />
+        <${StaleBanner} savedAt=${savedAt} />
+        ${error && !savedAt && html`<div class="error" role="alert">${error}</div>`}
+        <main class=${`screen ${fill ? 'fill' : ''}`} ref=${screen}>
+          <${Guard} key=${games ? 'games' : tab}>
+          ${!league ? html`<div class="empty">Loading…</div>`
+            : games ? html`<${Games} league=${league} version=${version} wide selected=${route.game || null} view=${route.view || 'summary'} />`
+              : tab === 'more' ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} />`
+                : tab === 'ai' ? html`<${Suggestions} league=${league} version=${version} wide />`
+                  : tab === 'planner' ? html`<${Planner} league=${league} version=${version} wide />`
+                    : tab === 'matchup' ? html`<${Matchup} league=${league} version=${version} />`
+                      : html`<${Roster} league=${league} version=${version} wide />`}
+          </${Guard}>
+        </main>
+      </div>
+    </div>`;
+  }
   // One game: full screen, as the design's game screens -- no header, no tabs.
   if (route.game && league) {
     return html`<div class="app"><${Guard} key=${location.hash}><${Game} league=${league} gameId=${route.game} view=${route.view} /></${Guard}></div>`;

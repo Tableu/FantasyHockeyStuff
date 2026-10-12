@@ -1,6 +1,7 @@
 // The AI suggestions screen (plan P2), from GET /suggestions (the newest plan): today's moves, the
 // upgrades, and the week plans -- a plan opens to its slots, a slot to its options, and an option
-// picks him into your week with the plan's drop (POST /choices/pick; again takes him back).
+// picks him into your week with the plan's drop (POST /choices/pick; again takes him back). On a
+// PC (`wide`) there are no sub-tabs: today's moves and the upgrades beside the week plans.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 
@@ -61,8 +62,9 @@ function Upgrades({ data }) {
     <div class="sec"><h2>Upgrades</h2><span class="note">gain over the pricing window · edge = gain − bar</span></div>
     <table class="list fixed">
       <thead><tr><th scope="col">Add</th><th scope="col" style="width: 30%">Drop</th>
-        <th scope="col" class="n" style="width: 58px">Gain</th><th scope="col" class="n" style="width: 50px">Bar</th>
-        <th scope="col" class="n" style="width: 60px">Edge</th></tr></thead>
+        <th scope="col" class="n" style="width: 62px" title="Points the add gains over the pricing window">Gain</th>
+        <th scope="col" class="n" style="width: 50px" title="What a move has to beat to be worth making">Bar</th>
+        <th scope="col" class="n" style="width: 72px" title="Gain minus bar">Edge</th></tr></thead>
       <tbody>${data.upgrades.map((u) => {
         const add = short(u.add), drop = short(u.drop);
         return html`<tr class=${u.clears ? 'hi' : ''}>
@@ -92,12 +94,13 @@ function Plans({ data, week, onWeek, onPick, busy }) {
     </div>
     ${!w.plans.length ? html`<div class="empty">${w.empty}</div>` : html`
       <div class="hint-line">Tap a plan for its slots, a slot for its options, an option to pick him into your Weekly planner.</div>
+      <div class="plan-grid">
       ${w.plans.map((pl) => {
         const key = `${w.which}:${pl.label}`;
         const isOpen = open.has(key);
         const meta = [pl.games ? `${pl.games} games` : '', pl.slots.length === 1 ? '1 move' : `${pl.slots.length} moves`,
           pl.without.length ? `without ${pl.without.join(', ')}` : ''].filter(Boolean).join(' · ');
-        return html`
+        return html`<div class="plan-block">
           <button type="button" class=${`plan ${isOpen ? 'open' : ''}`} aria-expanded=${isOpen} onClick=${() => flip(key)}>
             <span class="label">${pl.label}</span>
             <span class="what"><span class="sched">${pl.schedule.join(' → ')}</span><span class="meta">${meta}</span></span>
@@ -105,8 +108,8 @@ function Plans({ data, week, onWeek, onPick, busy }) {
           </button>
           ${isOpen && html`<table class="list fixed slots">
             <thead><tr><th scope="col" style="width: 84px">Day · slot</th><th scope="col">Best → drop</th>
-              <th scope="col" class="n" style="width: 58px">Gain</th><th scope="col" class="n" style="width: 50px">Bar</th>
-              <th scope="col" class="n" style="width: 60px">Edge</th></tr></thead>
+              <th scope="col" class="n" style="width: 62px">Gain</th><th scope="col" class="n" style="width: 50px">Bar</th>
+              <th scope="col" class="n" style="width: 72px">Edge</th></tr></thead>
             <tbody>${pl.slots.map((s) => {
               const skey = `${key}:${s.index}`;
               const sOpen = open.has(skey);
@@ -134,12 +137,13 @@ function Plans({ data, week, onWeek, onPick, busy }) {
                     <td class="dim">≈ ${short(n.add).name} <span class="meta">${n.team} · ${n.positions}</span></td>
                     <td colspan="3" class="n dim">${sg(n.delta)} vs pick</td></tr>`)}`;
             })}</tbody>
-          </table>`}`;
+          </table>`}</div>`;
       })}
+      </div>
       <p class="foot">Plan A is the model's best week; its moves today are in Today's moves. B, C, … each leave out every earlier plan's first team.</p>`}`;
 }
 
-export function Suggestions({ league, version }) {
+export function Suggestions({ league, version, wide }) {
   const [tab, setTab] = useState(() => store.get('fh.ai.tab') || 'today');
   const [week, setWeek] = useState('this');
   const [data, setData] = useState(null);
@@ -176,6 +180,14 @@ export function Suggestions({ league, version }) {
   if (!data) return html`<div class="empty">Loading…</div>`;
   const tabs = [['today', 'Today', data.today.length], ['upgrades', 'Upgrades', data.clearing],
     ['plans', 'Week plans', data.week.plans.length]];
+  if (wide) {
+    return html`
+      ${error && html`<div class="error" role="alert">${error.message}</div>`}
+      <div class="ai-wide">
+        <div class="ai-left"><${Today} data=${data} /><${Upgrades} data=${data} /></div>
+        <div class="ai-right"><${Plans} data=${data} week=${week} onWeek=${setWeek} onPick=${pick} busy=${busy} /></div>
+      </div>`;
+  }
   return html`
     <nav class="subtabs" aria-label="AI suggestions">
       ${tabs.map(([id, label, count]) => html`<button type="button" aria-pressed=${tab === id} onClick=${() => choose(id)}>

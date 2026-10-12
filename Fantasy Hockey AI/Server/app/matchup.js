@@ -1,7 +1,8 @@
 // The Matchup screen (plan P5), from GET /matchup: the week's score with each side's projection and
 // P(win), tonight's live against projected, the week day by day (final, live, projected), and the
 // league's week so far. The scores are the platform's (the server keeps them a minute), so this
-// polls once a minute while the app is on screen.
+// polls once a minute while the app is on screen. On a PC the league's week is a column beside the
+// rest (app.css, .two-col).
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 
@@ -47,7 +48,8 @@ export function Matchup({ league, version }) {
   const pwin = data.p_win === null || data.p_win === undefined ? null : Math.round(data.p_win * 100);
   const rank = data.league.findIndex((t) => t.who === 'you') + 1;
   const daysLeft = data.days_left;
-  return html`
+  return html`<div class="two-col">
+    <div class="two-main">
     ${error && html`<div class="error" role="alert">${error.message}</div>`}
     <section class="week-score" aria-label="Week score">
       <div class="ws-top"><span>Week ${data.period} · ${dayLabel(data.first_day)}–${dayLabel(data.last_day).split(' ').slice(1).join(' ')}</span>
@@ -95,6 +97,8 @@ export function Matchup({ league, version }) {
       })}</tbody>
     </table>
     ${!data.has_projection && html`<p class="foot">Projected days fill in once a refresh makes this week's plan with its projection.</p>`}
+    </div>
+    <aside class="two-side">
 
     <div class="sec"><h2>League this week</h2><span class="note">You're <b style="color: var(--text)">${ord(rank)}</b> of ${data.league.length}</span></div>
     <table class="list fixed">
@@ -104,5 +108,7 @@ export function Matchup({ league, version }) {
         <td class=${t.who === 'you' ? 'you strong' : t.who === 'opp' ? 'opp strong' : ''}>${t.name}</td>
         <td class=${`n ${t.who ? 'strong' : ''}`}>${f2(t.points)}</td></tr>`)}</tbody>
     </table>
-    <p class="foot">Week points so far, tonight's live points included, from the platform (read at most once a minute).</p>`;
+    <p class="foot">Week points so far, tonight's live points included, from the platform (read at most once a minute).</p>
+    </aside>
+  </div>`;
 }
