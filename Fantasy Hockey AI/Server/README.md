@@ -150,7 +150,8 @@ publish -- or stop the container and run server.py on Windows, where plan_gui.py
   `python plan_gui.py` (in Live/) shows the server's newest plan, its buttons start the server's
   refreshes and stream their progress, and it follows the server's auto refreshes. The window
   needs the server running.
-- Measured 2026-10-02: a full refresh 36 s, a quick one 21 s.
+- Measured 2026-10-02: a full refresh 36 s, a quick one 21 s (one league). 2026-10-12, both
+  leagues: a quick one 27 s before the leagues' reads ran alongside the data steps, 19 s after.
 - **measure_steps.py** times each refresh and nightly step in its own process with its peak memory
   (the plan's Phase 0 table): `docker compose exec server python measure_steps.py`. Linux only.
   2026-10-02 in the container: every step ran; the largest was build_tonight on a late-season day
