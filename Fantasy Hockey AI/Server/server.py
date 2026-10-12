@@ -13,10 +13,15 @@ Every call but the job's takes ?league=<name> (default: the first league served,
 
     GET  /plan                 the league's newest plan for the plan's day -- today, or tomorrow once
                                every game today has started: {league, file, saved_at, plan}
-    POST /refresh {mode}       'full' or 'quick' -- re-plans EVERY league; 'plan' -- re-plans the
-                               ?league= one on its last league read and your choices (about 2 s);
-                               returns the job. A tap while a refresh runs joins it (a 'plan' is
-                               queued behind it)
+    POST /refresh {mode, scope}   mode (planpass.Planner.run): 'full' (reports with line charts,
+                               projections, leagues read again), 'quick' (the same without line
+                               charts), 'news' (reports and projections, leagues planned on their
+                               kept read), 'league' (leagues read again, no reports), 'plan' (your
+                               choices changed: planned on the kept read, about 2 s). scope:
+                               'league' (the ?league= one) or 'all'; default 'all' for full and
+                               quick, 'league' otherwise. Returns the job. A tap while a refresh
+                               runs joins it (a 'plan' is queued behind it); the auto window plans
+                               every league
     GET  /jobs/{id}?after=n    the job's state and its progress lines after line n
     GET  /jobs                 the recent jobs, newest first, without their lines (the app's refresh log)
     GET  /status               the leagues served (each with its team), the day, the running job, when
@@ -119,7 +124,7 @@ class Job:
         self.started, self.finished = dt.datetime.now(), None
         self.error = None
         self.plan_files = {}            # league -> the plan file this job saved for it
-        self.only = None                # a 'plan' job's leagues (their choices changed); None: all
+        self.only = None                # the job's leagues (a tap's scope, or whose choices changed); None: all
 
     def echo(self, text):
         self.lines.append(f"{dt.datetime.now():%H:%M:%S}  {text}")
@@ -289,6 +294,9 @@ class AppFiles(StaticFiles):
 
 class Refresh(BaseModel):
     mode: str = "quick"
+    # Which leagues: "league" the ?league= one, "all" every league served. Default: "all" for
+    # full and quick (plan_gui's buttons, as before), "league" for news, league and plan.
+    scope: str | None = None
 
 
 class Choices(BaseModel):
@@ -458,9 +466,12 @@ def make_app(worker: Worker) -> FastAPI:
 
     @app.post("/refresh")
     def refresh(body: Refresh, league: str | None = None):
-        if body.mode not in ("full", "quick", "plan"):
-            raise HTTPException(422, "mode must be 'full', 'quick' or 'plan'")
-        only = [worker.league(league).name] if body.mode == "plan" else None
+        if body.mode not in planpass.MODES:
+            raise HTTPException(422, f"mode must be one of {', '.join(planpass.MODES)}")
+        scope = body.scope or ("all" if body.mode in ("full", "quick") else "league")
+        if scope not in ("league", "all"):
+            raise HTTPException(422, "scope must be 'league' or 'all'")
+        only = [worker.league(league).name] if scope == "league" else None
         return worker.start(body.mode, only=only).view()
 
     @app.get("/jobs/{job_id}")

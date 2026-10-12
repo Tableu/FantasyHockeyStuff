@@ -19,7 +19,7 @@ the first league served; plan_gui.py sends its own `--league`.
 | Call | Does |
 | --- | --- |
 | GET /plan | The league's newest saved plan for the plan's day -- today, or tomorrow once every game today has started (today's until tomorrow's is saved): {league, file, saved_at, plan} (404 before the first) |
-| POST /refresh {"mode": "full", "quick" or "plan"} | Starts a refresh of every league and returns its job; a tap while one runs joins it. "plan" re-plans only ?league= on its last league read and your choices (about 2 s), queued behind a running refresh |
+| POST /refresh {"mode", "scope"} | Starts a refresh and returns its job; a tap while one runs joins it. mode: "full" (injury, line-chart and goalie reports, projections, leagues read again), "quick" (the same without line charts), "news" (reports and projections, leagues planned on today's kept read), "league" (leagues read again and planned, no reports; on a day with no projections yet, those first), "plan" (planned on the kept read and your choices, about 2 s, queued behind a running refresh). scope: "league" (?league= alone) or "all"; default "all" for full and quick (plan_gui), "league" for the rest. The auto window plans every league |
 | GET /jobs/{id}?after=n | The job's state, each league's saved plan file, its progress lines after line n |
 | GET /status | The leagues served, the day, the running job, when each step last ran (with the league's own read), its newest plan |
 | GET /games | Today's games: score, clock, how many of your players and your opponent's are in each |

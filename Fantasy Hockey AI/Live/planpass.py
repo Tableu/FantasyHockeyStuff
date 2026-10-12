@@ -13,9 +13,10 @@ which plan_gui.py shows) call. Nothing here is scheduled -- a pass runs when one
     plan(...)          the shipped manager's plan (live.LiveRunner)
     save(...)          reports/<league>/plans/plan_{date}_{stem}.md + .json + plan_latest.md
 
-Planner runs them as one refresh (full or quick) for every league the server plans -- the data
-steps once while each league's settings check and read run alongside (a read-only child: the
-read needs none of the data steps), then each league's plan and save on that read. Each step
+Planner runs them as one refresh (full, quick, news, league or plan: Planner.run) for every
+league the server plans, or one -- the data steps once while each league's settings check and
+read run alongside (a read-only child: the read needs none of the data steps), then each
+league's plan and save on that read. Each step
 reports progress through `echo` (print by default; the server passes its job's progress lines).
 
 The leagues are planned in a child process, as the data steps already are:
@@ -59,6 +60,7 @@ SNAPSHOT_KINDS = ("injuries", "lines", "goalies")
 # along since the Fleaflicker listing reads its pages in parallel (~5 s instead of ~16 s), so a
 # late scratch posted as an injury reaches the next window's plan.
 QUICK_SNAPSHOT_KINDS = ("injuries", "goalies")
+MODES = ("full", "quick", "news", "league", "plan")   # Planner.run's refreshes
 PLAN_TIMEOUT_S = 600            # a planning child still running after this is stopped
 CHILD_ECHO, CHILD_RESULT = "@@echo ", "@@result "     # the planning child's progress and result lines
 
@@ -211,8 +213,7 @@ def plan_leagues(league_names, day: dt.date, now: dt.datetime, league_file=None,
                     and dt.datetime.fromtimestamp(kept.stat().st_mtime).date() == dt.date.today()):
                 snapshot = live.LeagueSnapshot.load(kept)
                 read_at = dt.datetime.fromtimestamp(kept.stat().st_mtime)
-                say(f"league: the read from {read_at:%H:%M:%S}"
-                    + (" (re-planning on your choices)" if reuse_read is True else ""))
+                say(f"league: the read from {read_at:%H:%M:%S}")
             else:
                 snapshot = read_league(league, day, league_file, platform_season, say, now=now)
                 read_at = dt.datetime.now()
@@ -292,33 +293,51 @@ class Planner:
         self.league_last = {league.name: {} for league in self.leagues}
 
     def run(self, mode: str, now: dt.datetime, echo=print, only=None) -> dict:
-        """A 'full' or 'quick' refresh, or a 'plan' -- the leagues `only` (default all) planned again
-        on their last read and today's projections, after the user's choices changed: {league name:
-        its saved plan's file name -- or, for a league that failed (its platform down; the others
-        still plan), the error as an exception}."""
+        """One refresh of the leagues `only` (default all): {league name: its saved plan's file
+        name -- or, for a league that failed (its platform down; the others still plan), the error
+        as an exception}. The modes (MODES):
+
+            full    injury, line-chart and goalie reports and tonight's projections, while each
+                    league's settings check and read run alongside; then each league planned
+            quick   the same without the line charts (the auto windows' usual)
+            news    injury and goalie reports and projections; each league planned on today's
+                    kept read (a late scratch, a goalie confirmed: nothing on the rosters moved)
+            league  each league read again and planned on today's projections, no reports (a
+                    move made on the platform); on a day with none yet, the projections first
+            plan    each league planned again on its kept read (the user's choices changed)
+        """
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}, not {mode!r}")
         chosen = [league for league in self.leagues if only is None or league.name in only]
+        names = [league.name for league in chosen]
         if mode == "plan":
-            outcome = plan_in_child([league.name for league in chosen], self.day, now, self.league_file,
-                                    self.platform_season, echo, reuse_read=True)
-            return {league.name: (RuntimeError(outcome[league.name]["error"])
-                                  if "error" in outcome.get(league.name, {"error": "no answer"})
-                                  else outcome[league.name]["file"]) for league in chosen}
-        # The leagues' settings check and read run while the data steps do (they need none of
-        # them; a Fleaflicker read's ~6 s and the child's start hidden), then each league is planned
-        # on that read. A rehearsal's league file is no read to hide.
-        names = [league.name for league in self.leagues]
-        reading = None if self.league_file else self._read_in_background(names, now, echo)
+            return self._results(chosen, plan_in_child(names, self.day, now, self.league_file,
+                                                       self.platform_season, echo, reuse_read=True))
+        if mode == "league":
+            if "projections" not in self.last:      # a Planner is one day's: none yet today
+                tonight(self.day, echo)
+                self.last["projections"] = dt.datetime.now()
+            return self._results(chosen, plan_in_child(names, self.day, now, self.league_file,
+                                                       self.platform_season, echo))
+        # The leagues' settings check and (full, quick) read run while the data steps do (they
+        # need none of them; a Fleaflicker read's ~4 s and the child's start hidden), then each
+        # league is planned on that read. A rehearsal's league file is no read to hide.
+        fresh_read = mode != "news"
+        reading = None if self.league_file else self._read_in_background(chosen, now, echo, fresh_read)
         try:
             self._data_steps(mode, echo)
         finally:
             read = reading() if reading else {}
-        results = {}
         # A league whose read failed is read again by the planning child: never planned on an
         # older read when a fresh one was asked for.
-        fresh = {name for name, got in read.items() if "read_at" in got}
-        outcome = plan_in_child(names, self.day, now, self.league_file, self.platform_season, echo,
-                                reuse_read=fresh)
-        for league in self.leagues:
+        reuse = {name for name, got in read.items() if "read_at" in got} if fresh_read else True
+        return self._results(chosen, plan_in_child(names, self.day, now, self.league_file,
+                                                   self.platform_season, echo, reuse_read=reuse))
+
+    def _results(self, chosen, outcome) -> dict:
+        """plan_in_child's outcome as run's result; each planned league's read time kept."""
+        results = {}
+        for league in chosen:
             got = outcome.get(league.name) or {"error": "the planning process said nothing about it"}
             if "error" in got:
                 results[league.name] = RuntimeError(got["error"])
@@ -327,14 +346,14 @@ class Planner:
             results[league.name] = got["file"]
         return results
 
-    def _read_in_background(self, names, now, echo):
+    def _read_in_background(self, chosen, now, echo, read=True):
         """On its own thread: each league's settings, re-detected once a day
-        (sync_league_settings.daily; the children read the files fresh), then the leagues'
-        read-only child. Returns a wait for the child's result."""
+        (sync_league_settings.daily; the children read the files fresh), then (`read`) the
+        leagues' read-only child. Returns a wait for the child's result ({} without a read)."""
         box = {}
 
         def work():
-            for league in self.leagues:
+            for league in chosen:
                 if league.readable and self.league_last[league.name].get("settings", dt.datetime.min).date() != self.day:
                     try:
                         sync_league_settings.daily(league, echo)
@@ -342,7 +361,9 @@ class Planner:
                     except Exception as error:  # noqa: BLE001 -- yesterday's settings still plan
                         echo(f"{league.name} settings check failed ({type(error).__name__}: {error}); "
                              "planning on the settings files as they are")
-            box["read"] = plan_in_child(names, self.day, now, None, self.platform_season, echo, read_only=True)
+            if read:
+                box["read"] = plan_in_child([league.name for league in chosen], self.day, now, None,
+                                            self.platform_season, echo, read_only=True)
 
         thread = threading.Thread(target=work, daemon=True)
         thread.start()

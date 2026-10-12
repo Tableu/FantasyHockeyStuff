@@ -19,6 +19,7 @@ const TABS = [
 ];
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
+const MODE_LABELS = { full: 'Full', quick: 'Quick', news: 'News', league: 'League', plan: 'Re-plan' };
 const STALE_MIN = 120;          // a step older than this shows amber
 const PULL_PX = 70;             // how far down a pull at the top of a screen must go to refresh
 const STATUS_EVERY_MS = 60000;  // follows the server's auto refreshes, as plan_gui does
@@ -184,7 +185,7 @@ function JobStrip({ job, onClose }) {
   const last = job.lines.length ? job.lines[job.lines.length - 1].replace(/^\d\d:\d\d:\d\d\s+/, '') : 'starting…';
   if (job.state === 'running') {
     return html`<div class="job" role="status"><span class="spin" aria-hidden="true"></span>
-      <span>${job.mode === 'full' ? 'Full' : job.mode === 'plan' ? 'Re-plan' : 'Quick'}</span>
+      <span>${MODE_LABELS[job.mode] || job.mode}</span>
       <span class="line">${last}</span></div>`;
   }
   const failed = job.state === 'failed';
@@ -234,7 +235,7 @@ function RefreshLog({ version }) {
     const secs = job.finished ? Math.round((new Date(job.finished) - new Date(job.started)) / 1000) : null;
     return html`
       <button type="button" class="log-row" aria-expanded=${open === job.id} onClick=${() => toggle(job)}>
-        <span class="what">${job.mode[0].toUpperCase() + job.mode.slice(1)} · <span class=${`state-${job.state}`}>${job.state}</span></span>
+        <span class="what">${MODE_LABELS[job.mode] || job.mode} · <span class=${`state-${job.state}`}>${job.state}</span></span>
         <span class="when">${clock(job.started)}${secs !== null ? ` · ${secs} s` : ''}</span>
         <span class="by">${job.by}</span>
         ${job.error && html`<span class="err">${job.error}</span>`}
