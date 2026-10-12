@@ -15,6 +15,10 @@ The goalie rolling table is built here too but kept separate: it is not part of 
 grain, and assemble.py uses it only to attach the opposing starting goalie's form.
 """
 
+import hashlib
+import os
+from pathlib import Path
+
 import pandas as pd
 
 from features import context, extract, injuries, rolling
@@ -217,13 +221,68 @@ def _before(frame: pd.DataFrame, tonight: dict) -> pd.DataFrame:
     return frame[pd.to_datetime(frame["game_date"]) < pd.Timestamp(tonight["date"])]
 
 
+# The live build's played-games history, kept between its runs: the facts and the player family
+# over completed games (~4.5 s of SQL and rolling sums) change only when the pipeline ingests a
+# game, while the plan server rebuilds tonight's rows on every refresh. FH_NO_HISTORY_CACHE=1
+# turns it off (an A/B of the cache).
+HISTORY_CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "live_cache"
+# Each source table's size and newest row, and the pipeline's newest stage run (every stage of
+# every game logs one): a game ingested or re-ingested changes the key. ~0.2 s.
+_FINGERPRINT_SQL = """
+SELECT (SELECT MAX(IngestionRunID) FROM Ingestion.IngestionRuns),
+       (SELECT COUNT_BIG(*) FROM Game.Games),
+       (SELECT CONCAT(COUNT_BIG(*), '/', MAX(CreatedAt)) FROM Stats.PlayerGameStats),
+       (SELECT CONCAT(COUNT_BIG(*), '/', MAX(CreatedAt)) FROM Lineups.GameLineups),
+       (SELECT CONCAT(COUNT_BIG(*), '/', MAX(CreatedAt)) FROM Game.Shots),
+       (SELECT CONCAT(COUNT_BIG(*), '/', MAX(CreatedAt)) FROM Game.Plays),
+       (SELECT COUNT_BIG(*) FROM Analytics.PlayerGameAdvancedStats),
+       (SELECT COUNT_BIG(*) FROM Analytics.PlayerGameOnIceStats)
+"""
+# The code that builds what is kept: an edit to it is a new key too.
+_HISTORY_CODE = [Path(__file__), Path(extract.__file__), Path(rolling.__file__)]
+
+
+def _history_key(cursor, season_ids: list, date) -> str:
+    cursor.execute(_FINGERPRINT_SQL)
+    parts = [str(v) for v in cursor.fetchone()] + [str(sorted(season_ids))]
+    parts += [hashlib.sha1(path.read_bytes()).hexdigest() for path in _HISTORY_CODE]
+    return f"{pd.Timestamp(date):%Y-%m-%d}_" + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+
+def live_history(cursor, season_ids: list, tonight: dict) -> tuple:
+    """(facts, history) over the games played before tonight's date -- built, or the copy kept
+    from an earlier run with the same key. The kept copy is a pickle, so it comes back with the
+    exact dtypes it was built with; older copies are removed when a new one is written."""
+    if os.environ.get("FH_NO_HISTORY_CACHE") == "1":
+        facts = _before(player_game_facts(cursor, season_ids), tonight)
+        return facts, player_history(facts)
+    key = _history_key(cursor, season_ids, tonight["date"])
+    path = HISTORY_CACHE_DIR / f"history_{key}.pkl"
+    if path.exists():
+        try:
+            return pd.read_pickle(path)
+        except Exception:  # noqa: BLE001 -- a damaged copy is rebuilt
+            pass
+    facts = _before(player_game_facts(cursor, season_ids), tonight)
+    history = player_history(facts)
+    HISTORY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    pd.to_pickle((facts, history), tmp)
+    os.replace(tmp, path)               # atomic: a reader never sees half a copy
+    for old in HISTORY_CACHE_DIR.glob("history_*.pkl"):
+        if old != path:
+            old.unlink(missing_ok=True)
+    return facts, history
+
+
 def build_base(cursor, season_ids: list, candidates: pd.DataFrame, tonight: dict | None = None) -> tuple:
     """(skaters, goalie_history) for the given seasons, over the candidate universe. `tonight`
     is the live build's not-yet-played games (see team_context)."""
-    facts = player_game_facts(cursor, season_ids)
     if tonight is not None:
-        facts = _before(facts, tonight)
-    history = player_history(facts)
+        facts, history = live_history(cursor, season_ids, tonight)
+    else:
+        facts = player_game_facts(cursor, season_ids)
+        history = player_history(facts)
     teams = team_context(cursor, season_ids, facts, tonight)
     goalies = goalie_history(cursor, season_ids, tonight)
 

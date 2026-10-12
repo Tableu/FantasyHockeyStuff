@@ -10,7 +10,9 @@ Projections/project_tonight.py:
                                                (the only file on a day with no games)
 
 Rebuilt before each lineup window, so each run overwrites the date's files; the durable record
-is the Live schema itself. Read-only like the rest of ModelFeatures.
+is the Live schema itself. Read-only like the rest of ModelFeatures. The played-games history
+(~4.5 s) is kept in data/live_cache/ between runs until the pipeline ingests a game
+(features/base.py live_history; FH_NO_HISTORY_CACHE=1 rebuilds it every run).
 
 Usage:
     python build_tonight.py                                   # today, as of now
