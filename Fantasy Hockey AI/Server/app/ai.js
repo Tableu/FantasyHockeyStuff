@@ -4,6 +4,7 @@
 // PC (`wide`) there are no sub-tabs: today's moves and the upgrades beside the week plans.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
+import { NoPlan } from './layout.js';
 
 const TAGS = {
   IR: ['#26304A', '#C9D4E6'], ADD: ['#123A2C', '#7DF0C4'], CLAIM: ['#2B240E', '#F2D88A'], DROP: ['#3B1216', '#FF8A8A'],
@@ -174,7 +175,7 @@ export function Suggestions({ league, version, wide }) {
 
   if (error && !data) {
     return error.status === 404
-      ? html`<div class="empty">No plan saved for today yet. Tap Quick to make one.</div>`
+      ? html`<${NoPlan} />`
       : html`<div class="error" role="alert">${error.message}</div>`;
   }
   if (!data) return html`<div class="empty">Loading…</div>`;

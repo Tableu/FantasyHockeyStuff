@@ -57,7 +57,8 @@ export const api = {
   login: (password) => call('POST', '/login', { body: { password } }),
   logout: () => call('POST', '/logout', { body: {} }),
   status: (league) => call('GET', '/status', { league }),
-  refresh: (league, mode) => call('POST', '/refresh', { league, body: { mode } }),
+  // scope 'league': this league alone (the app's taps); the server's default for full / quick is all.
+  refresh: (league, mode, scope = 'league') => call('POST', '/refresh', { league, body: { mode, scope } }),
   job: (id, after = 0) => call('GET', `/jobs/${encodeURIComponent(id)}`, { query: { after } }),
   jobs: () => call('GET', '/jobs'),
   roster: (league) => call('GET', '/roster', { league }),

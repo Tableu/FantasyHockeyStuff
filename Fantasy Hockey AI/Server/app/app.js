@@ -11,7 +11,7 @@ import { Suggestions } from './ai.js';
 import { Planner } from './planner.js';
 import { Games, Game } from './games.js';
 import { Matchup } from './matchup.js';
-import { useWide, useEscape } from './layout.js';
+import { useWide, useEscape, REFRESH_EVENT } from './layout.js';
 
 const TABS = [
   ['roster', 'Roster'], ['planner', 'Planner'], ['ai', 'AI'],
@@ -146,7 +146,7 @@ function Freshness({ status, now }) {
   })}</div>`;
 }
 
-function Header({ status, league, onLeague, job, onRefresh, now }) {
+function Header({ status, league, onLeague, job, onRefresh, now, wide }) {
   const [open, setOpen] = useState(false);
   const teams = (status && status.teams) || {};
   const leagues = (status && status.leagues) || [];
@@ -162,10 +162,10 @@ function Header({ status, league, onLeague, job, onRefresh, now }) {
           ${leagues.length > 1 && html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>`}
           <span class="day">${status ? dayLabel(status.day) : ''}</span>
         </button>
-        <div class="refresh">
-          <button type="button" class="btn primary" disabled=${running} onClick=${() => onRefresh('quick')}>Quick</button>
-          <button type="button" class="btn" disabled=${running} onClick=${() => onRefresh('full')}>Full</button>
-        </div>
+        ${wide && html`<div class="refresh">
+          <button type="button" class="btn small" disabled=${running} onClick=${() => onRefresh('quick')}
+            title="Quick: injuries, goalies and the roster, for this league (the rest are in More)">Refresh</button>
+        </div>`}
       </div>
       <${Freshness} status=${status} now=${now} />
       ${open && html`
@@ -274,7 +274,15 @@ function Login({ onDone }) {
   </form></div>`;
 }
 
-function More({ status, league, onLeague, version, onLogout }) {
+// The refreshes More offers, each for the league on screen (the auto window does every league).
+const REFRESHES = [
+  ['league', 'League', 'Made a move? Read the roster again', '~7 s'],
+  ['news', 'News', 'Injuries and goalies, on the roster as last read', '~12 s'],
+  ['quick', 'Quick', 'News and the roster', '~12 s'],
+  ['full', 'Full', 'Everything, line charts too', '~20 s'],
+];
+
+function More({ status, league, onLeague, version, onLogout, onRefresh, running }) {
   if (!status) return html`<div class="empty">Loading…</div>`;
   const teams = status.teams || {};
   const last = status.last || {};
@@ -288,6 +296,16 @@ function More({ status, league, onLeague, version, onLogout }) {
   if (status.skip_snapshots) rows.push(['Reports', 'scheduled snapshots']);
   if (status.league_file) rows.push(['League', `${status.league_file} (not the platform)`]);
   return html`<div class="more">
+    <div class="more-refresh">
+    <div class="sec"><h2>Refresh</h2><span class="note">this league<span class="pull-hint"> · pull down = Quick</span></span></div>
+    <div class="choices" role="group" aria-label="Refresh">
+      ${REFRESHES.map(([mode, label, what, takes]) => html`
+        <button type="button" class="choice" disabled=${running} onClick=${() => onRefresh(mode)}>
+          <span><span class="name">${label}</span><br /><span class="sub">${what}</span></span>
+          <span class="sub">${takes}</span>
+        </button>`)}
+    </div>
+    </div>
     <div class="more-league">
     <div class="sec"><h2>League</h2></div>
     <div class="choices" role="group" aria-label="League">
@@ -389,6 +407,14 @@ function App() {
       setError(e.message);
     }
   };
+  const running = !!(job && job.state === 'running');
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  useEffect(() => {
+    const on = (e) => refreshRef.current((e.detail && e.detail.mode) || 'quick');
+    addEventListener(REFRESH_EVENT, on);
+    return () => removeEventListener(REFRESH_EVENT, on);
+  }, []);
   const closeJob = () => { tracking.current = null; setJob(null); };
   const loggedIn = () => { setLocked(false); setError(null); loadStatus(league); setVersion((v) => v + 1); };
   // Logged out: the saved screens go too, so the phone keeps no league data without a login.
@@ -398,7 +424,7 @@ function App() {
     setLocked(true);
   };
   const pull = usePull(screen, () => refresh('quick'), !!league && !wide && !route.game && tab !== 'games'
-    && !(job && job.state === 'running'));
+    && !running);
 
   if (locked) return html`<${Login} onDone=${loggedIn} />`;
   if (wide) {
@@ -409,7 +435,7 @@ function App() {
     return html`<div class="app wide">
       <${Tabs} tab=${tab} side />
       <div class="col">
-        <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} />
+        <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} />
         <${JobStrip} job=${job} onClose=${closeJob} />
         <${StaleBanner} savedAt=${savedAt} />
         ${error && !savedAt && html`<div class="error" role="alert">${error}</div>`}
@@ -417,7 +443,7 @@ function App() {
           <${Guard} key=${games ? 'games' : tab}>
           ${!league ? html`<div class="empty">Loading…</div>`
             : games ? html`<${Games} league=${league} version=${version} wide selected=${route.game || null} view=${route.view || 'summary'} />`
-              : tab === 'more' ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} />`
+              : tab === 'more' ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} />`
                 : tab === 'ai' ? html`<${Suggestions} league=${league} version=${version} wide />`
                   : tab === 'planner' ? html`<${Planner} league=${league} version=${version} wide />`
                     : tab === 'matchup' ? html`<${Matchup} league=${league} version=${version} />`
@@ -441,16 +467,16 @@ function App() {
     </div>`;
   }
   return html`<div class="app">
-    <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} />
+    <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} />
     <${JobStrip} job=${job} onClose=${closeJob} />
     <${StaleBanner} savedAt=${savedAt} />
     ${error && !savedAt && html`<div class="error" role="alert">${error}</div>`}
     <main class="screen" ref=${screen}>
       ${pull > 0 && html`<div class="pull" style=${`height: ${pull}px`} aria-hidden="true">
-        <span>${pull >= PULL_PX ? 'Release to refresh (Quick)' : 'Pull to refresh'}</span></div>`}
+        <span>${pull >= PULL_PX ? 'Release to refresh' : 'Pull to refresh'}</span></div>`}
       <${Guard} key=${tab}>
       ${tab === 'more'
-        ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} />`
+        ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} />`
         : tab === 'roster' && league
           ? html`<${Roster} league=${league} version=${version} />`
           : tab === 'ai' && league

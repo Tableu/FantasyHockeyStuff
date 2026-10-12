@@ -8,7 +8,7 @@
 // (`wide`) the picker is a panel beside the calendar instead of a sheet over it.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { useEscape } from './layout.js';
+import { useEscape, NoPlan } from './layout.js';
 
 const TEAM = /\s*\(([A-Z]{2,3})\)\s*$/;
 const f2 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(2));
@@ -155,7 +155,7 @@ export function Planner({ league, version, wide }) {
 
   if (error && !data) {
     return error.status === 404
-      ? html`<div class="empty">No plan saved for today yet. Tap Quick to make one.</div>`
+      ? html`<${NoPlan} />`
       : error.status === 409
         ? html`<div class="empty">${error.message}</div>`
         : html`<div class="error" role="alert">${error.message}</div>`;

@@ -4,6 +4,7 @@
 // (`wide`) the table has room for both: tonight's columns, then the season's, no switch.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
+import { NoPlan } from './layout.js';
 
 const TONIGHT_EVERY_MS = 20000;     // the server's NHL feed cache is about 20 s
 const STARTED = new Set(['LIVE', 'CRIT', 'OFF', 'FINAL']);
@@ -200,7 +201,7 @@ export function Roster({ league, version, wide }) {
 
   if (error) {
     return error.status === 404
-      ? html`<div class="empty">No plan saved for today yet. Tap Quick to make one.</div>`
+      ? html`<${NoPlan} />`
       : html`<div class="error" role="alert">${error.message}</div>`;
   }
   if (!data) return html`<div class="empty">Loading…</div>`;

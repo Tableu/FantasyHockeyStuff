@@ -444,7 +444,10 @@ table.cal td.idle .cellbtn { color: var(--text-3); }
 /* Matchup (and More): two columns on a PC. */
 .app.wide .two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); align-items: start; }
 .app.wide .two-side { border-left: 1px solid var(--rule); min-height: 100%; }
-.app.wide .more { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "league log" "server log" "device log"; align-items: start; }
+.app.wide .more { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "refresh log" "league log" "server log" "device log"; align-items: start; }
+.more-refresh { grid-area: refresh; }
+.app.wide .pull-hint { display: none; }   /* no pull-to-refresh on the PC layout */
+.choice:disabled { opacity: .55; cursor: default; }
 .more-league { grid-area: league; }
 .more-server { grid-area: server; }
 .more-device { grid-area: device; }

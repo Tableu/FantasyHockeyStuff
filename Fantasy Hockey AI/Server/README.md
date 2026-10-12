@@ -60,9 +60,11 @@ compose publishes to 127.0.0.1 alone).
 files, no build step. Preact + htm are vendored in `app/vendor/` (htm 3.1.1's standalone build) and the IBM
 Plex fonts in `app/fonts/`, so nothing loads from a CDN. The app only shows what the API returns.
 
-Built so far: P0, the header (league, day, Quick / Full, how long ago each step ran, amber past
-2 h), a running refresh's progress lines, the bottom tabs, and the More tab (league switch,
-refresh log from `GET /jobs`, server status); P1, the Roster screen (`app/roster.js`): your lineup
+Built so far: P0, the header (league, day, how long ago each step ran, amber past 2 h; on the PC
+one Refresh button, a Quick of the league shown), a running refresh's progress lines, the bottom
+tabs, and the More tab (Refresh: League, News, Quick, Full for the league shown; league switch,
+refresh log from `GET /jobs`, server status). Pull down on Roster, Planner, AI or Matchup runs a
+Quick of the league shown; a screen with no plan yet has a Make a plan button; P1, the Roster screen (`app/roster.js`): your lineup
 as it stands, bench and IR from `GET /roster` (roster.py: tonight's projection, the season in the
 league's scoring), with tonight's games and live points from `GET /tonight` (games.py, every 20 s).
 P2, the AI suggestions screen (`app/ai.js`): today's moves, the upgrades and the week plans from
