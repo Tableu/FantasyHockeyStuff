@@ -8,3 +8,4 @@ ai_assistant/clips/
 __pycache__/
 *.pyc
 Fantasy Hockey AI/Settings/secrets.json
+Fantasy Hockey AI/Server/.env
