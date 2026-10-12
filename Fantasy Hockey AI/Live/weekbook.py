@@ -185,9 +185,11 @@ class Week:
         "status", "pts" (that night), "games" (his nights left this week from then), "gain" (the
         week's lineup points he adds, before any drop)}, most points first.
 
-        `positions` (a player swapped out: the positions his slot takes): instead, every free agent
-        at those positions who plays that night, "gain" the week's points of the swap itself (him
-        in, `without` out; None when it cannot go in). "Would start" is the wrong test for a swap:
+        `positions`: only free agents at those positions -- the slot clicked takes them, so an open
+        F/D slot lists forwards and D, not goalies who would start elsewhere (the user,
+        2026-10-12). With `without` too (a player swapped out): every such free agent who plays
+        that night, "gain" the week's points of the swap itself (him in, `without` out; None when
+        it cannot go in). "Would start" is the wrong test for a swap:
         with a forward gone a bench forward takes his slot, so no free-agent forward weaker than
         the bench "started", while D and goalies who would beat a starter there did -- an upgrade
         that has nothing to do with the player swapped out (the user, 2026-10-12)."""
@@ -203,12 +205,13 @@ class Week:
             if (not f["free"] or q in picked or q in tonight or night not in f["values"]
                     or (f["clears"] and f["clears"] > night)):
                 continue
-            if positions is not None:
-                if self.eligibility.get(q, frozenset()) & positions:
-                    out.append({"player_id": q, "player": f["player"], "positions": f["positions"],
-                                "status": f.get("status"), "pts": f["values"][night],
-                                "gain": self.replace_gain(moves, night, q, without),
-                                "games": sum(1 for n in f["nights"] if n >= start)})
+            if positions is not None and not self.eligibility.get(q, frozenset()) & positions:
+                continue
+            if positions is not None and without is not None:
+                out.append({"player_id": q, "player": f["player"], "positions": f["positions"],
+                            "status": f.get("status"), "pts": f["values"][night],
+                            "gain": self.replace_gain(moves, night, q, without),
+                            "games": sum(1 for n in f["nights"] if n >= start)})
                 continue
             if self.night_points(night, tonight | {q}) <= tonight_points + 1e-9:
                 continue                     # he would not start that night

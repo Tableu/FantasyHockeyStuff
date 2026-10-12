@@ -79,12 +79,12 @@ class Book:
                 "slot_rows": slot_rows, "nights": nights}
 
     def picker(self, day: str, occupant: int | None, slot: str | None = None) -> dict:
-        """The slot picker's free agents. Swapping out `occupant`: those at the positions `slot`
-        takes -- on the bench (no such slot), his own positions -- priced on the swap."""
+        """The slot picker's free agents, those at the positions `slot` takes -- on the bench (no
+        such slot), `occupant`'s own. Swapping out `occupant`: priced on the swap."""
         b = self.book
-        positions = None
-        if occupant is not None:
-            positions = b.accepts.get(slot) or b.eligibility.get(occupant) or frozenset()
+        positions = b.accepts.get(slot) if slot else None
+        if positions is None and occupant is not None:
+            positions = b.eligibility.get(occupant) or frozenset()
         found = b.picker(self.moves, day, self.plans, occupant, positions)
         positions = [q for q in POSITION_ORDER if any(q in f["positions"].split("/") for f in found)]
         return {"day": day, "counts_from": b.effective_on(day),

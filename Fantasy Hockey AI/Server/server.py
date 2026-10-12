@@ -41,9 +41,9 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                the suggestions as they now stand
     GET  /week?week=           the app's Weekly planner: your week from your picks on plan A's
                                workbench (week.py) -- each night's points, open slots, picks, slots
-    GET  /week/picker?day=&occupant=&slot=   the slot picker's free agents (plan picks first);
-                               occupant: the rental or rostered player whose slot it is -- then
-                               the free agents at that slot's positions, priced on the swap
+    GET  /week/picker?day=&slot=&occupant=   the slot picker's free agents at the slot's positions
+                               (plan picks first); occupant: the rental or rostered player whose
+                               slot it is -- then priced on the swap
     GET  /week/drops?day=&add=&occupant=   who that pick may drop, each with the week's gain
     POST /week/edit {week, action, day, add, drop, rental}   pick, replace, unpick or clear;
                                saved (choices.py), returns the calendar as it now stands

@@ -81,7 +81,7 @@ function Sheet({ league, week, sheet, onClose, onDone, docked }) {
           : 'Open'}${counts}.
           ${occupant
             ? `Free agents who can play ${sheet.slot === 'BN' ? 'his positions' : `the ${sheet.slot} slot`} that night: the plans' picks first, then the most points that night. Week: the week's lineup points with the swap.`
-            : "Free agents who would start that night: the plans' picks first, then the most points that night. Week: the lineup points he adds this week."}</span>
+            : `Free agents who can play the ${sheet.slot} slot and would start that night: the plans' picks first, then the most points that night. Week: the lineup points he adds this week.`}</span>
       </div>
       ${error && html`<div class="error" role="alert">${error}</div>`}
       ${list && list.positions.length > 1 && html`
