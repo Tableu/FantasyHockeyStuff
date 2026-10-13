@@ -17,8 +17,12 @@ services:
     ports:
       - "127.0.0.1:8000:8000"  # the server's API, from this PC only (Phase 1.5)
     working_dir: "/app/Fantasy Hockey AI/Server"
-    command: ["python", "server.py", "--host", "0.0.0.0"]   # the plan server (plan_gui.py shows it)
+    # The plan server (plan_gui.py and the app show it). --jobs: it runs the daily jobs (scheduled.py);
+    # the trial (plan container-own-db) runs them on the container's own database, 20 min after the
+    # Windows tasks, while the refreshes stay on the PC's database (NHLSTATS_DB_SERVER above).
+    command: ["python", "server.py", "--host", "0.0.0.0", "--jobs", "--jobs-db", "db,1433", "--jobs-shift", "20"]
     restart: unless-stopped    # back up when Docker Desktop starts, until `docker compose down`
+    depends_on: [db]           # started first: the daily jobs write to it
 
   # The container's own database (plan: container-own-db, the doc's Phase 3 on this PC): SQL Server
   # 2025 Express, a slim copy of the PC's NHLStats. Its data lives in the db-data volume (kept across
