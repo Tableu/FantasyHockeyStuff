@@ -76,6 +76,9 @@ def restore(cursor):
                    "MOVE N'NHLStats_log' TO N'/var/opt/mssql/data/NHLStats_log.ldf'")
     while cursor.nextset():                         # RESTORE reports progress as result sets
         pass
+    # Readers see the last committed rows instead of waiting on a writer: a refresh or the
+    # copy-back reading while a job (player teams holds a transaction for minutes) writes.
+    cursor.execute("ALTER DATABASE NHLStats SET READ_COMMITTED_SNAPSHOT ON")
     cursor.execute("ALTER DATABASE NHLStats SET MULTI_USER")
     cursor.execute("ALTER DATABASE NHLStats SET RECOVERY SIMPLE")
 
