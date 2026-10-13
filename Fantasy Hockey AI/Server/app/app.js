@@ -19,7 +19,8 @@ const TABS = [
 ];
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
-const MODE_LABELS = { full: 'Full', quick: 'Quick', news: 'News', league: 'League', plan: 'Re-plan' };
+const MODE_LABELS = { full: 'Full', quick: 'Quick', news: 'News', league: 'League', plan: 'Re-plan',
+  nightly: 'Nightly import', player_teams: 'Player teams', injuries: 'Injury listing' };
 const STALE_MIN = 120;          // a step older than this shows amber
 const PULL_PX = 70;             // how far down a pull at the top of a screen must go to refresh
 const STATUS_EVERY_MS = 60000;  // follows the server's auto refreshes, as plan_gui does
@@ -294,6 +295,15 @@ function More({ status, league, onLeague, version, onLogout, onRefresh, running 
     ...Object.entries(last).map(([step, when]) => [step[0].toUpperCase() + step.slice(1), clock(when)]),
   ];
   if (status.skip_snapshots) rows.push(['Reports', 'scheduled snapshots']);
+  // The daily jobs the server runs (scheduled.py), when it runs them: their times and last run.
+  for (const job of Object.values(status.scheduled || {})) {
+    const times = job.times.map((t) => {
+      const [h, m] = t.split(':').map(Number);
+      const at = h * 60 + m + (job.shift_min || 0);
+      return `${String(Math.floor(at / 60) % 24).padStart(2, '0')}:${String(at % 60).padStart(2, '0')}`;
+    }).join(', ');
+    rows.push([job.label, `${times} · last ${job.last ? new Date(job.last).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'never'}`]);
+  }
   if (status.league_file) rows.push(['League', `${status.league_file} (not the platform)`]);
   return html`<div class="more">
     <div class="more-refresh">

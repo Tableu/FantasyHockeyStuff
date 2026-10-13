@@ -100,6 +100,7 @@ import suggestions  # noqa: E402
 import week as week_module  # noqa: E402
 import paths  # noqa: E402
 import planpass  # noqa: E402
+import scheduled  # noqa: E402
 import simlayer  # noqa: E402
 
 APP = Path(__file__).resolve().parent / "app"     # the phone app's static files, served at /app/
@@ -151,6 +152,8 @@ class Worker:
         self.lock = threading.Lock()
         self.windows_done = set()       # puck times the auto window re-planned since it started
         self.pending = set()            # leagues whose choices changed during a running job
+        self.queued = None              # (mode, only, by): a refresh tapped during a scheduled job
+        self.scheduled_state = scheduled.load_state()   # job -> the scheduled time it last ran for
 
     def league(self, name=None):
         """A league served, by name (None: the first); a 404 for one it does not serve."""
@@ -175,13 +178,16 @@ class Worker:
         return dt.datetime.fromisoformat(self.args.now) if self.args.now else utc_now()
 
     def start(self, mode: str, by: str = "tap", only=None) -> Job:
-        """A new refresh, or the running one if there is one. A 'plan' (`only`: the leagues whose
-        choices changed) asked for while one runs is queued: it starts when that one ends, with
-        the choices saved by then."""
+        """A new refresh or scheduled job, or the running one if there is one. A 'plan' (`only`:
+        the leagues whose choices changed) asked for while one runs is queued: it starts when that
+        one ends, with the choices saved by then. So is a refresh tapped during a scheduled job (the
+        nightly import): it runs after it, on what it imported, instead of joining it."""
         with self.lock:
             if self.current is not None:
                 if mode == "plan":
                     self.pending.update(only or self.leagues)
+                elif self.current.mode in scheduled.JOBS and mode not in scheduled.JOBS:
+                    self.queued = (mode, only, by)
                 return self.current
             job = Job(next(self.numbers), mode, by)
             job.only = only
@@ -199,6 +205,10 @@ class Worker:
                 a = self.args
                 self.planner = planpass.Planner(list(self.leagues.values()), day, a.league_file,
                                                 a.platform_season, a.skip_snapshots)
+            if job.mode in scheduled.JOBS:
+                scheduled.run(job.mode, self.today(), job.echo, self.args.jobs_db)
+                job.state = "done"
+                return
             results = self.planner.run(job.mode, self.now(), job.echo, only=job.only)
             failed = {name: r for name, r in results.items() if isinstance(r, BaseException)}
             job.plan_files = {name: r for name, r in results.items() if name not in failed}
@@ -214,7 +224,10 @@ class Worker:
             with self.lock:
                 self.current = None
                 queued, self.pending = sorted(self.pending), set()
-            if queued:
+                tapped, self.queued = self.queued, None
+            if tapped:
+                self.start(tapped[0], tapped[2], only=tapped[1])
+            elif queued:
                 self.start("plan", "choices", only=queued)
 
     def planned_for(self, window) -> bool:
@@ -239,6 +252,28 @@ class Worker:
         if fetched is None or fetched.date() != dt.date.today():
             return None
         return dt.datetime.now() - fetched
+
+    def jobs_loop(self):
+        """The daily jobs (scheduled.py), checked each minute: one that is due starts when nothing
+        else runs, nightly first; its scheduled time is kept so a restart does not run it again."""
+        shift = dt.timedelta(minutes=self.args.jobs_shift)
+        while True:
+            try:
+                now = dt.datetime.now()
+                for name in scheduled.JOBS:
+                    at = scheduled.due(name, now, self.scheduled_state, shift)
+                    if at is None or self.current is not None:
+                        continue
+                    late = now - at > dt.timedelta(minutes=10)
+                    by = f"{'catch-up' if late else 'scheduled'}: {scheduled.JOBS[name]['label']} {at:%a %H:%M}"
+                    job = self.start(name, by=by)
+                    if job.mode == name and job.by == by:     # ours, not one already running
+                        self.scheduled_state[name] = at.isoformat()
+                        scheduled.save_state(self.scheduled_state)
+                    break                                     # one at a time, nightly first
+            except Exception as error:  # noqa: BLE001 -- a bad check must not end the loop
+                print(f"scheduled job check failed: {type(error).__name__}: {error}", file=sys.stderr)
+            time.sleep(AUTO_CHECK_S)
 
     def auto_loop(self):
         """A refresh ~30 minutes before each group of games, once per group: Full when the line
@@ -499,6 +534,9 @@ def make_app(worker: Worker) -> FastAPI:
             "plan_file": None if path is None else path.name,
             "plan_saved_at": None if path is None else iso(dt.datetime.fromtimestamp(path.stat().st_mtime)),
             "auto": not args.no_auto, "skip_snapshots": args.skip_snapshots,
+            "scheduled": None if not args.jobs else {
+                name: {"label": job["label"], "times": job["times"], "shift_min": args.jobs_shift,
+                       "last": worker.scheduled_state.get(name)} for name, job in scheduled.JOBS.items()},
             "league_file": args.league_file,
         }
 
@@ -518,6 +556,12 @@ def main():
     parser.add_argument("--no-auto", action="store_true", help="No auto window")
     parser.add_argument("--skip-snapshots", action="store_true",
                         help="Use the scheduled snapshots instead of taking fresh ones (faster)")
+    parser.add_argument("--jobs", action="store_true",
+                        help="Run the daily jobs (scheduled.py): nightly import, player teams, injury listing")
+    parser.add_argument("--jobs-db", default=None,
+                        help="The jobs' database server (NHLSTATS_DB_SERVER) if not the server's own, e.g. db,1433")
+    parser.add_argument("--jobs-shift", type=int, default=0,
+                        help="Minutes added to every job time (a trial beside the Windows tasks)")
     parser.add_argument("--host", default="127.0.0.1", help="0.0.0.0 in the container")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
@@ -526,6 +570,8 @@ def main():
     worker = Worker(args)
     if not args.no_auto:
         threading.Thread(target=worker.auto_loop, daemon=True).start()
+    if args.jobs:
+        threading.Thread(target=worker.jobs_loop, daemon=True).start()
     uvicorn.run(make_app(worker), host=args.host, port=args.port, log_level="warning")
 
 
