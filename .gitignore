@@ -9,3 +9,4 @@ __pycache__/
 *.pyc
 Fantasy Hockey AI/Settings/secrets.json
 Fantasy Hockey AI/Server/.env
+Fantasy Hockey AI/Server/dbseed/

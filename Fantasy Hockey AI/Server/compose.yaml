@@ -20,6 +20,27 @@ services:
     command: ["python", "server.py", "--host", "0.0.0.0"]   # the plan server (plan_gui.py shows it)
     restart: unless-stopped    # back up when Docker Desktop starts, until `docker compose down`
 
+  # The container's own database (plan: container-own-db, the doc's Phase 3 on this PC): SQL Server
+  # 2025 Express, a slim copy of the PC's NHLStats. Its data lives in the db-data volume (kept across
+  # `docker compose down`; `down -v` deletes it). The admin password comes from .env
+  # (MSSQL_SA_PASSWORD). dbseed/ (gitignored) is where a backup of the PC's database is put to restore.
+  db:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Express
+      TZ: America/Vancouver
+    env_file:
+      - path: .env
+        required: true
+    mem_limit: 2g
+    volumes:
+      - db-data:/var/opt/mssql
+      - ./dbseed:/seed
+    ports:
+      - "127.0.0.1:14330:1433"   # from this PC (checks, the copy-back); the server uses db:1433
+    restart: unless-stopped
+
   # The Cloudflare Tunnel (plan: Phone App Remote Access): dials out to Cloudflare, which serves the
   # app at the tunnel's public hostname and passes each call to http://server:8000 on this network.
   # Nothing listens on the PC for it. TUNNEL_TOKEN comes from .env here (gitignored).
@@ -31,3 +52,6 @@ services:
         required: false        # without it the tunnel alone fails to start
     depends_on: [server]
     restart: unless-stopped
+
+volumes:
+  db-data:
