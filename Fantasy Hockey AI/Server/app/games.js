@@ -117,7 +117,8 @@ function GoalFeed({ goals, open: opened, onToggle, rail }) {
             return html`<tr class=${side ? `tint-${side}` : ''}>
               <td class="n dim2" style="text-align: left">${clockTime(g.at)}</td>
               <td><b>${g.team}</b></td>
-              <td>${g.scorer.name} <span class="meta">(${g.scorer.to_date}) ${g.assists.map((a) => a.name).join(', ')}</span></td>
+              <td class="who">${g.scorer.name}${g.strength !== 'SO' && html` <span class="meta">(${g.scorer.to_date})</span>`}
+                ${g.assists.map((a) => html`<span class="meta assists">${a.name}</span>`)}</td>
               <td class="str">${g.strength}</td>
               <td class="n">${by.me ? html`<span class="you">${signed(by.me)}</span>` : ''}${by.me && by.opp ? ' ' : ''}${by.opp ? html`<span class="opp">${signed(by.opp)}</span>` : ''}</td>
               <td>${g.clip && html`<a class="clip" href=${g.clip} target="_blank" rel="noopener" aria-label=${`Highlight: ${g.scorer.name}`}>
@@ -293,6 +294,8 @@ const TYPES = [
 ];
 const TYPE_OF = { 'shot-on-goal': 'shot', 'missed-shot': 'shot' };
 const CODE = Object.fromEntries(TYPES.map(([id, , code]) => [id, code]));
+// A shot's own chip: on net (SOG, which earns its points) or missed (MISS, which earns none).
+const CHIP = { 'shot-on-goal': 'SOG', 'missed-shot': 'MISS' };
 
 function Plays({ game }) {
   const [scope, setScope] = useState('all');
@@ -341,7 +344,7 @@ function Plays({ game }) {
         <tr class="per"><td colspan="5">${per.name} period</td></tr>
         ${per.plays.map((p) => { const fp = p.fp || {}; return html`<tr class=${p.owners.length ? `tint-${p.owners.includes('me') ? 'me' : 'opp'}` : ''}>
           <td class="n" style="text-align: left">${p.time}</td><td><b>${p.team}</b></td>
-          <td><span class=${`chip t-${CODE[kind(p)]}`}>${CODE[kind(p)]}</span></td>
+          <td><span class=${`chip t-${CHIP[p.type] || CODE[kind(p)]}`}>${CHIP[p.type] || CODE[kind(p)]}</span></td>
           <td class="wrap">${p.text}</td>
           <td class="n">${fp.me ? html`<span class="you">${signed(fp.me)}</span>` : ''}${fp.me && fp.opp ? ' ' : ''}${fp.opp ? html`<span class="opp">${signed(fp.opp)}</span>` : ''}</td>
         </tr>`; })}`)}</tbody>

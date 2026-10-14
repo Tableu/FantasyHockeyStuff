@@ -61,7 +61,7 @@ export const api = {
   refresh: (league, mode, scope = 'league') => call('POST', '/refresh', { league, body: { mode, scope } }),
   job: (id, after = 0) => call('GET', `/jobs/${encodeURIComponent(id)}`, { query: { after } }),
   jobs: () => call('GET', '/jobs'),
-  roster: (league) => call('GET', '/roster', { league }),
+  roster: (league, day) => call('GET', '/roster', { league, query: day ? { day } : {} }),
   tonight: (league) => call('GET', '/tonight', { league }),
   suggestions: (league, week) => call('GET', '/suggestions', { league, query: { week } }),
   pick: (league, body) => call('POST', '/choices/pick', { league, body }),

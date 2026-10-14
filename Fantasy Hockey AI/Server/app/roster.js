@@ -161,6 +161,8 @@ export function Roster({ league, version, wide }) {
   const [tonight, setTonight] = useState(null);
   const [liveError, setLiveError] = useState(null);
   const [view, setView] = useState(() => store.get('fh.roster.view') || 'tonight');
+  // Today's or tomorrow's plan: today unless you pick tomorrow (not kept: tomorrow goes stale).
+  const [day, setDay] = useState('today');
   const [open, setOpen] = useState(null);
   // The Season sort: {key, desc}, or null for the roster's order; kept on this phone.
   const [sort, setSort] = useState(() => {
@@ -170,11 +172,11 @@ export function Roster({ league, version, wide }) {
   useEffect(() => {
     let gone = false;
     setError(null);
-    api.roster(league)
+    api.roster(league, day)
       .then((got) => { if (!gone) setData(got); })
       .catch((e) => { if (!gone) { setData(null); setError(e); } });
     return () => { gone = true; };
-  }, [league, version]);
+  }, [league, version, day]);
 
   useEffect(() => {
     let gone = false;
@@ -199,7 +201,17 @@ export function Roster({ league, version, wide }) {
     store.set('fh.roster.sort', JSON.stringify(next));
   };
 
+  // Tomorrow is there once a plan for it is saved (the server makes one when today's last game starts).
+  const dayBar = (days) => html`<div class="seg" role="group" aria-label="Day">
+    <button type="button" aria-pressed=${day === 'today'} onClick=${() => setDay('today')}>Today</button>
+    <button type="button" aria-pressed=${day === 'tomorrow'} disabled=${days && !days.tomorrow.planned && day !== 'tomorrow'}
+      title=${days && !days.tomorrow.planned ? "No plan for tomorrow yet: one is made when today's last game starts" : undefined}
+      onClick=${() => setDay('tomorrow')}>Tomorrow</button>
+  </div>`;
   if (error) {
+    if (error.status === 404 && day === 'tomorrow') {
+      return html`<div class="bar">${dayBar(null)}</div><div class="empty">No plan for tomorrow yet: one is made when today's last game starts.</div>`;
+    }
     return error.status === 404
       ? html`<${NoPlan} />`
       : html`<div class="error" role="alert">${error.message}</div>`;
@@ -218,16 +230,17 @@ export function Roster({ league, version, wide }) {
   const span = Math.max(...groups.map((g) => groupCols(g, shownView, data.columns).length));
   return html`
     <div class="sum">
-      <div><span class="k">Proj tonight</span><span class="v">${f2(data.proj_tonight)}</span></div>
+      <div><span class="k">Proj ${day === 'tomorrow' ? 'tomorrow' : 'tonight'}</span><span class="v">${f2(data.proj_tonight)}</span></div>
       <div><span class="k">Live</span><span class="v you">${liveTotal}</span></div>
       <div><span class="k">Next puck</span><span class="v">${data.next_puck ? puckTime(data.next_puck) : '—'}</span></div>
     </div>
-    ${!wide && html`<div class="bar">
-      <div class="seg" role="group" aria-label="Columns">
-        <button type="button" aria-pressed=${view === 'tonight'} onClick=${() => choose('tonight')}>Tonight</button>
+    <div class="bar">
+      ${dayBar(data.days)}
+      ${!wide && html`<div class="seg" role="group" aria-label="Columns">
+        <button type="button" aria-pressed=${view === 'tonight'} onClick=${() => choose('tonight')}>${day === 'tomorrow' ? 'Tomorrow' : 'Tonight'}</button>
         <button type="button" aria-pressed=${view === 'season'} onClick=${() => choose('season')}>Season</button>
-      </div>
-    </div>`}
+      </div>`}
+    </div>
     ${liveError && html`<div class="error" role="alert">Live points: ${liveError}</div>`}
     ${!data.games_today && html`<div class="empty">No NHL games on ${data.day}: the roster, no lineup to set.</div>`}
     ${data.empty_slots > 0 && data.games_today && html`<div class="error">${data.empty_slots} empty lineup slot${data.empty_slots > 1 ? 's' : ''} tonight</div>`}

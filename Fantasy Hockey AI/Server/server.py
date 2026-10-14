@@ -411,9 +411,26 @@ def make_app(worker: Worker) -> FastAPI:
                 "saved_at": iso(dt.datetime.fromtimestamp(path.stat().st_mtime)), "plan": plan}
 
     @app.get("/roster")
-    def get_roster(league: str | None = None):
-        chosen, path, plan = newest(league)
-        return {"league": chosen.name, "file": path.name, **roster.roster_view(plan, scoresets[chosen.name], slot_rows[chosen.name])}
+    def get_roster(league: str | None = None, day: str | None = None):
+        """day: 'today' or 'tomorrow' -- that day's newest plan, and which days have one (the
+        user, 2026-10-13: a switch, not the roll to tomorrow once today's games have started);
+        none given, the plan's day as before."""
+        chosen = worker.league(league)
+        today = worker.today()
+        days = {"today": today, "tomorrow": today + dt.timedelta(days=1)}
+        saved = {name: planpass.saved_plans(chosen, d) for name, d in days.items()}
+        if day is None:
+            path = worker.newest_plan(chosen)
+        elif day in days:
+            path = saved[day][-1] if saved[day] else None
+        else:
+            raise HTTPException(400, f"day is 'today' or 'tomorrow', not {day}")
+        if path is None:
+            raise HTTPException(404, f"no {chosen.name} plan saved for {(days.get(day) or worker.day()).isoformat()} yet")
+        plan = json.loads(path.read_text(encoding="utf-8"))
+        return {"league": chosen.name, "file": path.name,
+                "days": {name: {"date": d.isoformat(), "planned": bool(saved[name])} for name, d in days.items()},
+                **roster.roster_view(plan, scoresets[chosen.name], slot_rows[chosen.name])}
 
     @app.get("/choices")
     def get_choices(league: str | None = None):

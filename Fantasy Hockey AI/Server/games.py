@@ -413,16 +413,19 @@ class Games:
             for n, goal in enumerate(g.get("goals", [])):
                 strength = goal.get("strength", "ev")
                 bonus = weights.get({"pp": "ppp", "sh": "shp"}.get(strength, ""), 0)
+                period = goal.get("periodDescriptor") or {}
+                # The shootout's deciding goal is listed with the goals but is no goal or assist
+                # in the stats: shown, worth nothing.
+                shootout = period.get("periodType") == "SO"
 
                 def person(player_id, name, to_date, base):
-                    owner = owners.of(player_id)
+                    owner = None if shootout else owners.of(player_id)
                     points = round(weights.get(base, 0) + bonus, 2) if owner else None
                     if owner:
                         totals[owner] += points
                     return {"id": player_id, "name": name, "to_date": to_date, "owner": owner,
                             "points": points}
 
-                period = goal.get("periodDescriptor") or {}
                 scored, seen = self.store.clock.time_of(g, goal)
                 rows.append({
                     "game_id": g["id"],
@@ -434,7 +437,7 @@ class Games:
                     "scorer": person(goal["playerId"], goal["name"]["default"], goal.get("goalsToDate"), "goals"),
                     "assists": [person(a["playerId"], a["name"]["default"], a.get("assistsToDate"), "assists")
                                 for a in goal.get("assists", [])],
-                    "strength": STRENGTHS.get(strength, strength.upper()),
+                    "strength": "SO" if shootout else STRENGTHS.get(strength, strength.upper()),
                     "modifier": None if goal.get("goalModifier") in (None, "none") else goal["goalModifier"],
                     "score": f"{away} {goal.get('awayScore')}-{goal.get('homeScore')} {home}",
                     "clip": goal.get("highlightClipSharingUrl"),
@@ -527,7 +530,9 @@ class Games:
         d, kind = p.get("details") or {}, p.get("typeDescKey", "")
         sk, gk = self.scoreset.skaters, self.scoreset.goalies
         credit = []
-        if kind == "goal":
+        if (p.get("periodDescriptor") or {}).get("periodType") == "SO":
+            pass                    # shootout attempts: no goals, shots, saves or goals against
+        elif kind == "goal":
             period = (p.get("periodDescriptor") or {}).get("number")
             bonus = sk.get({"pp": "ppp", "sh": "shp"}.get(strengths.get((period, p.get("timeInPeriod"))), ""), 0)
             credit += [(d.get("scoringPlayerId"), sk.get("goals", 0) + sk.get("shots", 0) + bonus),
@@ -558,6 +563,11 @@ class Games:
             text = f"{who('scoringPlayerId')}" + (f" ({helpers})" if helpers else " (unassisted)")
         elif kind in ("shot-on-goal", "missed-shot"):
             text = who("shootingPlayerId") + (f", {d['shotType']}" if d.get("shotType") else "")
+            # On net (a shot on goal, which scores) or missed, and where (only shots on goal count).
+            if kind == "shot-on-goal":
+                text += " · on net" + (f", saved by {who('goalieInNetId')}" if who("goalieInNetId") else "")
+            else:
+                text += " · missed" + (f": {d['reason'].replace('-', ' ')}" if d.get("reason") else "")
         elif kind == "blocked-shot":
             text = f"{who('blockingPlayerId')} blocks {who('shootingPlayerId')}"
         elif kind == "hit":
