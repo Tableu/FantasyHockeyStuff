@@ -350,7 +350,7 @@ class Games:
         for g in goals:
             key = {"pp": "ppp", "sh": "shp"}.get(g.get("strength"))
             if key:
-                for player in [g["playerId"]] + [a["playerId"] for a in g.get("assists", [])]:
+                for player in [g.get("playerId")] + [a.get("playerId") for a in g.get("assists", [])]:
                     counts[player][key] += 1
         return counts
 
@@ -411,6 +411,8 @@ class Games:
         for g in data.get("games", []):
             away, home = g["awayTeam"]["abbrev"], g["homeTeam"]["abbrev"]
             for n, goal in enumerate(g.get("goals", [])):
+                if not goal.get("playerId"):    # just scored, no scorer named yet: next copy
+                    continue
                 strength = goal.get("strength", "ev")
                 bonus = weights.get({"pp": "ppp", "sh": "shp"}.get(strength, ""), 0)
                 period = goal.get("periodDescriptor") or {}

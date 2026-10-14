@@ -11,7 +11,9 @@ run_player_teams.cmd and run_live_snapshot.cmd:
 A job is due once its latest scheduled time has passed and it has not run for that time, so a
 sleep or a restart runs what was missed when the server is back (what catch_up.ps1 did on Windows):
 the most recent missed time only, nightly first. The times run for are kept in STATE, so a restart
-does not run a job twice. Output is appended to pipeline/logs/live/<job>.log as the .cmd files did.
+does not run a job twice. Output is appended to pipeline/logs/live/<job>.log as the .cmd files did --
+or, on another database (the trial's --jobs-db, while the Windows tasks still run), to
+<job>.container.log: one log file open on both sides stops the Windows task (2026-10-13).
 """
 
 import datetime as dt
@@ -103,7 +105,8 @@ def run(name: str, day: dt.date, echo, db_server: str | None = None) -> None:
     if db_server:
         env["NHLSTATS_DB_SERVER"] = db_server
     LOGS.mkdir(parents=True, exist_ok=True)
-    with open(LOGS / JOBS[name]["log"], "a", encoding="utf-8") as log:
+    log_name = JOBS[name]["log"].replace(".log", ".container.log") if db_server else JOBS[name]["log"]
+    with open(LOGS / log_name, "a", encoding="utf-8") as log:
         log.write(f"\n===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} {name} (plan server"
                   f"{', database ' + db_server if db_server else ''}) =====\n")
         for folder, command in steps(name, day):

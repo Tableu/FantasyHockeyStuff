@@ -14,13 +14,14 @@ import sys
 
 import sync_back as sb
 
+STAMPS = {"CreatedAt", "CalculatedAt"}                         # when a row was written, not what
 SKIP = {"Ingestion.RawApiResponses", "Ingestion.IngestionRuns"}   # fetch logs, not data
 WATCHED = ["Reference.Players", "Reference.PlayerTeamHistory", "Injuries.Spells", "Stats.PlayerSeasonStats",
            "Stats.SeasonTotals", "Live.PlayerStatus"]
 
 
 def values(cursor, table: sb.Table, where: str, game_id: int, ids: set) -> list:
-    keep = [c for c in table.columns if c not in ids and c != "CreatedAt"]
+    keep = [c for c in table.columns if c not in ids and c not in STAMPS]
     cursor.execute(f"SELECT {', '.join(f'[{c}]' for c in keep)} FROM {table.name} WHERE {where}", game_id)
     return sorted(tuple(r) for r in cursor.fetchall())
 
