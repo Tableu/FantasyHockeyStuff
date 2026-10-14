@@ -428,9 +428,15 @@ def make_app(worker: Worker) -> FastAPI:
         if path is None:
             raise HTTPException(404, f"no {chosen.name} plan saved for {(days.get(day) or worker.day()).isoformat()} yet")
         plan = json.loads(path.read_text(encoding="utf-8"))
+        nhl_ids = views[chosen.name].owners._nhl_ids(paths.players())
+        plan_day = dt.date.fromisoformat(plan["game_date"]) if plan.get("game_date") else today
+
+        def photo(player_id, team):
+            return live_games.headshot(nhl_ids.get(int(player_id)), team, plan_day)
+
         return {"league": chosen.name, "file": path.name,
                 "days": {name: {"date": d.isoformat(), "planned": bool(saved[name])} for name, d in days.items()},
-                **roster.roster_view(plan, scoresets[chosen.name], slot_rows[chosen.name])}
+                **roster.roster_view(plan, scoresets[chosen.name], slot_rows[chosen.name], photo)}
 
     @app.get("/choices")
     def get_choices(league: str | None = None):

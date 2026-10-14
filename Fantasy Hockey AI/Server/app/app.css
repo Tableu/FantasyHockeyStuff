@@ -146,7 +146,7 @@ pre.lines { margin: 0; padding: 8px 12px; background: var(--ground-2); border-bo
 table.roster { border-collapse: separate; border-spacing: 0; }
 table.roster th, table.roster td { border-bottom: 1px solid var(--rule); padding: 0 6px; height: 32px; white-space: nowrap; text-align: right; font-family: var(--mono); font-size: 12.5px; background: var(--ground); }
 table.roster tr.sub th { background: var(--ground-3); color: var(--text-3); font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; height: 24px; }
-table.roster .stick { position: sticky; left: 0; z-index: 1; text-align: left; font-family: var(--sans); font-size: 13.5px; font-weight: 500; border-right: 1px solid var(--rule); width: 150px; min-width: 150px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
+table.roster .stick { position: sticky; left: 0; z-index: 1; text-align: left; font-family: var(--sans); font-size: 13.5px; font-weight: 500; border-right: 1px solid var(--rule); width: 182px; min-width: 182px; max-width: 182px; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
 table.roster .f { width: 46px; min-width: 46px; max-width: 46px; }
 table.roster .txt { text-align: left; font-family: var(--sans); font-size: 12.5px; }
 table.roster td.dim { color: var(--text-3); }
@@ -155,6 +155,7 @@ table.roster td.you { color: var(--you); }
 table.roster td.dim2 { color: var(--text-2); }
 table.roster tr.sel th, table.roster tr.sel td { background: var(--ground-sel); }
 table.roster .slot { display: inline-block; width: 26px; color: var(--text-3); font-weight: 600; font-size: 12px; }
+table.roster .photo { margin-right: 7px; }
 table.roster .pname { padding: 0; min-height: 32px; background: none; border: 0; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text); }
 table.roster .pname.warn { color: var(--warn); }
 table.roster .pname.bad { color: var(--bad); }
@@ -333,7 +334,9 @@ table.list td.unit { font-weight: 600; color: var(--text-3); }
 .type-menu .btn { margin-top: 6px; }
 .feed table.list td { white-space: nowrap; }
 .feed table.list td.who { white-space: normal; height: auto; }
-.feed .assists { display: block; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed .who-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.feed .who-text { min-width: 0; flex: 1; }
+.feed .scorer, .feed .assists { display: block; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Matchup (matchup.js), as the design's Matchup artboard */
 .week-score { padding: 12px 12px 10px; border-bottom: 1px solid var(--rule); background: var(--ground-2); }
@@ -365,6 +368,11 @@ table.list .strong { font-weight: 700; }
 .screen { overscroll-behavior-y: contain; }
 .stale { flex: none; padding: 6px 12px; background: #2B240E; color: #F2D88A; font-size: 12px; border-bottom: 1px solid #4A3F17; }
 .pull { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; overflow: hidden; font-size: 12px; color: var(--text-3); }
+/* Player headshots (layout.js Photo): the NHL's cut-out on a dark disc, or his initials */
+.photo { display: inline-flex; align-items: center; justify-content: center; flex: none; vertical-align: middle; border-radius: 50%; overflow: hidden; background: var(--ground-3); border: 1px solid var(--rule); }
+/* Zoomed in a little on the face, held low enough to keep the jersey in view */
+.photo img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.3); transform-origin: 50% 60%; }
+.photo.none { color: var(--text-3); font-family: var(--sans); font-weight: 600; letter-spacing: .02em; }
 .logo-img { width: 26px; height: 26px; object-fit: contain; flex: none; }
 .logo-img.big { width: 44px; height: 44px; }
 /* The box score's sorted header carries its arrow past a narrow column's edge rather than clip it. */

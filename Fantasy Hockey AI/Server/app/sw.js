@@ -3,10 +3,12 @@
 // too, each answer kept; with the server out of reach the last one is served, marked with
 // X-Saved-At (when it was fetched) so the app can say it is stale. Live game calls are never kept:
 // an old score is worse than none.
-const SHELL_CACHE = 'fh-shell-v17';
+const SHELL_CACHE = 'fh-shell-v18';
 const DATA_CACHE = 'fh-data-v1';
 const LOGO_CACHE = 'fh-logos-v1';   // the NHL's team logos (assets.nhle.com): kept, they rarely change
 const LOGOS = 'https://assets.nhle.com/logos/';
+const MUG_CACHE = 'fh-mugs-v1';    // players' headshots (assets.nhle.com/mugs): kept, one a season and team
+const MUGS = 'https://assets.nhle.com/mugs/';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'api.js', 'layout.js', 'roster.js', 'ai.js', 'planner.js', 'games.js', 'matchup.js',
   'manifest.webmanifest', 'vendor/htm-preact-3.1.1.mjs', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -24,7 +26,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(caches.keys()
-    .then((keys) => Promise.all(keys.filter((k) => ![SHELL_CACHE, DATA_CACHE, LOGO_CACHE].includes(k)).map((k) => caches.delete(k))))
+    .then((keys) => Promise.all(keys.filter((k) => ![SHELL_CACHE, DATA_CACHE, LOGO_CACHE, MUG_CACHE].includes(k)).map((k) => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -59,9 +61,9 @@ async function data(request) {
   }
 }
 
-// A logo from the cache when it has one, else fetched and kept.
-async function logo(request) {
-  const cache = await caches.open(LOGO_CACHE);
+// A logo or headshot from the cache when it has one, else fetched and kept.
+async function kept(request, name) {
+  const cache = await caches.open(name);
   const hit = await cache.match(request);
   if (hit) return hit;
   const response = await fetch(request);
@@ -72,7 +74,11 @@ async function logo(request) {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method === 'GET' && event.request.url.startsWith(LOGOS)) {
-    event.respondWith(logo(event.request));
+    event.respondWith(kept(event.request, LOGO_CACHE));
+    return;
+  }
+  if (event.request.method === 'GET' && event.request.url.startsWith(MUGS)) {
+    event.respondWith(kept(event.request, MUG_CACHE));
     return;
   }
   if (event.request.method !== 'GET' || url.origin !== location.origin) return;

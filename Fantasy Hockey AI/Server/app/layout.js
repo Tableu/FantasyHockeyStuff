@@ -43,3 +43,17 @@ export function useEscape(active, onEscape) {
     return () => document.removeEventListener('keydown', on);
   }, [active]);
 }
+
+// A player's headshot (the NHL's, assets.nhle.com: the server sends its URL), a circle; his
+// initials in the circle when there is none or it cannot load (one just traded may have none
+// under his new team yet).
+export function Photo({ src, name, size = 26 }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  const style = `width: ${size}px; height: ${size}px`;
+  if (!src || failed) {
+    const initials = (name || '').replace(/\(.*\)/, '').split(/[\s.]+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('');
+    return html`<span class="photo none" style=${`${style}; font-size: ${Math.round(size * 0.38)}px`} aria-hidden="true">${initials}</span>`;
+  }
+  return html`<span class="photo" style=${style}><img src=${src} alt="" loading="lazy" decoding="async" onError=${() => setFailed(true)} /></span>`;
+}

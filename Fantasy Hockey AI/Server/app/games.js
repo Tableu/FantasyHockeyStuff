@@ -5,7 +5,7 @@
 // game and the goal feed sit side by side: the game opens in the middle, the feed is a rail.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { useEscape } from './layout.js';
+import { useEscape, Photo } from './layout.js';
 
 const LIVE = new Set(['LIVE', 'CRIT']);
 const DONE = new Set(['OFF', 'FINAL']);
@@ -107,18 +107,18 @@ function GoalFeed({ goals, open: opened, onToggle, rail }) {
       <div class="feed-body">
         ${!rows.length ? html`<p class="foot">${goals.goals.length ? 'No fantasy goals yet.' : 'No goals yet today.'}</p>` : html`
         <table class="list fixed">
-          <colgroup><col style="width: 76px" /><col style="width: 42px" /><col /><col style="width: 34px" /><col style="width: 58px" /><col style="width: 42px" /></colgroup>
-          ${open && html`<thead><tr><th scope="col">Time</th><th scope="col">Tm</th>
+          <colgroup><col style="width: 48px" /><col /><col style="width: 30px" /><col style="width: 58px" /><col style="width: 42px" /></colgroup>
+          ${open && html`<thead><tr><th scope="col">Tm</th>
             <th scope="col">Scorer · assists</th><th scope="col">Str</th>
             <th scope="col" class="n">FP</th><th scope="col"><span class="sr">Clip</span></th></tr></thead>`}
           <tbody>${(open ? rows : rows.slice(0, 1)).map((g) => {
             const by = fp(g);
             const side = by.me ? 'me' : by.opp ? 'opp' : '';
             return html`<tr class=${side ? `tint-${side}` : ''}>
-              <td class="n dim2" style="text-align: left">${clockTime(g.at)}</td>
               <td><b>${g.team}</b></td>
-              <td class="who">${g.scorer.name}${g.strength !== 'SO' && html` <span class="meta">(${g.scorer.to_date})</span>`}
-                ${g.assists.map((a) => html`<span class="meta assists">${a.name}</span>`)}</td>
+              <td class="who"><div class="who-row"><${Photo} src=${g.scorer.photo} name=${g.scorer.name} size=${34} />
+                <div class="who-text"><span class="scorer">${g.scorer.name}${g.strength !== 'SO' && html` <span class="meta">(${g.scorer.to_date})</span>`}</span>
+                ${g.assists.map((a) => html`<span class="meta assists">${a.name}</span>`)}</div></div></td>
               <td class="str">${g.strength}</td>
               <td class="n">${by.me ? html`<span class="you">${signed(by.me)}</span>` : ''}${by.me && by.opp ? ' ' : ''}${by.opp ? html`<span class="opp">${signed(by.opp)}</span>` : ''}</td>
               <td>${g.clip && html`<a class="clip" href=${g.clip} target="_blank" rel="noopener" aria-label=${`Highlight: ${g.scorer.name}`}>

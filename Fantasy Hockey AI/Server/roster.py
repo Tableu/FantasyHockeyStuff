@@ -4,7 +4,8 @@ his season so far in the league's scoring, and the plan's word on him. The windo
 shows the same rows (Live/plan_gui.py, PlanWindow.show). Live points come apart from these, from
 games.Games.tonight: they change every 20 s, these only with a new plan.
 
-    roster_view(plan, scoreset, slot_rows)    {day, proj_tonight, next_puck, columns, groups:
+    roster_view(plan, scoreset, slot_rows, photo)
+                                              {day, proj_tonight, next_puck, columns, groups:
                                                [{name, goalie, rows}]}
 """
 
@@ -53,8 +54,9 @@ def notes(row: dict, slot: dict | None, watch: dict, goalie_note: dict | None) -
     return out
 
 
-def roster_view(plan: dict, scoreset, slot_rows: list) -> dict:
-    """`slot_rows`: the league's lineup slots in its own order (C C LW LW ... G G), the lineup's order."""
+def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, team: None) -> dict:
+    """`slot_rows`: the league's lineup slots in its own order (C C LW LW ... G G), the lineup's order.
+    `photo(player_id, team)`: his headshot's URL, or None."""
     by_name = {r["player"]: r for r in plan.get("roster", [])}
     watch = {w["player"]: w for w in plan.get("watch", [])}
     goalie_notes = {g["player"]: g for g in plan.get("goalies", [])}
@@ -74,6 +76,7 @@ def roster_view(plan: dict, scoreset, slot_rows: list) -> dict:
         return {"player_id": r["player_id"], "player": r["player"], "name": short, "team": team,
                 "slot": slot["slot"] if slot is not None else ("IR" if where == "ir" else "BN"),
                 "positions": r["positions"], "goalie": goalie, "where": where,
+                "photo": photo(r["player_id"], team),
                 "flag": (slot or {}).get("flag") or r.get("status"),
                 "xpts": xpts, "p_plays": p_plays, "puck_utc": puck, "locked": locked,
                 "rate": r.get("rate"), "ros": r.get("ros_points"), "games_left": r.get("games_left"),

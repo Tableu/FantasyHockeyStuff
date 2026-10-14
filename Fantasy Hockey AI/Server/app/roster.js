@@ -4,7 +4,7 @@
 // (`wide`) the table has room for both: tonight's columns, then the season's, no switch.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { NoPlan } from './layout.js';
+import { NoPlan, Photo } from './layout.js';
 
 const TONIGHT_EVERY_MS = 20000;     // the server's NHL feed cache is about 20 s
 const STARTED = new Set(['LIVE', 'CRIT', 'OFF', 'FINAL']);
@@ -143,6 +143,7 @@ function Group({ group, view, columns, span, live, open, onToggle, sort, onSort 
         <tr class=${isOpen ? 'sel' : ''}>
           <th scope="row" class="stick">
             <span class="slot">${row.slot}</span>
+            <${Photo} src=${row.photo} name=${row.name} size=${30} />
             <button type="button" class=${`pname ${FLAG_CLASS[row.flag] || ''}`} aria-expanded=${isOpen}
               onClick=${() => onToggle(row.player_id)} title=${row.player}>${row.name}</button>
             ${row.flag && html` <span class=${`flag ${FLAG_CLASS[row.flag] || 'warn'}`}>${row.flag}</span>`}

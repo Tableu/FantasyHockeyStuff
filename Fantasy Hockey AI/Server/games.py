@@ -68,6 +68,18 @@ PERIOD_S = lineup_calc.PERIOD_SECONDS
 FORWARDS = set(lineup_calc.FORWARD_POSITIONS)
 STRENGTHS = {"ev": "EV", "pp": "PP", "sh": "SH"}
 TEAM_SUFFIX = re.compile(r"\(([A-Z]{2,3})\)\s*$")
+
+
+def headshot(nhl_id, team, day: dt.date):
+    """The NHL's photo of him for the season and team (assets.nhle.com, as score/now's mugshot
+    links them); None without either. One just traded may have none under his new team yet: the
+    app shows his initials when it cannot load."""
+    if nhl_id is None or not team:
+        return None
+    start = day.year if day.month >= 7 else day.year - 1
+    return f"https://assets.nhle.com/mugs/nhl/{start}{start + 1}/{team}/{int(nhl_id)}.png"
+
+
 WATCH_LIVE_S = 20               # score/now's cache window, while a game is on or about to start
 WATCH_IDLE_S = 300              # otherwise
 WATCH_LEAD = dt.timedelta(minutes=30)
@@ -407,6 +419,7 @@ class Games:
     def goals(self) -> dict:
         data, owners = self.score_now(), self._owners()
         weights = self.scoreset.skaters
+        day = dt.date.fromisoformat(data["currentDate"]) if data.get("currentDate") else dt.date.today()
         rows, totals = [], {"me": 0.0, "opp": 0.0}
         for g in data.get("games", []):
             away, home = g["awayTeam"]["abbrev"], g["homeTeam"]["abbrev"]
@@ -420,13 +433,14 @@ class Games:
                 # in the stats: shown, worth nothing.
                 shootout = period.get("periodType") == "SO"
 
-                def person(player_id, name, to_date, base):
+                def person(player_id, name, to_date, base, photo=None):
                     owner = None if shootout else owners.of(player_id)
                     points = round(weights.get(base, 0) + bonus, 2) if owner else None
                     if owner:
                         totals[owner] += points
                     return {"id": player_id, "name": name, "to_date": to_date, "owner": owner,
-                            "points": points}
+                            "points": points,
+                            "photo": photo or headshot(player_id, goal.get("teamAbbrev"), day)}
 
                 scored, seen = self.store.clock.time_of(g, goal)
                 rows.append({
@@ -436,7 +450,8 @@ class Games:
                     "at": scored.isoformat(timespec="seconds"), "at_estimated": not seen,
                     "period": period.get("number"), "period_type": period.get("periodType"),
                     "time": goal.get("timeInPeriod"), "team": goal.get("teamAbbrev"),
-                    "scorer": person(goal["playerId"], goal["name"]["default"], goal.get("goalsToDate"), "goals"),
+                    "scorer": person(goal["playerId"], goal["name"]["default"], goal.get("goalsToDate"), "goals",
+                                     goal.get("mugshot")),
                     "assists": [person(a["playerId"], a["name"]["default"], a.get("assistsToDate"), "assists")
                                 for a in goal.get("assists", [])],
                     "strength": "SO" if shootout else STRENGTHS.get(strength, strength.upper()),
