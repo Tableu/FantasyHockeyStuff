@@ -279,6 +279,7 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
         roster = list(view.roster)
         pool = [p for p in view.free_agents()
                 if (params.claim or not view.on_waivers(p)) and p not in reserved
+                and p not in getattr(view, "no_rentals", ())     # the live plan's day-to-day FAs
                 and not is_goalie(eligibility, p)]
         holders = [p for p in spots(view, params, horizon, source, pool, eligibility)
                    if p not in reserved]

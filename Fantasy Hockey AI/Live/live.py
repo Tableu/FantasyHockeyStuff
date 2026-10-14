@@ -453,6 +453,10 @@ class LiveRunner:
         # day-to-day players): they may stay on IR -- never forced off with a drop -- until their
         # report clears. They are not out: a DTD player is valued and started as before.
         ir_ok = set(status.loc[status["status"].isin(self.config.rules["ir_eligible"]), "player_id"].astype(int))
+        # Day-to-day free agents are never rented: a rental is a game or two, and whether he plays
+        # them is a coin-flip the plan cannot price (the user, 2026-10-14, after a claim of a DTD
+        # Spurgeon who had sat the night before). Kept and started on your own roster as before.
+        no_rentals = set(status.loc[status["status"] == "DTD", "player_id"].astype(int))
         unavailable = injured | set(rows.loc[rows["injured_at_lockout"].fillna(False).astype(bool), "player_id"].astype(int))
         playing = set(rows["player_id"].astype(int))
         nhl_team = {p: t for p, t in self.board_team.items() if t is not None}
@@ -525,6 +529,7 @@ class LiveRunner:
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
             v.upgrade_drops = self.upgrade_drops      # adddrop
             v.ir_ok = ir_ok                           # view.healthy_on_ir
+            v.no_rentals = no_rentals                 # streaming.run, weekplan
             v.moves_from = moves_from                 # adddrop, streaming.run, weekplan
             return v
 

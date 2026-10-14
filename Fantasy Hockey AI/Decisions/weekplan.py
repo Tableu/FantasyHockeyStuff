@@ -141,9 +141,11 @@ class WeekPlanner:
         # tonight's simulated line below; on P(start) x the average line alone, +0.26 +/- 0.60.
         self.goalies = params.goalies
         # An injured free agent is rented only if he is expected back by the middle of the rest
-        # of the week (long_absence); before his return he counts for nothing either way.
+        # of the week (long_absence); before his return he counts for nothing either way. The live
+        # plan's `no_rentals` (day-to-day free agents) are never rented; backtests have none.
+        no_rentals = getattr(view, "no_rentals", frozenset())
         free = [p for p in view.free_agents() if not long_absence(view, p, view.nights_through(p, 0))
-                and (self.goalies or not streaming.is_goalie(eligibility, p))]
+                and p not in no_rentals and (self.goalies or not streaming.is_goalie(eligibility, p))]
         self.claimable = [p for p in free if view.on_waivers(p)] if params.claim else []
         self.addable = [p for p in free if not view.on_waivers(p)]
         pool = self.addable + self.claimable
