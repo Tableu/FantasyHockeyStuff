@@ -1,3 +1,4 @@
+# Since 2026-10-15 (plan container-own-db) the plan server runs these jobs on the container's database (Server/scheduled.py) and the tasks are disabled (not deleted); run by hand it writes the PC's NHLStats, which the nightly copy-back overwrites.
 # Registers (or re-registers) the daily pipeline tasks in Windows Task Scheduler, for the current
 # user. Times are this PC's local time (Pacific). The PC has to be on and awake at those times;
 # a missed run starts as soon as possible afterwards.

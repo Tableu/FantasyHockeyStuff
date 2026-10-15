@@ -1,4 +1,5 @@
 @echo off
+rem Since 2026-10-15 (plan container-own-db) the plan server runs this job on the container's database (Server/scheduled.py) and the task is disabled; run by hand it writes the PC's NHLStats, which the nightly copy-back overwrites.
 rem Nightly job for Task Scheduler (schedule_live_tasks.ps1), output appended to logs\live\nightly.log:
 rem   1. pipeline: yesterday's games, lineups, season totals, then the live injury spells
 rem   2. ModelFeatures: the season's variant-A lineup rows and goalie starts, which tonight's

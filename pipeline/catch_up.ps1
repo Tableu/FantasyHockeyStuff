@@ -1,3 +1,4 @@
+# Since 2026-10-15 (plan container-own-db) the plan server runs this job on the container's database (Server/scheduled.py) and the task is disabled; run by hand it writes the PC's NHLStats, which the nightly copy-back overwrites.
 # Runs any daily pipeline task whose last scheduled time passed while the PC was asleep or off.
 # Task Scheduler's own "run as soon as possible after a missed start" did not fire after a wake on
 # 2026-10-04 (the 4:00 nightly ingest and the 10:00 injuries stayed missed for 25+ minutes), so

@@ -1,4 +1,5 @@
 @echo off
+rem Since 2026-10-15 (plan container-own-db) the plan server runs this job on the container's database (Server/scheduled.py) and the task is disabled; run by hand it writes the PC's NHLStats, which the nightly copy-back overwrites.
 rem Daily 05:00 job for Task Scheduler (schedule_live_tasks.ps1), output appended to
 rem logs\live\player_teams.log:
 rem   1. pipeline: import_player_teams.py -- new signings from the unresolved names (NHL search),

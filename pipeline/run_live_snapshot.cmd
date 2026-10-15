@@ -1,4 +1,5 @@
 @echo off
+rem Since 2026-10-15 (plan container-own-db) the plan server runs this job on the container's database (Server/scheduled.py) and the task is disabled; run by hand it writes the PC's NHLStats, which the nightly copy-back overwrites.
 rem One live snapshot: %1 = injuries | lines | goalies. Task Scheduler runs it for injuries only
 rem (FantasyHockey-LiveInjuries, schedule_live_tasks.ps1); lines and goalies run from the plan window.
 rem Output is appended to logs\live\<kind>.log next to this script.

@@ -10,22 +10,24 @@ services:
     mem_limit: 1g
     memswap_limit: 3g          # 1 GiB of memory + 2 GiB of swap, as the VM will have
     environment:
-      NHLSTATS_DB_SERVER: host.docker.internal   # the PC's SQL Server (TCP 1433)
+      # The container's own database (below), the only one written since the cutover (2026-10-15);
+      # host.docker.internal (the PC's SQL Server) is the rollback, with the Windows tasks back on.
+      NHLSTATS_DB_SERVER: db,1433
       TZ: America/Vancouver                      # "today" is the PC's local day, as on Windows
     volumes:
       - ../..:/app             # the repo: code, Settings, models and data files
     ports:
       - "127.0.0.1:8000:8000"  # the server's API, from this PC only (Phase 1.5)
     working_dir: "/app/Fantasy Hockey AI/Server"
-    # The plan server (plan_gui.py and the app show it). --jobs: it runs the daily jobs (scheduled.py);
-    # the trial (plan container-own-db) runs them on the container's own database, 20 min after the
-    # Windows tasks, while the refreshes stay on the PC's database (NHLSTATS_DB_SERVER above).
-    command: ["python", "server.py", "--host", "0.0.0.0", "--jobs", "--jobs-db", "db,1433", "--jobs-shift", "20"]
+    # The plan server (plan_gui.py and the app show it). --jobs: it runs the daily jobs (scheduled.py)
+    # in place of the Windows tasks; the nightly ends by copying the database back into the PC's.
+    command: ["python", "server.py", "--host", "0.0.0.0", "--jobs"]
     restart: unless-stopped    # back up when Docker Desktop starts, until `docker compose down`
-    depends_on: [db]           # started first: the daily jobs write to it
+    depends_on: [db]           # started first: everything reads and writes it
 
   # The container's own database (plan: container-own-db, the doc's Phase 3 on this PC): SQL Server
-  # 2025 Express, a slim copy of the PC's NHLStats. Its data lives in the db-data volume (kept across
+  # 2025 Express, a slim copy of the PC's NHLStats (db_seed.py), and since 2026-10-15 the one written:
+  # the PC's NHLStats is only brought up to it each night (sync_back.py). Its data lives in the db-data volume (kept across
   # `docker compose down`; `down -v` deletes it). The admin password comes from .env
   # (MSSQL_SA_PASSWORD). dbseed/ (gitignored) is where a backup of the PC's database is put to restore.
   db:

@@ -143,10 +143,24 @@ publish -- or stop the container and run server.py on Windows, where plan_gui.py
 - **Code and data** are not in the image: the repo is mounted at /app, so an edit on Windows runs
   in the container at once. Reading the mounted Windows folder is slower than a Linux disk, so
   timings here are an upper bound for the VM.
-- **Database:** the same credentials files as on Windows; `NHLSTATS_DB_SERVER=host.docker.internal`
-  (compose.yaml) replaces their `localhost`, read by pipeline/nhl_pipeline/config.py and
-  ModelFeatures/nhlstats_db.py. SQL Server must accept TCP on 1433 with SQL logins (it does,
-  checked 2026-10-02).
+- **Database:** the same credentials files as on Windows; `NHLSTATS_DB_SERVER` (compose.yaml)
+  replaces their `localhost`, read by pipeline/nhl_pipeline/config.py and
+  ModelFeatures/nhlstats_db.py. Since 2026-10-15 (plan container-own-db) it is `db,1433`: the
+  compose `db` service, SQL Server Express with a slim copy of NHLStats (db_seed.py: this season
+  whole, last season's games and lineups, no raw responses), the only database anything writes.
+  The nightly job ends with sync_back.py, which brings the PC's full NHLStats (model training's)
+  up to it: other tables row by row, this season's new games whole. The PC's database is written
+  by nothing else -- a one-off import goes to the container's (`NHLSTATS_DB_SERVER=127.0.0.1,14330`
+  on Windows), or the copy-back overwrites it.
+  - **Daily jobs** (scheduled.py, `--jobs`): nightly 04:00, player teams 05:00, injuries 10:00 and
+    15:00, each caught up after a sleep. The Windows FantasyHockey-* tasks are disabled, not deleted.
+  - **Rollback:** `NHLSTATS_DB_SERVER: host.docker.internal` in compose.yaml (the copy-back then
+    stops by itself), `docker compose up -d server`, and re-enable the four tasks
+    (`Enable-ScheduledTask FantasyHockey-NightlyIngest` etc.).
+  - **Re-seed:** a backup of the PC's NHLStats (`sqlcmd -S localhost -E -C -Q "BACKUP DATABASE
+    NHLStats TO DISK=N'C:\Users\Public\Documents\NHLStats_container.bak' WITH COPY_ONLY,
+    COMPRESSION, INIT"`) moved into dbseed/, then `python db_seed.py` with the server stopped.
+  - **Checks:** trial_check.py compares the PC's database with the container's game by game.
 - **Time zone:** America/Vancouver, so "today" is the same day as on the PC.
 - **Port 8000** is published to this PC only (127.0.0.1), for the plan window:
   `python plan_gui.py` (in Live/) shows the server's newest plan, its buttons start the server's

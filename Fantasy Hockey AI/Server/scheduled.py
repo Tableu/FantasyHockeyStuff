@@ -4,7 +4,8 @@ run_player_teams.cmd and run_live_snapshot.cmd:
 
     nightly        04:00            run_daily, then the season's lineup rows, goalie starts, season
                                     stats, season history and feature table, then every skater's
-                                    rest-of-season projection
+                                    rest-of-season projection; on the container's own database, then
+                                    the copy-back of it into the PC's (sync_back.py)
     player_teams   05:00            import_player_teams, build_players
     injuries       10:00, 15:00     the full injury listing (snapshot_live --kind injuries), build_players
 
@@ -30,6 +31,7 @@ MODEL_FEATURES = SIBLINGS / "ModelFeatures"
 PROJECTIONS = SIBLINGS / "Projections"
 LOGS = PIPELINE / "logs" / "live"
 STATE = HERE / "state" / "scheduled_jobs.json"      # job -> the scheduled time it last ran for
+PC_DB = "host.docker.internal"                     # the PC's SQL Server, as the container reaches it
 
 # In the order a catch-up runs them: the database jobs never overlap (one worker), nightly first.
 JOBS = {
@@ -44,10 +46,13 @@ def season_of(day: dt.date) -> str:
     return f"{start}-{(start + 1) % 100:02d}"
 
 
-def steps(name: str, day: dt.date) -> list:
-    """[(folder, command)] for the job, as its .cmd file runs them."""
+def steps(name: str, day: dt.date, copy_from: str | None = None) -> list:
+    """[(folder, command)] for the job, as its .cmd file runs them. `copy_from`: the database the
+    jobs write when it is not the PC's (the container's, db,1433) -- the nightly ends by copying it
+    back into the PC's NHLStats, which model training reads."""
     season = season_of(day)
     if name == "nightly":
+        copy_back = [(HERE, ["sync_back.py", "--source", copy_from, "--target", PC_DB])] if copy_from else []
         return [(PIPELINE, ["run_daily.py"]),
                 (MODEL_FEATURES, ["build_lineup_features.py", "--season", season, "--variant", "A"]),
                 (MODEL_FEATURES, ["build_goalie_starts.py", "--season", season]),
@@ -55,7 +60,7 @@ def steps(name: str, day: dt.date) -> list:
                 (MODEL_FEATURES, ["build_season_history.py"]),
                 (MODEL_FEATURES, ["build_feature_table.py", "--season", season]),
                 (PROJECTIONS, ["ros_predict.py", "--season", season, "--min-games-played", "0",
-                               "--weights", "points-league"])]
+                               "--weights", "points-league"])] + copy_back
     if name == "player_teams":
         return [(PIPELINE, ["import_player_teams.py"]), (MODEL_FEATURES, ["build_players.py"])]
     if name == "injuries":
@@ -100,8 +105,12 @@ def save_state(state: dict) -> None:
 def run(name: str, day: dt.date, echo, db_server: str | None = None) -> None:
     """The job's steps in order, each a child process; its output appended to the job's log, its
     last useful line echoed. A failing step stops the job and raises with its last lines.
-    `db_server` points the steps at a database (NHLSTATS_DB_SERVER) other than the server's own."""
+    `db_server` points the steps at a database (NHLSTATS_DB_SERVER) other than the server's own: the
+    trial's, whose ids differ from the PC's, so it is never copied back. The server's own database,
+    when not the PC's, is (the cutover, 2026-10-15)."""
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    own = os.environ.get("NHLSTATS_DB_SERVER")
+    copy_from = own if not db_server and own and own != PC_DB else None
     if db_server:
         env["NHLSTATS_DB_SERVER"] = db_server
     LOGS.mkdir(parents=True, exist_ok=True)
@@ -109,7 +118,7 @@ def run(name: str, day: dt.date, echo, db_server: str | None = None) -> None:
     with open(LOGS / log_name, "a", encoding="utf-8") as log:
         log.write(f"\n===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} {name} (plan server"
                   f"{', database ' + db_server if db_server else ''}) =====\n")
-        for folder, command in steps(name, day):
+        for folder, command in steps(name, day, copy_from):
             done = subprocess.run([sys.executable, *command], cwd=folder, capture_output=True, text=True,
                                   encoding="utf-8", errors="replace", env=env)
             output = done.stdout + done.stderr
