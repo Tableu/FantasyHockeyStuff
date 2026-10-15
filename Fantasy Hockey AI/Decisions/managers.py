@@ -536,6 +536,16 @@ class FullSystem(Manager):
                     continue
                 nights.setdefault(night, []).append(player_id)
 
+        # A goalie's later nights each their own (live: Live/live.goalie_nights, his P(start) with
+        # the night's back-to-back in it); otherwise one number for the week, tonight's if he plays
+        # tonight. Backtests have none, and are unchanged.
+        goalie_nights = getattr(view, "goalie_nights", None) or {}
+
+        def on(player_id, night):
+            if goalie_nights and pd.Timestamp(night) != today:
+                return goalie_nights.get((player_id, pd.Timestamp(night)), values[player_id])
+            return values[player_id]
+
         eligibility = view._state.eligibility
         mean = var = 0.0
         by_night = {}
@@ -543,10 +553,11 @@ class FullSystem(Manager):
             weight = view.night_weight(night)
             if weight <= 0:
                 continue
-            lineup = slots_module.assign(self.slot_order, {p: values[p][0] for p in players},
+            night_values = {p: on(p, night) for p in players}
+            lineup = slots_module.assign(self.slot_order, {p: v[0] for p, v in night_values.items()},
                                          eligibility, self.accepts)
             for player_id in lineup.assigned.values():
-                mu, sd = values[player_id]
+                mu, sd = night_values[player_id]
                 mean += weight * mu
                 var += weight * sd * sd
                 by_night[night] = by_night.get(night, 0.0) + weight * mu

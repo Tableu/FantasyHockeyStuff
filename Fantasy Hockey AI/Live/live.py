@@ -333,6 +333,108 @@ def latest_rates(day: dt.date, scoreset, expected_line: float) -> dict:
     return rates
 
 
+# Goalies on back-to-backs, measured on 2024-25 and confirmed on 2025-26 (scratchpad b2b_measure.py,
+# b2b_repeat.py, 2026-10-15). The goalie who starts the first night starts the second too in 7.4%
+# of back-to-backs (7.9%): his partner takes it otherwise. On the first night a team's first goalie
+# (by start share) starts 63.3% of games against 70.5% on other nights (59.8 / 65.9%); a near-even
+# pair shows no such dip, so that factor fades to none as his share falls to a half.
+SAME_GOALIE_BOTH_NIGHTS = 0.074
+FIRST_NIGHT_FACTOR = 0.633 / 0.705
+FIRST_GOALIE_SHARE = 0.705
+USUAL_NIGHTS = 5
+
+
+def first_night(share: float) -> float:
+    """The first goalie's factor on the first night of a back-to-back, at his usual share."""
+    weight = min(max((share - 0.5) / (FIRST_GOALIE_SHARE - 0.5), 0.0), 1.0)
+    return 1.0 + weight * (FIRST_NIGHT_FACTOR - 1.0)
+
+
+def goalie_nights(day: dt.date, schedule: pd.DataFrame, line_mean: float, line_sd: float,
+                  days_ahead=14) -> dict:
+    """{(player id, night): (mean, sd)} of a goalie's points on each of his team's nights after
+    `day`: the matchup's week projection (managers._week_projection) reads them instead of one
+    number for the whole week. The points are P(start) x the league line, as tonight's.
+
+    A team's usual split is the model's P(start) over its last USUAL_NIGHTS nights that were no
+    back-to-back with the same healthy goalies, averaged, for the goalies of the newest of them: one night's swings with that
+    night's own rest (TBL, 2026-10-14 and 15: Vasilevskiy 0.97, then 0.65). Not the news-led
+    P(start), which is about that night alone; and not a back-to-back's, where the model hands the
+    second night to the backup (WSH, 2026-10-14: Lindgren 0.94). On a normal night the
+    goalies start in that split; on the first of a back-to-back the first goalie a little less
+    (first_night); on the second, whoever started the first night starts again only
+    SAME_GOALIE_BOTH_NIGHTS of the time, his partners sharing the rest in their usual split. When
+    the first night is tonight, who starts it is tonight's own P(start), news included: a goalie
+    confirmed tonight is mostly not tomorrow's."""
+    season_start = dt.date(day.year if day.month >= 7 else day.year - 1, 7, 1).isoformat()
+    by_team = {}                                  # team -> {its game date: goalie rows}
+    for path in sorted(TONIGHT_DIR.glob("tonight_*.parquet")):
+        if not season_start <= path.stem[len("tonight_"):] <= day.isoformat():
+            continue
+        rows = pd.read_parquet(path, columns=["kind", "team_id", "player_id", "game_date", "p_start", "p_start_model",
+                                     "injured_at_lockout"])
+        for team, group in rows[rows["kind"] == "goalie"].groupby("team_id"):
+            by_team.setdefault(int(team), {})[pd.Timestamp(group["game_date"].iloc[0]).normalize()] = group
+    played = {(int(t), pd.Timestamp(d).normalize()) for t, d in zip(schedule["team_id"], schedule["game_date"])}
+    one_day = pd.Timedelta(days=1)
+
+    def kind(team, night):
+        if (team, night - one_day) in played:
+            return "leg2"
+        return "leg1" if (team, night + one_day) in played else "normal"
+
+    def healthy(rows):
+        return frozenset(rows.loc[~rows["injured_at_lockout"].fillna(False).astype(bool), "player_id"].astype(int))
+
+    def split(values):
+        total = values.sum()
+        return values / total if total > 0 else np.full(len(values), 1.0 / max(len(values), 1))
+
+    today, out = pd.Timestamp(day), {}
+    for team, nights in by_team.items():
+        normal = sorted(d for d in nights if kind(team, d) == "normal")
+        group = nights[max(normal) if normal else max(nights)]
+        ids = group["player_id"].astype(int).to_numpy()
+        # Only nights with the same healthy goalies: one with a goalie hurt is another split.
+        normal = [d for d in normal if healthy(nights[d]) == healthy(group)][-USUAL_NIGHTS:]
+        usual = np.zeros(len(ids))
+        for d in normal:
+            seen = dict(zip(nights[d]["player_id"].astype(int), nights[d]["p_start_model"].fillna(0.0)))
+            usual += split(np.array([seen.get(int(i), 0.0) for i in ids], dtype="float64"))
+        usual = split(usual)
+        if not normal:                            # its only nights are back-to-backs: an even split
+            usual = split(np.ones(len(ids)))
+        first = int(np.argmax(usual))
+        tonight = nights.get(today)
+        prev = None                               # P(start) on the night before, when it was the team's
+        if tonight is not None:
+            tonight_p = dict(zip(tonight["player_id"].astype(int), tonight["p_start"].fillna(0.0)))
+            prev = (today, split(np.array([tonight_p.get(int(i), 0.0) for i in ids], dtype="float64")))
+        for night in sorted(n for t, n in played if t == team and today < n <= today + pd.Timedelta(days=days_ahead)):
+            k = kind(team, night)
+            if k == "leg2" and prev is not None and prev[0] == night - one_day:
+                starts = np.zeros(len(ids))
+                for h, q in enumerate(prev[1]):
+                    starts[h] += q * SAME_GOALIE_BOTH_NIGHTS
+                    rest = usual.copy()
+                    rest[h] = 0.0
+                    starts += q * (1.0 - SAME_GOALIE_BOTH_NIGHTS) * split(rest) if len(ids) > 1 else 0.0
+            elif k == "leg1":
+                top = usual[first] * first_night(usual[first])
+                others = split(np.delete(usual, first)) if len(ids) > 1 else np.array([])
+                starts = np.insert((1.0 - top) * others, first, top)
+            else:
+                starts = usual.copy()
+            if len(ids) == 1:
+                starts = usual.copy()
+            prev = (night, starts)
+            for player_id, q in zip(ids, starts):
+                mean = q * line_mean
+                var = max(q * (line_sd ** 2 + line_mean ** 2) - mean ** 2, 0.0)
+                out[(int(player_id), night)] = (float(mean), float(var ** 0.5))
+    return out
+
+
 def latest_spreads(day: dt.date, weights: dict, theta: dict) -> tuple:
     """({player: sd of his points per team game}, {player: peripheral share}) from the newest
     tonight file that has him, on or before `day` (valuation.line_spread) -- carried like the rate."""
@@ -479,6 +581,7 @@ class LiveRunner:
         _, periph = latest_spreads(self.day, self.scoreset.weights("skaters"), self.theta)
         self.periph = {**self.board_periph, **periph}
         rate_estimate.update(latest_rates(self.day, self.scoreset, self.goalie_line_mean))
+        goalie_nights_ = goalie_nights(self.day, self.calendar.schedule, self.goalie_line_mean, self.goalie_line_sd)
         decision_points = self._draws(skaters, goalies)
 
         state = self._state(snapshot, day)
@@ -530,6 +633,7 @@ class LiveRunner:
             v.upgrade_drops = self.upgrade_drops      # adddrop
             v.ir_ok = ir_ok                           # view.healthy_on_ir
             v.no_rentals = no_rentals                 # streaming.run, weekplan
+            v.goalie_nights = goalie_nights_          # managers._week_projection
             v.moves_from = moves_from                 # adddrop, streaming.run, weekplan
             return v
 
