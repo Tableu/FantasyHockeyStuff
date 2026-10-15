@@ -248,14 +248,24 @@ function Summary({ game }) {
     <p class="foot">The higher number in each row is bold; for giveaways and penalty minutes, the lower. Power play = goals / chances.${LIVE.has(game.state) ? ' Updates every 5 s while the game is live.' : ''}</p>`;
 }
 
-const SKATER_COLS = [['goals', 'G'], ['assists', 'A'], ['shots', 'SOG'], ['hits', 'HIT'], ['blocks', 'BLK'], ['toi', 'TOI'], ['fantasy', 'FP']];
+// FP first, so it stays on screen while the rest scroll sideways on a phone. PP / SH TOI come from
+// the shift reports (as Lines): blank until they are posted.
+const SKATER_COLS = [['fantasy', 'FP'], ['goals', 'G'], ['assists', 'A'], ['shots', 'SOG'], ['hits', 'HIT'],
+  ['blocks', 'BLK'], ['pim', 'PIM'], ['faceoff_wins', 'FOW'], ['faceoff_pct', 'FO%'], ['toi', 'TOI'],
+  ['pp_toi', 'PP TOI'], ['sh_toi', 'SH TOI']];
+const TOI_KEYS = new Set(['toi', 'pp_toi', 'sh_toi']);
 const toiSeconds = (t) => (t ? t.split(':').reduce((m, s) => m * 60 + Number(s), 0) : 0);
+function skaterCell(p, key) {
+  if (key === 'fantasy') return f2(p.fantasy);
+  if (key === 'faceoff_pct') return p.faceoff_pct == null ? '' : Math.round(p.faceoff_pct * 100);
+  return p[key] ?? '';
+}
 
 function Box({ game, league }) {
   const [side, setSide] = useState('home');
   const [sort, setSort] = useState({ key: 'fantasy', desc: true });
   const team = game[side];
-  const value = (p, key) => (key === 'toi' ? toiSeconds(p.toi) : p[key]);
+  const value = (p, key) => (TOI_KEYS.has(key) ? toiSeconds(p[key]) : p[key] ?? -1);
   const skaters = team.players.filter((p) => p.position !== 'G')
     .sort((a, b) => (value(b, sort.key) - value(a, sort.key)) * (sort.desc ? 1 : -1) || a.name.localeCompare(b.name));
   const goalies = team.players.filter((p) => p.position === 'G' && toiSeconds(p.toi) > 0);
@@ -267,15 +277,15 @@ function Box({ game, league }) {
       </div>
       <span class="meta"><span class="you">■</span> You <span class="opp">■</span> Opp</span>
     </div>
-    <table class="list fixed box">
+    <div class="table-scroll"><table class="list skaters">
       <thead><tr><th scope="col">Skater</th>${SKATER_COLS.map(([key, label]) => html`<th scope="col" class="n"
         aria-sort=${sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}>
         <button type="button" class=${`sort ${sort.key === key ? 'on' : ''}`} onClick=${() => tap(key)}>${label}${sort.key === key ? (sort.desc ? '▾' : '▴') : ''}</button></th>`)}</tr></thead>
       <tbody>${skaters.map((p) => html`<tr class=${p.owner ? `tint-${p.owner}` : ''}>
         <th scope="row">${p.name}</th>
-        ${SKATER_COLS.map(([key]) => html`<td class=${`n ${key === 'fantasy' ? 'strong' : ''}`}>${key === 'fantasy' ? f2(p.fantasy) : p[key]}</td>`)}
+        ${SKATER_COLS.map(([key]) => html`<td class=${`n ${key === 'fantasy' ? 'strong' : ''}`}>${skaterCell(p, key)}</td>`)}
       </tr>`)}</tbody>
-    </table>
+    </table></div>
     <table class="list fixed box">
       <thead><tr><th scope="col">Goalie</th><th scope="col" class="n">SA</th><th scope="col" class="n">SV</th><th scope="col" class="n">GA</th><th scope="col" class="n">SV%</th><th scope="col" class="n">FP</th></tr></thead>
       <tbody>${goalies.length ? goalies.map((p) => html`<tr class=${p.owner ? `tint-${p.owner}` : ''}>

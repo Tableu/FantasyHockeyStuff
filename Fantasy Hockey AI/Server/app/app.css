@@ -317,6 +317,15 @@ table.list.box th.n:nth-child(4), table.list.box th.n:nth-child(5), table.list.b
 table.list.box th.n:nth-last-child(2) { width: 50px; }
 table.list.box th.n:last-child { width: 52px; }
 table.list.box td.strong { font-weight: 600; }
+/* The skaters' box: every column, scrolled sideways on a phone with the name held at the left */
+table.list.skaters { width: max-content; min-width: 100%; }
+table.list.skaters th, table.list.skaters td { white-space: nowrap; }
+table.list.skaters th.n, table.list.skaters td.n { padding-left: 8px; padding-right: 8px; }
+table.list.skaters th:first-child { position: sticky; left: 0; z-index: 1; width: 120px; min-width: 120px; max-width: 120px; border-right: 1px solid var(--rule); }
+table.list.skaters tbody th:first-child { background: var(--ground); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+table.list.skaters td.strong { font-weight: 600; }
+table.list.skaters tr.tint-me th:first-child { background: #0F2236; }
+table.list.skaters tr.tint-opp th:first-child { background: #2A1A10; }
 table.list button.sort { padding: 0; min-height: 22px; border: 0; background: none; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
 table.list button.sort.on { color: var(--you); }
 table.list tr.per td { background: var(--ground-2); color: var(--text-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; height: 24px; }

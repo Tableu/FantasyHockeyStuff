@@ -38,7 +38,7 @@ import re
 import sys
 import threading
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from email.utils import formatdate
 from pathlib import Path
 
@@ -366,8 +366,13 @@ class Games:
                     counts[player][key] += 1
         return counts
 
-    def _box_players(self, box, side, special, owners) -> list:
-        """One side's box score: each skater's and goalie's counts and fantasy points."""
+    def _box_players(self, box, side, special, owners, faceoffs=None, special_toi=None) -> list:
+        """One side's box score: each skater's and goalie's counts and fantasy points. `faceoffs`:
+        {nhl_id: [won, lost]} from the play-by-play (the box score has only the percentage);
+        `special_toi`: {"pp": {nhl_id: seconds}, "sh": {...}} from the shift reports (compute_lines),
+        empty before they are posted."""
+        faceoffs = faceoffs if faceoffs is not None else defaultdict(lambda: [0, 0])
+        special_toi = special_toi or {}
         team = box[side]["abbrev"]
         stats = box.get("playerByGameStats", {}).get(side, {})
         players = []
@@ -377,10 +382,14 @@ class Games:
                           "points": p.get("points", 0), "shots": p.get("sog", 0),
                           "hits": p.get("hits", 0), "blocks": p.get("blockedShots", 0),
                           "pim": p.get("pim", 0), "plus_minus": p.get("plusMinus", 0),
+                          "faceoff_wins": faceoffs[p["playerId"]][0], "faceoff_losses": faceoffs[p["playerId"]][1],
                           **special.get(p["playerId"], {"ppp": 0, "shp": 0})}
+                taken = sum(faceoffs[p["playerId"]])
                 players.append({"id": p["playerId"], "name": p["name"]["default"], "team": team,
                                 "number": p.get("sweaterNumber"), "position": p.get("position"),
                                 "toi": p.get("toi"), "owner": owners.of(p["playerId"]),
+                                "faceoff_pct": round(faceoffs[p["playerId"]][0] / taken, 3) if taken else None,
+                                **{f"{k}_toi": clock(v.get(p["playerId"], 0)) for k, v in special_toi.items()},
                                 "fantasy": self._points(counts, False), **counts})
         for p in stats.get("goalies", []):
             decision = p.get("decision")
@@ -489,8 +498,11 @@ class Games:
             if g["gameState"] in LIVE_STATES | FINAL_STATES and {away["abbrev"], home["abbrev"]} & held_teams:
                 box = self.game_feed(g["id"], "boxscore")
                 special = self._special_points(g.get("goals", []))
+                # Faceoffs only from the play-by-play: fetched only for a league that scores them.
+                faceoffs = (self._faceoffs(self.game_feed(g["id"], "play-by-play"))
+                            if {"faceoff_wins", "faceoff_losses"} & set(self.scoreset.skaters) else None)
                 for side in ("awayTeam", "homeTeam"):
-                    for p in self._box_players(box, side, special, owners):
+                    for p in self._box_players(box, side, special, owners, faceoffs):
                         if p["owner"]:
                             lines[p["id"]] = p
         players, live = {}, 0.0
@@ -513,8 +525,11 @@ class Games:
         rail = self.game_feed(game_id, "right-rail")
         pbp = self.game_feed(game_id, "play-by-play")
         special = self._special_points(summary.get("goals", []))
+        faceoffs = self._faceoffs(pbp)
+        special_toi = self._special_toi(game_id)
         sides = {side: {"abbrev": box[side]["abbrev"], "score": box[side].get("score"),
-                        "sog": box[side].get("sog"), "players": self._box_players(box, side, special, owners)}
+                        "sog": box[side].get("sog"),
+                        "players": self._box_players(box, side, special, owners, faceoffs, special_toi)}
                  for side in ("awayTeam", "homeTeam")}
         names = {s["playerId"]: f"{s['firstName']['default'][:1]}. {s['lastName']['default']}"
                  for s in pbp.get("rosterSpots", [])}
@@ -538,6 +553,32 @@ class Games:
             "last_sort": max((p["sort"] for p in plays), default=-1),
             "team": owners.names["me"], "opponent": owners.names["opp"],
         }
+
+    @staticmethod
+    def _faceoffs(pbp) -> dict:
+        """{nhl_id: [won, lost]} from the play-by-play's faceoffs."""
+        faceoffs = defaultdict(lambda: [0, 0])
+        for p in pbp.get("plays", []):
+            if p.get("typeDescKey") == "faceoff":
+                d = p.get("details") or {}
+                if d.get("winningPlayerId"):
+                    faceoffs[d["winningPlayerId"]][0] += 1
+                if d.get("losingPlayerId"):
+                    faceoffs[d["losingPlayerId"]][1] += 1
+        return faceoffs
+
+    def _special_toi(self, game_id) -> dict:
+        """Each skater's power-play and shorthanded ice time from the Lines view (the box score has
+        neither); {} before the shift reports are up, or if they cannot be read: the box shows
+        without them."""
+        try:
+            teams = self.lines(game_id).get("teams", [])
+        except Exception as error:  # noqa: BLE001 -- the box score stands without them
+            print(f"special-teams TOI for {game_id} failed: {type(error).__name__}: {error}", file=sys.stderr)
+            return {}
+        if not teams:
+            return {}
+        return {k: {p: s for t in teams for p, s in t[f"{k}_toi"].items()} for k in ("pp", "sh")}
 
     def _play_points(self, p, owners, strengths) -> dict:
         """The fantasy points a play earned each owner -- {"me": 4.0} -- in the league's scoring: the
@@ -740,6 +781,9 @@ def compute_lines(game_id, pbp, report_bodies, owners) -> dict:
         pp = [sec for sec in range(total) if strength["pp"][team][sec]]
         sh = [sec for sec in range(total) if strength["pp"][other][sec]]
         entry["pp_seconds"], entry["sh_seconds"] = len(pp), len(sh)
+        # Each skater's own seconds on the ice in those (the box score's PP / SH TOI).
+        entry["pp_toi"] = dict(Counter(p for sec in pp for p in on_ice[team][sec] if p in skaters))
+        entry["sh_toi"] = dict(Counter(p for sec in sh for p in on_ice[team][sec] if p in skaters))
         entry["pp"] = units(team, pp, skaters, 5, lineup_calc.MAX_SPECIAL_TEAMS_UNITS) if len(pp) >= MIN_UNIT_S else []
         entry["pk"] = units(team, sh, skaters, 4, lineup_calc.MAX_SPECIAL_TEAMS_UNITS) if len(sh) >= MIN_UNIT_S else []
         teams.append(entry)
