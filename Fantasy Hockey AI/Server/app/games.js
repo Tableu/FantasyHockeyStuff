@@ -117,7 +117,7 @@ function GoalFeed({ goals, open: opened, onToggle, rail }) {
             return html`<tr class=${side ? `tint-${side}` : ''}>
               <td><b>${g.team}</b></td>
               <td class="who"><div class="who-row"><${Photo} src=${g.scorer.photo} name=${g.scorer.name} size=${34} />
-                <div class="who-text"><span class="scorer">${g.scorer.name}${g.strength !== 'SO' && html` <span class="meta">(${g.scorer.to_date})</span>`}</span>
+                <div class="who-text"><span class="scorer">${g.scorer.name} <span class="meta">(${g.scorer.to_date})</span></span>
                 ${g.assists.map((a) => html`<span class="meta assists">${a.name}</span>`)}</div></div></td>
               <td class="str">${g.strength}</td>
               <td class="n">${by.me ? html`<span class="you">${signed(by.me)}</span>` : ''}${by.me && by.opp ? ' ' : ''}${by.opp ? html`<span class="opp">${signed(by.opp)}</span>` : ''}</td>

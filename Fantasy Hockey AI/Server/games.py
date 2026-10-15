@@ -435,15 +435,16 @@ class Games:
             for n, goal in enumerate(g.get("goals", [])):
                 if not goal.get("playerId"):    # just scored, no scorer named yet: next copy
                     continue
-                strength = goal.get("strength", "ev")
-                bonus = weights.get({"pp": "ppp", "sh": "shp"}.get(strength, ""), 0)
                 period = goal.get("periodDescriptor") or {}
                 # The shootout's deciding goal is listed with the goals but is no goal or assist
-                # in the stats: shown, worth nothing.
-                shootout = period.get("periodType") == "SO"
+                # in the stats, and worth nothing: left out (the user, 2026-10-15).
+                if period.get("periodType") == "SO":
+                    continue
+                strength = goal.get("strength", "ev")
+                bonus = weights.get({"pp": "ppp", "sh": "shp"}.get(strength, ""), 0)
 
                 def person(player_id, name, to_date, base, photo=None):
-                    owner = None if shootout else owners.of(player_id)
+                    owner = owners.of(player_id)
                     points = round(weights.get(base, 0) + bonus, 2) if owner else None
                     if owner:
                         totals[owner] += points
@@ -463,7 +464,7 @@ class Games:
                                      goal.get("mugshot")),
                     "assists": [person(a["playerId"], a["name"]["default"], a.get("assistsToDate"), "assists")
                                 for a in goal.get("assists", [])],
-                    "strength": "SO" if shootout else STRENGTHS.get(strength, strength.upper()),
+                    "strength": STRENGTHS.get(strength, strength.upper()),
                     "modifier": None if goal.get("goalModifier") in (None, "none") else goal["goalModifier"],
                     "score": f"{away} {goal.get('awayScore')}-{goal.get('homeScore')} {home}",
                     "clip": goal.get("highlightClipSharingUrl"),
