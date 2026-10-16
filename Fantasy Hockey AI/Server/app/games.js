@@ -3,7 +3,7 @@
 // /games/<id>) and Lines (GET /games/<id>/lines). Live, they poll every 5 s -- the server's feed
 // cache (about 20 s) is what bounds the calls to the NHL. On a PC (`wide`) the list, the chosen
 // game and the goal feed sit side by side: the game opens in the middle, the feed is a rail.
-import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
+import { html, useState, useEffect, useRef } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 import { useEscape, Photo } from './layout.js';
 
@@ -76,9 +76,62 @@ function Logo({ abbr, big }) {
 
 // ---------- the games list and the goal feed ----------
 
+const FEED_TOP = 96;          // the open feed's top, below the screen's head (.feed.open)
+const FEED_SNAP = 0.3;        // a drag past this share of the way opens (or closes) the feed
+
+// The feed's bar dragged up or down: the sheet follows the finger and, let go, settles open or
+// closed -- past FEED_SNAP of the way, or flicked that way. A tap without a drag still toggles.
+function useFeedDrag(open, onToggle) {
+  const sheet = useRef(null);
+  const [height, setHeight] = useState(null);     // px while dragging or settling, else null
+  const [settling, setSettling] = useState(false);
+  const drag = useRef(null);
+  const moved = useRef(false);
+  const bounds = () => {
+    const el = sheet.current, box = el.offsetParent.getBoundingClientRect(), rect = el.getBoundingClientRect();
+    return { max: rect.bottom - box.top - FEED_TOP, min: 96 };
+  };
+  const down = (e) => {
+    if (e.button > 0 || !sheet.current) return;
+    const { min, max } = bounds();
+    drag.current = { y: e.clientY, start: open ? max : Math.min(sheet.current.offsetHeight, min), min, max, t: e.timeStamp, v: 0, last: e.clientY };
+    moved.current = false;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const move = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    const dy = e.clientY - d.y;
+    if (!moved.current && Math.abs(dy) < 6) return;
+    setSettling(false);
+    moved.current = true;
+    const dt = Math.max(1, e.timeStamp - d.t);
+    d.v = (e.clientY - d.last) / dt;              // px per ms, + = down
+    d.t = e.timeStamp; d.last = e.clientY;
+    setHeight(Math.max(d.min, Math.min(d.max, d.start - dy)));
+  };
+  const up = (e) => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d || !moved.current) return;
+    const h = Math.max(d.min, Math.min(d.max, d.start - (e.clientY - d.y)));
+    const share = (h - d.min) / Math.max(1, d.max - d.min);
+    const flick = Math.abs(d.v) > 0.5 ? (d.v < 0 ? 'open' : 'closed') : null;
+    const toOpen = flick ? flick === 'open' : open ? share > 1 - FEED_SNAP : share > FEED_SNAP;
+    setSettling(true);
+    setHeight(toOpen ? d.max : d.min);            // settles there (the transition), then the class takes over
+    setTimeout(() => { setHeight(null); setSettling(false); if (toOpen !== open) onToggle(); }, 180);
+  };
+  // The click after a drag is the drag's own, not a tap.
+  const click = (e) => { if (moved.current) { moved.current = false; e.preventDefault(); return; } onToggle(); };
+  return { sheet, height, settling, handlers: { onPointerDown: down, onPointerMove: move, onPointerUp: up, onPointerCancel: up, onClick: click } };
+}
+
 function GoalFeed({ goals, open: opened, onToggle, rail }) {
   const [filter, setFilter] = useState('all');
-  const open = rail || opened;
+  const { sheet, height, settling, handlers } = useFeedDrag(!!opened, onToggle);
+  const dragging = !rail && height !== null;
+  const open = rail || opened || dragging;
   useEscape(!rail && opened, onToggle);
   if (!goals) return null;
   const rows = goals.goals.filter((g) => filter === 'all' || g.scorer.owner || g.assists.some((a) => a.owner));
@@ -89,15 +142,16 @@ function GoalFeed({ goals, open: opened, onToggle, rail }) {
   };
   return html`
     ${open && !rail && html`<div class="feed-scrim" onClick=${onToggle}></div>`}
-    <section class=${`feed ${open ? 'open' : ''} ${rail ? 'rail' : ''}`} aria-label="Goal feed">
+    <section ref=${sheet} class=${`feed ${open ? 'open' : ''} ${rail ? 'rail' : ''} ${dragging ? 'dragging' : ''} ${settling ? 'settling' : ''}`}
+      style=${dragging ? `top: auto; height: ${height}px` : ''} aria-label="Goal feed">
       <div class="feed-bar">
         ${rail ? html`<div class="feed-toggle">
           <span class="feed-title">Goals · FP <span class="you">You ${f2(goals.totals.me)}</span> · <span class="opp">Opp ${f2(goals.totals.opp)}</span></span>
-        </div>` : html`<button type="button" class="feed-toggle" aria-expanded=${open} onClick=${onToggle}
-          aria-label=${open ? 'Close the goal feed' : 'Open the goal feed'}>
+        </div>` : html`<button type="button" class="feed-toggle" aria-expanded=${!!opened} ...${handlers}
+          aria-label=${opened ? 'Close the goal feed' : 'Open the goal feed (or drag it up)'}>
           <span class="grip"></span>
           <span class="feed-title">Goals · FP <span class="you">You ${f2(goals.totals.me)}</span> · <span class="opp">Opp ${f2(goals.totals.opp)}</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style=${`margin-left: auto; transform: rotate(${open ? 180 : 0}deg)`}><path d="m6 15 6-6 6 6"></path></svg></span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style=${`margin-left: auto; transform: rotate(${opened ? 180 : 0}deg)`}><path d="m6 15 6-6 6 6"></path></svg></span>
         </button>`}
         ${open && html`<div class="seg" role="group" aria-label="Filter goals">
           <button type="button" aria-pressed=${filter === 'all'} onClick=${() => setFilter('all')}>All</button>
@@ -330,22 +384,22 @@ function Plays({ game }) {
     periods[periods.length - 1].plays.push(p);
   }
   return html`
-    <div class="bar">
+    <div class="bar plays-bar">
       <div class="seg" role="group" aria-label="Whose plays">
         ${[['all', 'All'], ['me', 'Mine'], ['opp', 'Opponent']].map(([id, label]) => html`
           <button type="button" aria-pressed=${scope === id} onClick=${() => setScope(id)}>${label}</button>`)}
       </div>
       <button type="button" class="btn small" aria-expanded=${menu} aria-haspopup="true" onClick=${() => setMenu(!menu)}>
         Filter${off.size ? html` <span class="badge">${TYPES.length - off.size}</span>` : ''}</button>
+      ${menu && html`<div class="type-menu" role="dialog" aria-label="Event types">
+        <div class="type-head"><span>Event types</span>
+          <button type="button" class="link" onClick=${() => save((prev) => (prev.size ? new Set() : new Set(TYPES.map(([id]) => id))))}>${off.size ? 'Select all' : 'Clear all'}</button></div>
+        ${TYPES.map(([id, label, code]) => html`<label class="type-row">
+          <input type="checkbox" checked=${!off.has(id)} onChange=${() => save((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; })} />
+          <span>${label}</span><span class=${`chip t-${code}`}>${code}</span></label>`)}
+        <button type="button" class="btn" onClick=${() => setMenu(false)}>Done</button>
+      </div>`}
     </div>
-    ${menu && html`<div class="type-menu" role="dialog" aria-label="Event types">
-      <div class="type-head"><span>Event types</span>
-        <button type="button" class="link" onClick=${() => save((prev) => (prev.size ? new Set() : new Set(TYPES.map(([id]) => id))))}>${off.size ? 'Select all' : 'Clear all'}</button></div>
-      ${TYPES.map(([id, label, code]) => html`<label class="type-row">
-        <input type="checkbox" checked=${!off.has(id)} onChange=${() => save((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; })} />
-        <span>${label}</span><span class=${`chip t-${code}`}>${code}</span></label>`)}
-      <button type="button" class="btn" onClick=${() => setMenu(false)}>Done</button>
-    </div>`}
     ${!shown.length ? html`<p class="foot">No plays of this kind yet.</p>` : html`
     <table class="list fixed plays">
       <thead><tr><th scope="col" style="width: 56px">Time</th><th scope="col" style="width: 40px">Tm</th>

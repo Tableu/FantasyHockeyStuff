@@ -3,7 +3,7 @@
 // too, each answer kept; with the server out of reach the last one is served, marked with
 // X-Saved-At (when it was fetched) so the app can say it is stale. Live game calls are never kept:
 // an old score is worse than none.
-const SHELL_CACHE = 'fh-shell-v18';
+const SHELL_CACHE = 'fh-shell-v23';
 const DATA_CACHE = 'fh-data-v1';
 const LOGO_CACHE = 'fh-logos-v1';   // the NHL's team logos (assets.nhle.com): kept, they rarely change
 const LOGOS = 'https://assets.nhle.com/logos/';
@@ -21,7 +21,7 @@ const SAVED_API = ['/status', '/plan', '/roster', '/suggestions', '/week', '/mat
 const SAVED_EXACT = ['/jobs'];      // the refresh log; a running job's own lines are never kept
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL.map((u) => new Request(u, { cache: 'no-cache' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -30,9 +30,11 @@ self.addEventListener('activate', (event) => {
     .then(() => self.clients.claim()));
 });
 
+// The shell is always checked with the server (`no-cache`: a quick 304 when unchanged): Cloudflare
+// rewrites the server's no-cache to a 4-hour browser lifetime, which kept an old app.css for hours.
 async function shell(request) {
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: 'no-cache' });
     if (response.ok) {
       const copy = response.clone();
       caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy));

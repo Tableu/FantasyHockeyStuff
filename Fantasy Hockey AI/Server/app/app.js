@@ -80,8 +80,14 @@ function usePull(ref, onPull, enabled) {
     const el = ref.current;
     if (!el || !enabled) return undefined;
     let start = null, dist = 0, engaged = false;
+    // At the top: the screen, and any box inside it the touch starts in (a table that scrolls on
+    // its own, its header held at its top) -- a pull down in a scrolled table scrolls it back.
+    const atTop = (target) => {
+      for (let n = target; n && n !== el; n = n.parentElement) if (n.scrollTop > 0) return false;
+      return el.scrollTop <= 0;
+    };
     const down = (e) => {
-      start = el.scrollTop <= 0 && e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+      start = atTop(e.target) && e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
       dist = 0; engaged = false;
     };
     const move = (e) => {
@@ -504,5 +510,13 @@ function App() {
 render(html`<${App} />`, document.getElementById('root'));
 
 if ('serviceWorker' in navigator) {
+  // A new version's worker takes over (it skips waiting) while this page shows the old files:
+  // reload once, so an update shows on the first open after it rather than the second.
+  if (navigator.serviceWorker.controller) {
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!reloaded) { reloaded = true; location.reload(); }
+    });
+  }
   navigator.serviceWorker.register('sw.js').catch(() => { /* the app works without it */ });
 }
