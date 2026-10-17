@@ -28,6 +28,21 @@ function clockTime(iso) {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
+// A live game's man advantage (the server's situation): a red "PP" (or "Pulled", for a pulled
+// goalie) beside the team that has it, on a card and in the game's header. Even strength: none.
+function SituationTag({ s, team }) {
+  if (!s || s.team !== team) return null;
+  return html`<span class=${`sit ${s.kind}`}>${s.kind === 'pulled' ? 'Pulled' : 'PP'}</span>`;
+}
+
+// ...and, in the game's header, its skater count under the period and clock: "5v4 · 1:42" (the
+// power play's time left). Cards leave it out.
+function SituationLine({ s }) {
+  if (!s) return null;
+  const left = s.kind === 'pp' && s.left ? s.left.replace(/^0(?=\d:)/, '') : '';
+  return html`<span class="sit-line">${s.skaters[0]}v${s.skaters[1]}${left ? ` · ${left}` : ''}</span>`;
+}
+
 // "2nd 14:21", "INT · end 1st", "Final", "Final/OT", or the start time.
 function stateLabel(g) {
   if (DONE.has(g.state)) return g.period_type && g.period_type !== 'REG' ? `Final/${g.period_type}` : 'Final';
@@ -174,7 +189,7 @@ function GoalFeed({ goals, open: opened, onToggle, rail }) {
                 <div class="who-text"><span class="scorer">${g.scorer.name} <span class="meta">(${g.scorer.to_date})</span></span>
                 ${g.assists.map((a) => html`<span class="meta assists">${a.name}</span>`)}</div></div></td>
               <td class="str">${g.strength}</td>
-              <td class="n">${by.me ? html`<span class="you">${signed(by.me)}</span>` : ''}${by.me && by.opp ? ' ' : ''}${by.opp ? html`<span class="opp">${signed(by.opp)}</span>` : ''}</td>
+              <td class=${`n ${by.me && by.opp ? 'fp-both' : ''}`}>${by.me ? html`<span class="you">${signed(by.me)}</span>` : ''}${by.me && by.opp ? ' ' : ''}${by.opp ? html`<span class="opp">${signed(by.opp)}</span>` : ''}</td>
               <td>${g.clip && html`<a class="clip" href=${g.clip} target="_blank" rel="noopener" aria-label=${`Highlight: ${g.scorer.name}`}>
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"></path></svg></a>`}</td>
             </tr>`;
@@ -195,7 +210,7 @@ function card(g, href, current) {
     </div>
     ${['away', 'home'].map((side) => html`<div class="game-team">
       <${Logo} abbr=${g[side].abbrev} />
-      <span class="tn"><span class=${done && lead && lead !== side ? 'dim2' : ''}>${g[side].abbrev}</span>
+      <span class="tn"><span class="ab"><span class=${done && lead && lead !== side ? 'dim2' : ''}>${g[side].abbrev}</span><${SituationTag} s=${g.situation} team=${g[side].abbrev} /></span>
         ${started && g[side].sog !== null && html`<span class="sog">SOG: ${g[side].sog}</span>`}</span>
       <span class=${`score ${done && lead && lead !== side ? 'dim2' : ''}`}>${started ? g[side].score : ''}</span>
     </div>`)}
@@ -483,10 +498,11 @@ export function Game({ league, gameId, view, embedded }) {
     </header>`}
     ${error && html`<div class="error" role="alert">${error}</div>`}
     ${game && html`<section class="scoreboard" aria-label="Score">
-      <div class="side"><${Logo} abbr=${game.away.abbrev} big /><span class="nm"><span class=${lead === 'home' ? 'dim2' : ''}>${game.away.abbrev}</span><span class="meta">Away</span></span></div>
+      <div class="side"><${Logo} abbr=${game.away.abbrev} big /><span class="nm"><span class="ab"><span class=${lead === 'home' ? 'dim2' : ''}>${game.away.abbrev}</span><${SituationTag} s=${game.situation} team=${game.away.abbrev} /></span><span class="meta">Away</span></span></div>
       <div class="mid"><span class="num mono"><span class=${lead === 'home' ? 'dim' : ''}>${game.away.score ?? 0}</span><span class="dash">–</span><span class=${lead === 'away' ? 'dim' : ''}>${game.home.score ?? 0}</span></span>
-        <span class=${`st ${live ? 'live' : ''}`}>${live && !game.intermission && html`<span class="dot"></span>`}${state}</span></div>
-      <div class="side right"><span class="nm"><span class=${lead === 'away' ? 'dim2' : ''}>${game.home.abbrev}</span><span class="meta">Home</span></span><${Logo} abbr=${game.home.abbrev} big /></div>
+        <span class=${`st ${live ? 'live' : ''}`}>${live && !game.intermission && html`<span class="dot"></span>`}${state}</span>
+        <${SituationLine} s=${game.situation} /></div>
+      <div class="side right"><span class="nm"><span class="ab"><${SituationTag} s=${game.situation} team=${game.home.abbrev} /><span class=${lead === 'away' ? 'dim2' : ''}>${game.home.abbrev}</span></span><span class="meta">Home</span></span><${Logo} abbr=${game.home.abbrev} big /></div>
     </section>`}
     <nav class="game-views" aria-label="Game views">
       ${VIEWS.map(([id, label]) => html`<a href=${`#/game/${gameId}/${id}`} aria-current=${id === view ? 'page' : undefined}>${label}</a>`)}

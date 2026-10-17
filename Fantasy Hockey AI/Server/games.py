@@ -89,6 +89,33 @@ def clock(seconds: int) -> str:
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
+def situation(feed: dict) -> dict | None:
+    """A live game's man advantage, from the feed's situation code (away goalie, away skaters, home
+    skaters, home goalie, e.g. "1451"): {"team", "kind": "pp" | "pulled", "skaters": [its, theirs],
+    "left": the power play's time left}. A pulled goalie wins over a power play (6v4 is "pulled");
+    even strength (5v5, 4v4, 3v3) is None, as is a game not on the ice."""
+    if feed.get("gameState") not in ("LIVE", "CRIT") or (feed.get("clock") or {}).get("inIntermission"):
+        return None
+    sit = feed.get("situation") or {}
+    code = str(sit.get("situationCode") or "")
+    if len(code) != 4 or not code.isdigit():
+        return None
+    away_goalie, away, home, home_goalie = map(int, code)
+    teams = {"away": (sit.get("awayTeam") or {}).get("abbrev") or (feed.get("awayTeam") or {}).get("abbrev"),
+             "home": (sit.get("homeTeam") or {}).get("abbrev") or (feed.get("homeTeam") or {}).get("abbrev")}
+    if away_goalie != home_goalie:
+        side = "away" if not away_goalie else "home"
+        kind = "pulled"
+    elif away != home:
+        side = "away" if away > home else "home"
+        kind = "pp"
+    else:
+        return None
+    mine, theirs = (away, home) if side == "away" else (home, away)
+    return {"team": teams[side], "kind": kind, "skaters": [mine, theirs],
+            "left": sit.get("timeRemaining") if kind == "pp" else None}
+
+
 def mmss(text) -> int:
     minutes, seconds = (text or "0:00").split(":")
     return int(minutes) * 60 + int(seconds)
@@ -420,6 +447,7 @@ class Games:
                 "period_type": (g.get("periodDescriptor") or {}).get("periodType"),
                 "clock": (g.get("clock") or {}).get("timeRemaining"),
                 "intermission": bool((g.get("clock") or {}).get("inIntermission")),
+                "situation": situation(g),
                 "mine": owners.count("me", teams), "opp": owners.count("opp", teams),
             })
         return {"date": data.get("currentDate"), "team": owners.names["me"],
@@ -546,6 +574,7 @@ class Games:
             "period_type": (box.get("periodDescriptor") or {}).get("periodType"),
             "clock": (box.get("clock") or {}).get("timeRemaining"),
             "intermission": bool((box.get("clock") or {}).get("inIntermission")),
+            "situation": situation(box),
             "away": sides["awayTeam"], "home": sides["homeTeam"],
             "linescore": (rail.get("linescore") or {}).get("byPeriod", []),
             "shots_by_period": rail.get("shotsByPeriod", []),
