@@ -1095,6 +1095,10 @@ class LiveRunner:
         # rentals are in the week plans), then the pickups it priced on the roster as it stands,
         # for comparison.
         choices = []
+        # A package (adddrop.packages): a swap and its refill, made together -- each row names the
+        # other move.
+        then = lambda back, second: (f"then add {name(back)}, drop "
+                                     f"{name(second) if second is not None else '(open spot)'}")
         upgrades = [q for q in manager.move_log if q["kind"] in ("add", "claim")]
         for q in upgrades:
             p, d = q["incoming"], q["outgoing"]
@@ -1106,10 +1110,21 @@ class LiveRunner:
                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
                             "add_periph": self.peripheral(p),
                             "add_games": q.get("incoming_games"),
-                            "drop_games": q.get("outgoing_games") if d is not None else None})
+                            "drop_games": q.get("outgoing_games") if d is not None else None,
+                            "then": None})
+            if q.get("package") is not None:
+                partner = next((m for m in upgrades if m["incoming"] == q["package"]), None)
+                if partner is not None and partner.get("package") == p and partner is not q:
+                    first = upgrades.index(q) < upgrades.index(partner)
+                    choices[-1]["note"] = "in plan, a package"
+                    choices[-1]["then"] = (then(partner["incoming"], partner["outgoing"]) if first
+                                           else f"with {name(partner['incoming'])} for "
+                                                f"{name(partner['outgoing'])}")
         # An upgrade is the same pricing as its row below, so it takes that row's rank instead; a
         # rented player keeps his row, priced as an upgrade.
-        made = {(q["incoming"], q["outgoing"]): row for q, row in zip(upgrades, choices)}
+        # A package's swap is keyed with its refill; the refill's own entry matches no row.
+        made = {(q["incoming"], q["outgoing"], q.get("package")): row
+                for q, row in zip(upgrades, choices)}
         rented = {q["incoming"] for q in manager.move_log if q["kind"] in ("rental", "rental claim")}
         added = {q["incoming"] for q in manager.move_log}
         seen, ranked = set(), 0
@@ -1120,8 +1135,9 @@ class LiveRunner:
             seen.add(p)
             ranked += 1
             clears = q["gain"] > q["bar"]
-            if (p, d) in made:                           # listed above, as the plan made it
-                made[(p, d)]["rank"] = ranked
+            key = (p, d, q["second"][0] if "second" in q else None)
+            if key in made:                              # listed above, as the plan made it
+                made[key]["rank"] = ranked
                 continue
             note = ("rental in plan" if p in rented else "in plan, other drop" if p in added
                     else ("clears bar" if q["shortlisted"]
@@ -1135,7 +1151,8 @@ class LiveRunner:
                             "add_rate": priced(p), "drop_rate": priced(d) if d is not None else None,
                             "add_periph": self.peripheral(p),
                             "add_games": len(q["nights"].nights(p)),
-                            "drop_games": len(q["nights"].nights(d)) if d is not None else None})
+                            "drop_games": len(q["nights"].nights(d)) if d is not None else None,
+                            "then": then(*q["second"]) if "second" in q else None})
             if ranked == OPTIONS_SHOWN:
                 break
         # The week mode's plan (weekplan.py): every move it would make this week, today's made above,
@@ -1438,6 +1455,8 @@ def render(plan: dict) -> str:
         blank = lambda x, f="": "" if x is None else format(x, f)
         for o in plan["options"]:
             mark = f"**{o['note']}**" if o["in_plan"] else o["note"]
+            if o.get("then"):
+                mark += f"; {o['then']}"
             lines.append(f"| {blank(o['rank'])} | {o['kind']} | {o['add']} | {o['add_rate']} | {blank(o['add_games'])} | "
                          f"{o['drop'] or '(open spot)'} | {blank(o['drop_rate'])} | {blank(o['drop_games'])} | "
                          f"{blank(o['gain'], '+.1f')} | {blank(o['bar'], '.1f')} | {blank(o['edge'], '+.1f')} | {mark} |")

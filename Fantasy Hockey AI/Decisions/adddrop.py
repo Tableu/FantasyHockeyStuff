@@ -23,6 +23,12 @@ The rule, in the order it is applied:
    and no rung ever claimed; `claim_premium=inf` restores that.
    A claim's gain counts only nights from the day the player clears waivers (as streaming's
    rentals always have); until 2026-09-26 it was priced from today.
+5. **Packages** (`packages`): a swap that leaves a position short -- a goalie dropped for a
+   skater, a D for a forward -- is also priced with its second move, the best free agent at the
+   dropped player's positions for one of the cheapest other drops, both at once: two moves, the
+   two swaps' bars added. Alone it prices the empty slot as lost; with the free agent added
+   back, the roster spot he needs is counted too (the user's question, 2026-10-18: espn-la's
+   plan dropped Thompson for Coronato while Saros, a better goalie, was free).
 
 Then repeat while moves remain. Nothing here reads a file or a table: it is handed a view, and
 it acts through the view's league state, whose methods raise on an illegal move.
@@ -50,6 +56,7 @@ class AddDropParams:
     drop_shortlist: int               # cheapest fieldable drops tried against each
     tail: str                         # value after the window: "none", "cost" or "net" (below)
     goalie_absence: bool              # an injured goalie's window value counts games from his return
+    packages: bool                    # a swap leaving a position short also priced with its refill
 
     def __post_init__(self):
         if self.tail not in TAILS:
@@ -58,7 +65,7 @@ class AddDropParams:
     def describe(self) -> str:
         return (f"H={self.horizon_weeks} m={self.margin:g} rate={self.rate_source} "
                 f"claim={self.claim_premium:g}" + ("" if self.tail == "none" else f" tail={self.tail}")
-                + (" gabs" if self.goalie_absence else ""))
+                + (" gabs" if self.goalie_absence else "") + (" pkg" if self.packages else ""))
 
 
 # What the rest of the season after the H-week window counts for. A swap is permanent, but the
@@ -105,7 +112,18 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
     if not candidates:
         return []
 
-    rates = {p: valuation.rate(view, p, params.rate_source) for p in roster + candidates}
+    # Packages (`packages`): the best free agents at each drop's positions, the refill a swap that
+    # leaves those positions short is priced with. Not on waivers: he is added the same day.
+    refill = {}
+    if params.packages and view.moves_left >= 2:
+        best_first = sorted((p for p in pool if forward[p] > 0.0 and not view.on_waivers(p)),
+                            key=lambda p: forward[p], reverse=True)
+        for d in roster:
+            positions = eligibility.get(d, frozenset())
+            refill[d] = [p for p in best_first if eligibility.get(p, frozenset()) & positions][:2]
+    refills = sorted({p for r in refill.values() for p in r} - set(candidates))
+
+    rates = {p: valuation.rate(view, p, params.rate_source) for p in roster + candidates + refills}
     nights = valuation.RosterNights(view, roster, rates, params.horizon_weeks, slot_order,
                                     eligibility, accepts)
     # A rostered player with no rate yet is unknown, not worthless: never a drop candidate.
@@ -130,6 +148,10 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
         if p not in tails:
             tails[p] = tail_value(view, p, params)
         return tails[p]
+
+    def slots_of(p):
+        held = eligibility.get(p, frozenset())
+        return frozenset(s for s in slot_order if accepts[s] & held)
 
     pairs = []
     for rank, incoming in enumerate(candidates):
@@ -163,6 +185,37 @@ def price(view, params: AddDropParams, slot_order, accepts, fieldable, reserved=
                           # Whether the rule itself prices him: a wider `shortlist` (the plan
                           # window's options) prices free agents the rule never considers.
                           "shortlisted": rank < params.shortlist})
+            # The swap with its refill: only when the incoming player cannot fill a slot the
+            # outgoing one could -- else a refill is an upgrade of its own, priced as one.
+            if (outgoing is None or clears is not None or not refill
+                    or slots_of(outgoing) <= slots_of(incoming)):
+                continue
+            back = next((r for r in refill.get(outgoing, []) if r != incoming), None)
+            if back is None:
+                continue
+            seconds = [z for z in drops if z is not None and z != outgoing][:params.drop_shortlist]
+            if view.roster_room() > 0:
+                seconds = [None] + seconds
+            for second in seconds:
+                after = [p for p in roster if p not in (outgoing, second)] + [incoming, back]
+                if not fieldable(after, eligibility, roster):
+                    continue
+                both_in, both_out = [incoming, back], [outgoing, second]
+                gain = nights.swap_gain_many(both_in, both_out, from_day=start)
+                # Two moves, two bars: each swap's own sd x the margin, as if made one at a time.
+                bar = params.margin * (nights.swap_sd(incoming, outgoing)
+                                       + nights.swap_sd(back, second))
+                lost = 0.0
+                if params.tail != "none":
+                    lost = tail(outgoing) + tail(second) - tail(incoming) - tail(back)
+                    if params.tail == "cost":
+                        bar += max(0.0, lost)
+                    else:
+                        gain -= lost
+                pairs.append({"incoming": incoming, "outgoing": outgoing, "gain": gain,
+                              "bar": bar, "claim": False, "rates": rates, "nights": nights,
+                              "tail_lost": lost, "shortlisted": rank < params.shortlist,
+                              "second": (back, second)})
     # Stable, so equal margins keep the pricing order: the first priced wins, as it always has.
     pairs.sort(key=lambda q: q["gain"] - q["bar"], reverse=True)
     return pairs
@@ -182,19 +235,23 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
 
     while view.moves_left > 0:
         pairs = price(view, params, slot_order, accepts, fieldable, reserved)
-        best = next((q for q in pairs if q["gain"] > q["bar"]), None)
+        best = next((q for q in pairs if q["gain"] > q["bar"]
+                     and ("second" not in q or view.moves_left >= 2)), None)
         if best is None:
             break
 
         incoming, outgoing, gain = best["incoming"], best["outgoing"], best["gain"]
         rates, nights = best["rates"], best["nights"]
         reserved.update({incoming, outgoing} - {None})
+        back, second = best.get("second", (None, None))
+        reserved.update({back, second} - {None})
         try:
             if best["claim"]:
                 state.submit_claim(view.team_index, incoming, drop=outgoing, today=view.day)
                 kind = "claim"
             else:
-                state.add(view.team_index, incoming, view.day, drop=outgoing, reason="upgrade")
+                state.add(view.team_index, incoming, view.day, drop=outgoing,
+                          reason="upgrade" if back is None else "package")
                 kind = "add"
         except Exception as error:                     # noqa: BLE001 - state raises IllegalMove
             log.debug("team %d could not take %s: %s", view.team_index, incoming, error)
@@ -204,6 +261,19 @@ def run(view, params: AddDropParams, slot_order, accepts, fieldable) -> list:
                      "incoming_rate": rates[incoming], "outgoing_rate": rates.get(outgoing, 0.0),
                      "incoming_games": len(nights.nights(incoming)),
                      "outgoing_games": len(nights.nights(outgoing))})
+        if back is not None:
+            # The package's second move: its gain and bar are the first's -- the pair's together.
+            try:
+                state.add(view.team_index, back, view.day, drop=second, reason="package")
+            except Exception as error:                 # noqa: BLE001 - state raises IllegalMove
+                log.debug("team %d could not refill with %s: %s", view.team_index, back, error)
+            else:
+                done[-1]["package"] = back
+                done.append({"day": view.day, "kind": "add", "incoming": back, "outgoing": second,
+                             "predicted_gain": gain, "bar": best["bar"], "package": incoming,
+                             "incoming_rate": rates[back], "outgoing_rate": rates.get(second, 0.0),
+                             "incoming_games": len(nights.nights(back)),
+                             "outgoing_games": len(nights.nights(second))})
         if kind == "claim":
             # A claim resolves tomorrow and does not spend today's move; stop pricing against a
             # roster that may be about to change.

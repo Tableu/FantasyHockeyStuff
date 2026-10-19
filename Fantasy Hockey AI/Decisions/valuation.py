@@ -223,6 +223,23 @@ class RosterNights:
             gain += self._weight(night) * (self._value(players, night) - self.base.get(night, 0.0))
         return gain
 
+    def swap_gain_many(self, incoming, outgoing, from_day=None) -> float:
+        """`swap_gain` for several players in place of several (adddrop's packages): lineup points
+        over the window with `incoming` (a list) in place of `outgoing` (a list; None for an open
+        spot), minus without."""
+        incoming = [p for p in incoming if p is not None]
+        outgoing = {p for p in outgoing if p is not None}
+        plays = {p: set(self.nights(p)) for p in incoming}
+        nights = set().union(*plays.values(), *(set(self.nights(p)) for p in outgoing))
+        gain = 0.0
+        for night in sorted(nights):                     # sorted: see swap_gain
+            if from_day is not None and night < from_day:
+                continue
+            players = [p for p in self.playing.get(night, []) if p not in outgoing]
+            players += [p for p in incoming if night in plays[p]]
+            gain += self._weight(night) * (self._value(players, night) - self.base.get(night, 0.0))
+        return gain
+
     def swap_sd(self, incoming, outgoing) -> float:
         """A rough sd for that gain: both players' per-game spread over their games."""
         variance = (len(self.nights(incoming)) * self.values[incoming] ** 2

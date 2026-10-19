@@ -8,7 +8,8 @@
     "shortlist": 10,
     "drop_shortlist": 4,
     "tail": "none",
-    "goalie_absence": false
+    "goalie_absence": false,
+    "packages": false
   },
   "streaming": {
     "spots": 2,

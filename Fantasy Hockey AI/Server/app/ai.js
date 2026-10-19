@@ -71,7 +71,7 @@ function Upgrades({ data }) {
         return html`<tr class=${u.clears ? 'hi' : ''}>
           <td><b>${add.name}</b>${u.in_plan && html` <span class="tag" style="background: #123A2C; color: #7DF0C4">plan</span>`}
             <br /><span class="meta">${add.team} · ${f2(u.add_rate)}/g · ${u.add_games} gp</span></td>
-          <td class="dim2">${u.drop ? drop.name : '(open spot)'}</td>
+          <td class="dim2">${u.drop ? drop.name : '(open spot)'}${u.then && html`<br /><span class="meta">${u.then}</span>`}</td>
           <td class="n">${sg(u.gain)}</td><td class="n dim">${f2(u.bar)}</td>
           <td class=${`n ${u.clears ? 'good' : 'dim'}`}>${sg(u.edge)}</td>
         </tr>`;

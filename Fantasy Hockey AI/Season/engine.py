@@ -1023,4 +1023,7 @@ class Season:
         return {"move_hit_rate": hit, "realized_gain_per_move": per,
                 "rentals": len(rentals), "rental_hit_rate": rhit, "rental_gain": rper,
                 "rental_drop_next_week": float(np.mean(drop_tail)) if drop_tail else float("nan"),
-                "regular_drops": regulars}
+                "regular_drops": regulars,
+                # adddrop's packages (a swap with its refill, Decisions/adddrop.py): adds made in one.
+                "package_adds": sum(1 for m in self.state.transactions
+                                    if m["team"] == team_index and m["kind"] == "package")}
