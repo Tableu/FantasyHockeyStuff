@@ -182,14 +182,15 @@ class Week:
         """The free agents who fit in `night`'s lineup -- added with nobody dropped (or with
         `without`, a rental being replaced, gone), he would start that night, in whichever slot
         the lineup solve puts him -- not picked up already: {"player_id", "player", "positions",
-        "status", "pts" (that night), "games" (his nights left this week from then), "gain" (the
+        "status", "pts" (that night), "games" (his nights left this week from then), "days" (the nights he
+        plays from `night` on), "gain" (the
         week's lineup points he adds, before any drop)}, most points first.
 
         `positions`: only free agents at those positions -- the slot clicked takes them, so an open
         F/D slot lists forwards and D, not goalies who would start elsewhere (the user,
         2026-10-12). With `without` too (a player swapped out): every such free agent who plays
-        that night, "gain" the week's points of the swap itself (him in, `without` out; None when
-        it cannot go in). "Would start" is the wrong test for a swap:
+        that night, "gain" the week's points of the swap itself (him in, `without` out; one whose
+        swap cannot go in is left out). "Would start" is the wrong test for a swap:
         with a forward gone a bench forward takes his slot, so no free-agent forward weaker than
         the bench "started", while D and goalies who would beat a starter there did -- an upgrade
         that has nothing to do with the player swapped out (the user, 2026-10-12)."""
@@ -208,10 +209,12 @@ class Week:
             if positions is not None and not self.eligibility.get(q, frozenset()) & positions:
                 continue
             if positions is not None and without is not None:
-                out.append({"player_id": q, "player": f["player"], "positions": f["positions"],
-                            "status": f.get("status"), "pts": f["values"][night],
-                            "gain": self.replace_gain(moves, night, q, without),
-                            "games": sum(1 for n in f["nights"] if n >= start)})
+                gain = self.replace_gain(moves, night, q, without)
+                if gain is not None:         # None: the swap would be left out, so he is not listed
+                    out.append({"player_id": q, "player": f["player"], "positions": f["positions"],
+                                "status": f.get("status"), "pts": f["values"][night], "gain": gain,
+                                "games": sum(1 for n in f["nights"] if n >= start),
+                                "days": [n for n in f["nights"] if n >= night]})
                 continue
             if self.night_points(night, tonight | {q}) <= tonight_points + 1e-9:
                 continue                     # he would not start that night
@@ -219,7 +222,8 @@ class Week:
             gain = sum(self.night_points(n, held[n] | {q}) - base[n] for n in later if n in f["values"])
             out.append({"player_id": q, "player": f["player"], "positions": f["positions"],
                         "status": f.get("status"), "pts": f["values"][night], "gain": gain,
-                        "games": sum(1 for n in f["nights"] if n >= start)})
+                        "games": sum(1 for n in f["nights"] if n >= start),
+                        "days": [n for n in f["nights"] if n >= night]})
         out.sort(key=lambda r: (-r["pts"], r["player"]))
         return out
 

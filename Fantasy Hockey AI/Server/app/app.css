@@ -197,7 +197,7 @@ button.plan { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; ga
 button.plan.open { background: var(--ground-sel); }
 button.plan .label { font-size: 16px; font-weight: 700; }
 button.plan .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-button.plan .sched { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+button.plan .sched { font-size: 12.5px; font-weight: 600; }
 button.plan .nums { display: flex; flex-direction: column; align-items: flex-end; font-family: var(--mono); font-size: 12px; }
 table.slots { background: var(--ground-2); }
 
@@ -243,6 +243,7 @@ table.cal td.rental .pt { color: #9FD0FF; }
 .filters .seg button { padding: 0 9px; }
 .adds { flex: 3; min-height: 0; overflow-y: auto; border-top: 1px solid var(--rule); }
 .adds table.list tr.sel td { background: #2A4F80; }
+.adds .days { display: block; font-size: 11px; color: var(--text-3); }
 .drops { flex: 2; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--rule-strong); }
 .drops-head { padding: 6px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .drops-head span { font-weight: 400; text-transform: none; letter-spacing: 0; }

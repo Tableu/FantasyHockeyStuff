@@ -62,10 +62,10 @@ function Upgrades({ data }) {
   return html`
     <div class="sec"><h2>Upgrades</h2><span class="note">gain over the pricing window · edge = gain − bar</span></div>
     <table class="list fixed">
-      <thead><tr><th scope="col">Add</th><th scope="col" style="width: 30%">Drop</th>
-        <th scope="col" class="n" style="width: 62px" title="Points the add gains over the pricing window">Gain</th>
-        <th scope="col" class="n" style="width: 50px" title="What a move has to beat to be worth making">Bar</th>
-        <th scope="col" class="n" style="width: 72px" title="Gain minus bar">Edge</th></tr></thead>
+      <thead><tr><th scope="col">Add</th><th scope="col">Drop</th>
+        <th scope="col" class="n" style="width: 54px" title="Points the add gains over the pricing window">Gain</th>
+        <th scope="col" class="n" style="width: 44px" title="What a move has to beat to be worth making">Bar</th>
+        <th scope="col" class="n" style="width: 60px" title="Gain minus bar">Edge</th></tr></thead>
       <tbody>${data.upgrades.map((u) => {
         const add = short(u.add), drop = short(u.drop);
         return html`<tr class=${u.clears ? 'hi' : ''}>
@@ -109,8 +109,8 @@ function Plans({ data, week, onWeek, onPick, busy }) {
           </button>
           ${isOpen && html`<table class="list fixed slots">
             <thead><tr><th scope="col" style="width: 84px">Day · slot</th><th scope="col">Best → drop</th>
-              <th scope="col" class="n" style="width: 62px">Gain</th><th scope="col" class="n" style="width: 50px">Bar</th>
-              <th scope="col" class="n" style="width: 72px">Edge</th></tr></thead>
+              <th scope="col" class="n" style="width: 54px">Gain</th><th scope="col" class="n" style="width: 44px">Bar</th>
+              <th scope="col" class="n" style="width: 60px">Edge</th></tr></thead>
             <tbody>${pl.slots.map((s) => {
               const skey = `${key}:${s.index}`;
               const sOpen = open.has(skey);

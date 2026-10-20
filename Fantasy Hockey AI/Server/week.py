@@ -80,15 +80,21 @@ class Book:
 
     def picker(self, day: str, occupant: int | None, slot: str | None = None) -> dict:
         """The slot picker's free agents, those at the positions `slot` takes -- on the bench (no
-        such slot), `occupant`'s own. Swapping out `occupant`: priced on the swap."""
+        such slot), any position (the user, 2026-10-17). Swapping out `occupant`: priced on the
+        swap."""
         b = self.book
         positions = b.accepts.get(slot) if slot else None
         if positions is None and occupant is not None:
-            positions = b.eligibility.get(occupant) or frozenset()
+            positions = frozenset().union(*b.accepts.values())
         found = b.picker(self.moves, day, self.plans, occupant, positions)
         positions = [q for q in POSITION_ORDER if any(q in f["positions"].split("/") for f in found)]
+        # Swapping out a player one of your picks drops already: no swap can go in (he would be
+        # dropped twice), so the picker says which pick to take out instead of listing nobody.
+        dropped = None if occupant is None else next((m for m in b.made(self.moves) if m["drop"] == occupant), None)
         return {"day": day, "counts_from": b.effective_on(day),
                 "occupant": occupant, "occupant_name": None if occupant is None else b.name(occupant),
+                "dropped_by": None if dropped is None else {"day": dropped["picked"], "add_name": b.name(dropped["add"])},
+                "moves_full": b.used(self.moves) >= b.bench["moves_left"],
                 "positions": positions,
                 "adds": [{**f, "gain": round(f["gain"], 2), "pts": round(f["pts"], 2)} for f in found]}
 
