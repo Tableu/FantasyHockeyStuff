@@ -254,11 +254,8 @@ export function Games({ league, version, wide, selected, view }) {
       <${GoalFeed} goals=${goals} rail />
     </div>`;
   }
+  // The phone: the app's header (the team selector) is above it, not a Games bar of its own.
   return html`
-    <header class="screen-head">
-      <span class="h">Games <span class="dim">${todayLabel()}</span></span>
-      ${live && html`<span class="live-tag"><span class="dot"></span>Live · 5s</span>`}
-    </header>
     <main class="screen games-screen">
       ${error && html`<div class="error" role="alert">${error}</div>`}
       ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">No NHL games today.</div>` : html`

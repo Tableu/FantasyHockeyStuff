@@ -65,6 +65,7 @@ export const api = {
   tonight: (league) => call('GET', '/tonight', { league }),
   suggestions: (league, week) => call('GET', '/suggestions', { league, query: { week } }),
   pick: (league, body) => call('POST', '/choices/pick', { league, body }),
+  together: (league, body) => call('POST', '/choices/together', { league, body }),
   week: (league, week) => call('GET', '/week', { league, query: { week } }),
   picker: (league, week, day, occupant, slot) => call('GET', '/week/picker',
     { league, query: { week, day, slot, ...(occupant ? { occupant } : {}) } }),

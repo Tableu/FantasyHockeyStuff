@@ -643,7 +643,11 @@ class LiveRunner:
         state_now = copy.deepcopy(state)
         manager = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
         manager.plan.week_alternatives = WEEK_ALTERNATIVES
-        # The week plans come after today's upgrades, as in a backtest (the user, 2026-10-08).
+        # The week plans come after today's upgrades, as in a backtest (the user, 2026-10-08) --
+        # or apart, on the roster and moves before them, when the user switches that off in AI
+        # Suggestions (choices.together; orchestrator.DailyPlan.week_view_on).
+        if not choices_module.together(self.choices):
+            manager.plan.week_view_on = lambda before_upgrades: view(state=before_upgrades)
         manager.transactions(view())
         # The Weekly planner tab's calendar is the user's own week: its workbench is the league as it
         # stands, before any of the model's moves (weekplan.workbench).
@@ -1255,6 +1259,11 @@ class LiveRunner:
                              for m in slot_list],
                 "moves": slot_list}
         week_plans = [team_plan(i, w) for i, w in enumerate(manager.plan.week_plans)]
+        for r, why in manager.plan.week_conflicts:
+            problems.append(f"today's rental {name(r['incoming'])}"
+                            + (f" for {name(r['outgoing'])}" if r["outgoing"] is not None else "")
+                            + f" clashes with today's upgrades ({why}) -- not made; the week plans "
+                            "are planned apart from the upgrades, so choose between them")
         to_ir = [name(p) for p in me.ir if p not in before["ir"]]
         off_ir = [name(p) for p in before["ir"] if p not in me.ir]
         dropped = [name(p) for p in before["roster"] + before["ir"]

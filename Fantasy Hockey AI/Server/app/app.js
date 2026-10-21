@@ -473,9 +473,10 @@ function App() {
   if (route.game && league) {
     return html`<div class="app"><${Guard} key=${location.hash}><${Game} league=${league} gameId=${route.game} view=${route.view} /></${Guard}></div>`;
   }
-  // Games: its own header (the day, live), as the design's Games screen.
+  // Games: the app's header with the team selector (the user, 2026-10-20), no pull to refresh.
   if (tab === 'games' && league) {
     return html`<div class="app">
+      <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} />
       <${JobStrip} job=${job} onClose=${closeJob} />
       <${StaleBanner} savedAt=${savedAt} />
       <${Guard} key="games"><${Games} league=${league} version=${version} /></${Guard}>

@@ -191,6 +191,10 @@ table.list td.dim { color: var(--text-3); }
 .link[aria-pressed="true"] { color: var(--you); font-weight: 600; }
 .link:disabled { opacity: .6; }
 .foot { margin: 8px 12px 12px; font-size: 11.5px; color: var(--text-3); line-height: 1.4; }
+.ai-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
+.ai-mode .what { display: flex; flex-direction: column; min-width: 0; font-size: 12.5px; font-weight: 600; }
+.ai-mode .meta { font-weight: 400; font-size: 11px; color: var(--text-3); }
+.ai-mode .seg button { height: 28px; padding: 0 10px; font-size: 12px; }
 .hint-line { padding: 0 12px 6px; font-size: 11px; color: var(--text-3); }
 .sec .seg button { height: 28px; padding: 0 9px; font-size: 12px; }
 button.plan { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px; align-items: center; width: 100%; min-height: 48px; padding: 7px 12px; border: 0; border-top: 1px solid var(--rule); background: transparent; color: var(--text); cursor: pointer; text-align: left; }
@@ -284,10 +288,12 @@ table.cal td.rental .pt { color: #9FD0FF; }
 .feed.dragging { max-height: none; }
 .feed.dragging.settling { transition: height .18s ease-out; }
 .feed-toggle { touch-action: none; user-select: none; -webkit-user-select: none; }
-.feed-bar { display: flex; align-items: flex-start; gap: 8px; padding-right: 12px; }
+.feed-bar { position: relative; display: flex; align-items: flex-start; gap: 8px; padding-right: 12px; }
 .feed-bar .seg { margin-top: 10px; }
 .feed-toggle { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-height: 44px; padding: 6px 0 6px 12px; background: none; border: 0; cursor: pointer; text-align: left; }
-.feed-toggle .grip { align-self: center; width: 36px; height: 4px; border-radius: 2px; background: #3A4A68; }
+button.feed-toggle { padding-top: 16px; }   /* room for the grip above the title */
+/* Centred on the whole bar, not the toggle beside the filter. */
+.feed-toggle .grip { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); width: 36px; height: 4px; border-radius: 2px; background: #3A4A68; }
 .feed-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .feed-body { flex: 1; min-height: 0; overflow-y: auto; }
 .feed .str { font-size: 11px; font-weight: 700; color: var(--text-2); }

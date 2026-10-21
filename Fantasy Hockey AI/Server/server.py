@@ -39,6 +39,8 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                choices: {upgrade_drops, days: {date: {moves}}}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
                                until a refresh (or a 'plan') -- the window says so
+    POST /choices/together {on, week}   the week plans planned after today's upgrades (true) or apart
+                               (false); saved (choices.py), re-planned once the app asks for a 'plan'
     GET  /suggestions?week=    the app's AI suggestions from the newest plan: today's moves, the
                                upgrades, the week plans ('this' or 'next') with your picks marked
     POST /choices/pick {week, label, index, player_id}   a week plan's option picked into your week
@@ -347,6 +349,11 @@ class WeekEdit(BaseModel):
     rental: int | None = None       # 'replace': the rental (or rostered player) whose slot it is
 
 
+class Together(BaseModel):
+    on: bool                        # the week plans after today's upgrades (else apart, before them)
+    week: str = "this"              # the week plans shown in the suggestions returned
+
+
 class Pick(BaseModel):
     week: str = "this"              # 'this' or 'next' (next week's plans, on the week's last day)
     label: str                      # the week plan, "A", "B", ...
@@ -519,6 +526,16 @@ def make_app(worker: Worker) -> FastAPI:
             raise HTTPException(422, f"player {body.player_id} is not an option in that slot")
         saved = choices.save(chosen.name, choices.pick_from_plan(choices.load(chosen.name, worker.day()), shown,
                                                                  body.index, body.player_id), worker.day())
+        return {"league": chosen.name, "file": path.name, "choices": saved,
+                **suggestions.suggestions_view(plan, saved, body.week)}
+
+    @app.post("/choices/together")
+    def set_together(body: Together, league: str | None = None):
+        """Whether the week plans take today's upgrades into account (choices.together): saved, and
+        the suggestions as they now stand (the plan's own until a 'plan' runs on it)."""
+        chosen, path, plan = newest(league)
+        mine = choices.load(chosen.name, worker.day())
+        saved = choices.save(chosen.name, {**mine, "together": body.on}, worker.day())
         return {"league": chosen.name, "file": path.name, "choices": saved,
                 **suggestions.suggestions_view(plan, saved, body.week)}
 

@@ -1,10 +1,12 @@
 // The AI suggestions screen (plan P2), from GET /suggestions (the newest plan): today's moves, the
 // upgrades, and the week plans -- a plan opens to its slots, a slot to its options, and an option
 // picks him into your week with the plan's drop (POST /choices/pick; again takes him back). On a
-// PC (`wide`) there are no sub-tabs: today's moves and the upgrades beside the week plans.
+// PC (`wide`) there are no sub-tabs: today's moves and the upgrades beside the week plans. Above
+// them, whether the week plans take today's upgrades into account or are planned apart (POST
+// /choices/together, then a re-plan; the user, 2026-10-20).
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { NoPlan } from './layout.js';
+import { NoPlan, askRefresh } from './layout.js';
 
 const TAGS = {
   IR: ['#26304A', '#C9D4E6'], ADD: ['#123A2C', '#7DF0C4'], CLAIM: ['#2B240E', '#F2D88A'], DROP: ['#3B1216', '#FF8A8A'],
@@ -57,6 +59,21 @@ function Today({ data }) {
     </table>`;
 }
 
+// Together: the week plans spend what today's upgrades leave. Apart: planned on the roster before
+// them, so an upgrade never changes a plan -- and today's rental that clashes with one is not made.
+function Mode({ data, onSet, busy }) {
+  const chosen = data.together_chosen;
+  return html`<div class="ai-mode">
+    <span class="what">Week plans and upgrades
+      <span class="meta">${chosen !== data.together ? 'Re-planning…'
+        : chosen ? 'Week plans are planned after today\'s upgrades' : 'Planned apart: choose between them'}</span></span>
+    <div class="seg" role="group" aria-label="Week plans and upgrades">
+      <button type="button" aria-pressed=${chosen} disabled=${busy} onClick=${() => onSet(true)}>Together</button>
+      <button type="button" aria-pressed=${!chosen} disabled=${busy} onClick=${() => onSet(false)}>Apart</button>
+    </div>
+  </div>`;
+}
+
 function Upgrades({ data }) {
   if (!data.upgrades.length) return html`<div class="empty">No pickups priced.</div>`;
   return html`
@@ -77,9 +94,8 @@ function Upgrades({ data }) {
         </tr>`;
       })}</tbody>
     </table>
-    <p class="foot">${data.clearing
-      ? 'Green clears the bar. Week plans are planned after today\'s upgrades.'
-      : 'None clears the bar today, so the plan makes no upgrade. Week plans are planned after today\'s upgrades.'}</p>`;
+    <p class="foot">${data.clearing ? 'Green clears the bar.' : 'None clears the bar today, so the plan makes no upgrade.'}
+      ${data.together ? 'Week plans are planned after today\'s upgrades.' : 'Week plans are planned apart from them.'}</p>`;
 }
 
 function Plans({ data, week, onWeek, onPick, busy }) {
@@ -141,7 +157,8 @@ function Plans({ data, week, onWeek, onPick, busy }) {
           </table>`}</div>`;
       })}
       </div>
-      <p class="foot">Plan A is the model's best week; its moves today are in Today's moves. B, C, … each leave out every earlier plan's first team.</p>`}`;
+      <p class="foot">Plan A is the model's best week; its moves today are in Today's moves${data.together ? ''
+        : ' (one that clashes with an upgrade is left out)'}. B, C, … each leave out every earlier plan's first team.</p>`}`;
 }
 
 export function Suggestions({ league, version, wide }) {
@@ -161,6 +178,21 @@ export function Suggestions({ league, version, wide }) {
   }, [league, version, week]);
 
   const choose = (t) => { setTab(t); store.set('fh.ai.tab', t); };
+  // Saved, then re-planned (a 'plan' on the kept read, in App's refresh strip): the screen
+  // re-fetches when it ends.
+  const setTogether = async (on) => {
+    if (on === data.together_chosen) return;
+    setBusy(true);
+    try {
+      setData(await api.together(league, { on, week }));
+      setError(null);
+      askRefresh('plan');
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
   const pick = async (label, index, playerId) => {
     setBusy(true);
     try {
@@ -184,6 +216,7 @@ export function Suggestions({ league, version, wide }) {
   if (wide) {
     return html`
       ${error && html`<div class="error" role="alert">${error.message}</div>`}
+      <${Mode} data=${data} onSet=${setTogether} busy=${busy} />
       <div class="ai-wide">
         <div class="ai-left"><${Today} data=${data} /><${Upgrades} data=${data} /></div>
         <div class="ai-right"><${Plans} data=${data} week=${week} onWeek=${setWeek} onPick=${pick} busy=${busy} /></div>
@@ -194,6 +227,7 @@ export function Suggestions({ league, version, wide }) {
       ${tabs.map(([id, label, count]) => html`<button type="button" aria-pressed=${tab === id} onClick=${() => choose(id)}>
         ${label}<span class=${`badge ${count ? '' : 'zero'}`}>${count}</span></button>`)}
     </nav>
+    <${Mode} data=${data} onSet=${setTogether} busy=${busy} />
     ${error && html`<div class="error" role="alert">${error.message}</div>`}
     ${tab === 'today' && html`<${Today} data=${data} />`}
     ${tab === 'upgrades' && html`<${Upgrades} data=${data} />`}

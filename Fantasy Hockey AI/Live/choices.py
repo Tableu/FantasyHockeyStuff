@@ -6,6 +6,10 @@ server's /choices:
                                                     that day, with that drop or (null) into an open
                                                     spot: the window's own week (Live/weekbook.py),
                                                     never planned on (the user, 2026-10-08)
+     "together": true,                              AI Suggestions: the week plans planned after
+                                                    today's upgrades (true, the default) or apart,
+                                                    on the roster before them (false; the user,
+                                                    2026-10-20 -- orchestrator.DailyPlan.week_view_on)
      "updated_at": ...}
 
 An empty upgrade list, or no file: the model chooses (Decisions/adddrop.py). A marked player may be
@@ -33,7 +37,7 @@ def _path(league: str):
 def _tidy(raw: dict, day: dt.date | None) -> dict:
     """Ids as ints, lists sorted, empty days and days before `day` left out."""
     out = {"upgrade_drops": sorted({int(p) for p in raw.get("upgrade_drops", [])}),
-           "days": {}, "updated_at": raw.get("updated_at")}
+           "days": {}, "together": bool(raw.get("together", True)), "updated_at": raw.get("updated_at")}
     for day_text, chosen in sorted((raw.get("days") or {}).items()):
         if day is not None and dt.date.fromisoformat(day_text) < day:
             continue
@@ -71,6 +75,11 @@ def save(league: str, chosen: dict, day: dt.date | None = None) -> dict:
 def upgrade_drops(chosen: dict):
     """Who upgrades may drop, as the view carries them (adddrop: `upgrade_drops`), or None."""
     return set(chosen.get("upgrade_drops", [])) or None
+
+
+def together(chosen: dict) -> bool:
+    """Whether the week plans are planned after today's upgrades (else apart, before them)."""
+    return chosen.get("together", True)
 
 
 def saved_on(chosen: dict):
