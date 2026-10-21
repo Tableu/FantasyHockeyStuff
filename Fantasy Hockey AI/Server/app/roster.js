@@ -9,7 +9,6 @@ import { NoPlan, Photo } from './layout.js';
 const TONIGHT_EVERY_MS = 20000;     // the server's NHL feed cache is about 20 s
 const STARTED = new Set(['LIVE', 'CRIT', 'OFF', 'FINAL']);
 const FLAG_CLASS = { DTD: 'warn', GTD: 'warn', Q: 'warn', O: 'bad', OUT: 'bad', IR: 'bad', SUSP: 'bad' };
-const ORD = { 1: '1st', 2: '2nd', 3: '3rd' };
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
@@ -27,15 +26,13 @@ function puckTime(utc) {
   return `${h}:${m} ${t.getHours() < 12 ? 'AM' : 'PM'}`;
 }
 
-function gameLabel(row, game) {
-  const team = row.team || '';
-  if (!game) return row.puck_utc ? `${team} ${puckTime(row.puck_utc)}` : `${team} —`;
-  const vs = `${team} ${game.home ? 'v ' : '@'}${game.vs}`;
-  if (game.state === 'FUT' || game.state === 'PRE') return `${vs} ${puckTime(game.start_utc.replace('T', ' ').replace('Z', ''))}`;
-  if (game.state === 'OFF' || game.state === 'FINAL') return `${vs} F ${game.score}–${game.vs_score}`;
-  if (game.intermission) return `${vs} INT`;
-  const period = game.period_type === 'OT' ? 'OT' : game.period_type === 'SO' ? 'SO' : ORD[game.period] || `P${game.period}`;
-  return `${vs} ${period}`;
+// Under the name (the user, 2026-10-20): the opponent, @ on the road, and the score, his team's
+// first -- before the puck drops, its time; no game data (tomorrow), the puck time alone.
+function gameLine(row, game) {
+  if (!game) return row.puck_utc ? puckTime(row.puck_utc) : '';
+  const vs = `${game.home ? '' : '@'}${game.vs}`;
+  if (!STARTED.has(game.state)) return `${vs} ${puckTime(game.start_utc.replace('T', ' ').replace('Z', ''))}`;
+  return `${vs} ${game.score ?? 0}–${game.vs_score ?? 0}`;
 }
 
 function tonightCells(row, live, goalie) {
@@ -55,7 +52,6 @@ function tonightCells(row, live, goalie) {
     { text: f2(row.xpts), cls: 'f', weight: 600 },
     { text: line ? f2(line.fantasy) : '', cls: 'f you', weight: 600 },
     { text: prob, cls: `f ${probWarn ? 'warn' : 'dim'}` },
-    { text: gameLabel(row, game), cls: 'txt dim2' },
   ];
   // A goalie's five stats take the skaters' six columns (a blank before TOI), so the groups line up.
   const stats = !line ? ['', '', '', '', '', '']
@@ -81,13 +77,13 @@ function seasonCells(row, columns) {
 // What a header's abbreviation stands for, shown on hover.
 const TITLES = {
   xPts: 'Expected fantasy points tonight', Live: 'Fantasy points so far tonight', 'P%': 'Chance he plays tonight',
-  Game: "Tonight's game, or its score once it starts", FP: 'Fantasy points this season',
+  FP: 'Fantasy points this season',
   'FP/g': 'Fantasy points per game this season', ROS: 'Projected fantasy points for the rest of the season',
 };
 
 function heads(view, goalie, columns) {
   const F = (label, strong) => ({ label, cls: 'f', strong });
-  const tonight = () => [F('xPts', true), F('Live'), F('P%'), { label: 'Game', cls: 'txt' },
+  const tonight = () => [F('xPts', true), F('Live'), F('P%'),
     ...(goalie ? ['SA', 'SV', 'GA', 'SV%', '', 'TOI'] : ['G', 'A', 'SOG', 'HIT', 'BLK', 'TOI']).map((label) => ({ label }))];
   const season = () => [{ ...F('FP'), key: 'fp' }, { ...F('FP/g', true), key: 'fp_per_game' }, { ...F('ROS'), key: 'ros' },
     ...columns.map(([key, label]) => ({ label, key })), ...(goalie ? [{ label: 'SV%', key: 'sv_pct' }] : [])];
@@ -143,10 +139,13 @@ function Group({ group, view, columns, span, live, open, onToggle, sort, onSort 
         <tr class=${isOpen ? 'sel' : ''}>
           <th scope="row" class="stick">
             <span class="slot">${row.slot}</span>
-            <${Photo} src=${row.photo} name=${row.name} size=${30} />
-            <button type="button" class=${`pname ${FLAG_CLASS[row.flag] || ''}`} aria-expanded=${isOpen}
-              onClick=${() => onToggle(row.player_id)} title=${row.player}>${row.name}</button>
-            ${row.flag && html` <span class=${`flag ${FLAG_CLASS[row.flag] || 'warn'}`}>${row.flag}</span>`}
+            <${Photo} src=${row.photo} name=${row.name} size=${34} />
+            <span class="who">
+              <span><button type="button" class=${`pname ${FLAG_CLASS[row.flag] || ''}`} aria-expanded=${isOpen}
+                onClick=${() => onToggle(row.player_id)} title=${row.player}>${row.name}</button>
+              ${row.flag && html` <span class=${`flag ${FLAG_CLASS[row.flag] || 'warn'}`}>${row.flag}</span>`}</span>
+              ${view !== 'season' && html`<span class="game">${gameLine(row, live && live[row.player_id] && live[row.player_id].game)}</span>`}
+            </span>
           </th>
           ${cells.map((c) => html`<td class=${c.cls || ''} style=${c.weight ? `font-weight: ${c.weight}` : ''}>${c.text}</td>`)}
           ${pad.map(() => html`<td></td>`)}

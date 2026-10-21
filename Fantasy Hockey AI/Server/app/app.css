@@ -146,7 +146,7 @@ pre.lines { margin: 0; padding: 8px 12px; background: var(--ground-2); border-bo
 table.roster { border-collapse: separate; border-spacing: 0; }
 table.roster th, table.roster td { border-bottom: 1px solid var(--rule); padding: 0 6px; height: 32px; white-space: nowrap; text-align: right; font-family: var(--mono); font-size: 12.5px; background: var(--ground); }
 table.roster tr.sub th { background: var(--ground-3); color: var(--text-3); font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; height: 24px; }
-table.roster .stick { position: sticky; left: 0; z-index: 1; text-align: left; font-family: var(--sans); font-size: 13.5px; font-weight: 500; border-right: 1px solid var(--rule); width: 182px; min-width: 182px; max-width: 182px; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
+table.roster .stick { position: sticky; left: 0; z-index: 1; text-align: left; font-family: var(--sans); font-size: 13.5px; font-weight: 500; border-right: 1px solid var(--rule); width: 186px; min-width: 186px; max-width: 186px; overflow: hidden; text-overflow: ellipsis; padding-left: 12px; }
 table.roster .f { width: 46px; min-width: 46px; max-width: 46px; }
 table.roster .txt { text-align: left; font-family: var(--sans); font-size: 12.5px; }
 table.roster td.dim { color: var(--text-3); }
@@ -157,6 +157,10 @@ table.roster tr.sel th, table.roster tr.sel td { background: var(--ground-sel); 
 table.roster .slot { display: inline-block; width: 26px; color: var(--text-3); font-weight: 600; font-size: 12px; }
 table.roster .photo { margin-right: 7px; }
 table.roster .pname { padding: 0; min-height: 32px; background: none; border: 0; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text); }
+table.roster .who { display: inline-flex; flex-direction: column; justify-content: center; vertical-align: middle; min-width: 0; max-width: 100px; line-height: 1.2; }
+table.roster .who > span { overflow: hidden; text-overflow: ellipsis; }
+table.roster .who .pname { min-height: 0; }
+table.roster .who .game { font-size: 11px; color: var(--text-3); }
 table.roster .pname.warn { color: var(--warn); }
 table.roster .pname.bad { color: var(--bad); }
 table.roster .flag { font-size: 10.5px; font-weight: 700; }
@@ -391,8 +395,8 @@ table.list .strong { font-weight: 700; }
 .pull { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px; overflow: hidden; font-size: 12px; color: var(--text-3); }
 /* Player headshots (layout.js Photo): the NHL's cut-out on a dark disc, or his initials */
 .photo { display: inline-flex; align-items: center; justify-content: center; flex: none; vertical-align: middle; border-radius: 50%; overflow: hidden; background: var(--ground-3); border: 1px solid var(--rule); }
-/* Zoomed in a little on the face, held low enough to keep the jersey in view */
-.photo img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.3); transform-origin: 50% 60%; }
+/* Zoomed in on the face (the user, 2026-10-20) */
+.photo img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.4); transform-origin: 50% 50%; }
 .photo.none { color: var(--text-3); font-family: var(--sans); font-weight: 600; letter-spacing: .02em; }
 .logo-img { width: 26px; height: 26px; object-fit: contain; flex: none; }
 .logo-img.big { width: 44px; height: 44px; }
