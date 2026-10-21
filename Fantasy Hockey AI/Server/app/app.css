@@ -166,6 +166,29 @@ table.roster .pname.bad { color: var(--bad); }
 table.roster .flag { font-size: 10.5px; font-weight: 700; }
 table.roster tr.note td { text-align: left; height: auto; padding: 0; background: var(--ground-2); font-family: var(--sans); white-space: normal; }
 table.roster tr.note td span { display: block; position: sticky; left: 0; max-width: min(100vw, 480px); box-sizing: border-box; padding: 6px 12px 8px; color: var(--text-2); font-size: 12px; }
+/* Tonight on a phone: a card per player. Columns: slot, photo, name (P%) and game, xPts / live. */
+.tn-list { border-top: 1px solid var(--rule); }
+.tn-head { position: sticky; top: 0; z-index: 2; margin: 0; padding: 5px 12px; background: var(--ground-3); color: var(--text-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; display: flex; justify-content: space-between; gap: 8px; }
+.tn-head .cap { font-weight: 500; text-transform: none; letter-spacing: 0; }
+.tn-row { display: grid; grid-template-columns: 26px 34px minmax(0, 1fr) 46px; column-gap: 7px; row-gap: 5px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
+.tn-row.sel { background: var(--ground-sel); }
+.tn-row .slot { color: var(--text-3); font-weight: 600; font-size: 12px; }
+.tn-row .who { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.tn-row .who > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tn-row .pname { padding: 0; background: none; border: 0; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text); }
+.tn-row .pname.warn { color: var(--warn); }
+.tn-row .pname.bad { color: var(--bad); }
+.tn-row .flag { font-size: 10.5px; font-weight: 700; }
+.tn-row .game { font-size: 11px; color: var(--text-3); }
+.tn-row .p { margin-left: 5px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.tn-row .p.warn { color: var(--warn); }
+.tn-row .x, .tn-row .live { text-align: right; font-family: var(--mono); font-size: 14px; font-weight: 600; }
+.tn-row .live { color: var(--you); }
+.tn-row .tags { grid-column: 2 / 4; display: flex; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; }
+.tn-row .tag { flex: none; padding: 1px 4px; border-radius: 3px; background: var(--ground-3); font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text); }
+.tn-row .tag .k { font-family: var(--sans); font-weight: 500; color: var(--text-3); }
+.tn-row .tag.zero { color: var(--text-3); font-weight: 400; }
+.tn-note { padding: 6px 12px 8px; background: var(--ground-2); border-bottom: 1px solid var(--rule); color: var(--text-2); font-size: 12px; }
 table.roster button.sort { padding: 0 2px; min-height: 36px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
 table.roster button.sort.on { color: var(--you); }
 

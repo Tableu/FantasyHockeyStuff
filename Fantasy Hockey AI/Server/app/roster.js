@@ -1,7 +1,9 @@
 // The Roster screen (plan P1): your lineup as it stands, bench and IR from GET /roster (the newest
 // plan), with tonight's games and live points from GET /tonight. Tonight / Season switch the
-// columns (Season: tap a header to sort); tap a name for what the plan says about him. On a PC
-// (`wide`) the table has room for both: tonight's columns, then the season's, no switch.
+// columns (Season: tap a header to sort); tap a name for what the plan says about him. Tonight on
+// a phone is a card per player (the user, 2026-10-20): name, P% and game, xPts on the right,
+// his box line and TOI as tags below, live points under xPts. On a PC (`wide`) the table
+// has room for both: tonight's columns, then the season's, no switch.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 import { NoPlan, Photo } from './layout.js';
@@ -35,19 +37,22 @@ function gameLine(row, game) {
   return `${vs} ${game.score ?? 0}–${game.vs_score ?? 0}`;
 }
 
-function tonightCells(row, live, goalie) {
+// P%: his chance to play, or once his game has started ✓ -- a goalie who sat (no box line, or
+// 0:00) didn't play.
+function playChance(row, live, goalie) {
   const game = live && live.game;
   const line = live && live.line;
   const started = (game && STARTED.has(game.state)) || row.locked;
-  let prob = '—', probWarn = false;
-  if (row.p_plays !== null && row.p_plays !== undefined) {
-    // Started: ✓ once he's in it -- a goalie who sat (no box line, or 0:00) didn't play.
-    if (started && game) prob = goalie && (!line || !line.toi || line.toi === '00:00') ? (line ? 'DNP' : '…') : '✓';
-    else {
-      prob = String(Math.round(row.p_plays * 100));
-      probWarn = row.p_plays < 0.9;
-    }
+  if (row.p_plays === null || row.p_plays === undefined) return { prob: '—', probWarn: false };
+  if (started && game) {
+    return { prob: goalie && (!line || !line.toi || line.toi === '00:00') ? (line ? 'DNP' : '…') : '✓', probWarn: false };
   }
+  return { prob: String(Math.round(row.p_plays * 100)), probWarn: row.p_plays < 0.9 };
+}
+
+function tonightCells(row, live, goalie) {
+  const line = live && live.line;
+  const { prob, probWarn } = playChance(row, live, goalie);
   const cells = [
     { text: f2(row.xpts), cls: 'f', weight: 600 },
     { text: line ? f2(line.fantasy) : '', cls: 'f you', weight: 600 },
@@ -155,6 +160,46 @@ function Group({ group, view, columns, span, live, open, onToggle, sort, onSort 
   </tbody>`;
 }
 
+// His box line as tags: a skater's G A SOG HIT BLK, a goalie's SA SV GA SV%; then TOI.
+function boxTags(line, goalie) {
+  if (!line) return [];
+  if (goalie) {
+    return [['SA', line.shots_against], ['SV', line.saves], ['GA', line.goals_against],
+      ['SV%', line.shots_against ? (line.saves / line.shots_against).toFixed(3).replace(/^0/, '') : ''], ['TOI', line.toi]];
+  }
+  return [['G', line.goals], ['A', line.assists], ['SOG', line.shots], ['HIT', line.hits], ['BLK', line.blocks], ['TOI', line.toi]];
+}
+
+// Tonight on a phone: one card per player, the group's name sticking at the top.
+function TonightGroup({ group, live, open, onToggle }) {
+  return html`<section class="tn" aria-label=${group.name}>
+    <h3 class="tn-head">${group.name}<span class="cap">Expected points</span></h3>
+    ${group.rows.map((row) => {
+      const mine = live && live[row.player_id];
+      const line = mine && mine.line;
+      const { prob, probWarn } = playChance(row, mine, group.goalie);
+      const tags = boxTags(line, group.goalie);
+      const isOpen = open === row.player_id && row.notes.length > 0;
+      return html`<div class=${`tn-row ${isOpen ? 'sel' : ''}`}>
+        <span class="slot">${row.slot}</span>
+        <${Photo} src=${row.photo} name=${row.name} size=${34} />
+        <span class="who">
+          <span><button type="button" class=${`pname ${FLAG_CLASS[row.flag] || ''}`} aria-expanded=${isOpen}
+            onClick=${() => onToggle(row.player_id)} title=${row.player}>${row.name}</button>
+          ${row.flag && html` <span class=${`flag ${FLAG_CLASS[row.flag] || 'warn'}`}>${row.flag}</span>`}
+          <span class=${`p ${probWarn ? 'warn' : ''}`} title="Chance he plays tonight">${/^\d+$/.test(prob) ? `${prob}%` : prob}</span></span>
+          <span class="game">${gameLine(row, mine && mine.game)}</span>
+        </span>
+        <span class="x" title="Expected fantasy points tonight">${f2(row.xpts)}</span>
+        ${line && html`
+          <span class="tags">${tags.map(([k, v]) => html`<span class=${`tag ${v ? '' : 'zero'}`}><span class="k">${k}</span> ${v ?? ''}</span>`)}</span>
+          <span class="live" title="Fantasy points so far tonight">${f2(line.fantasy)}</span>`}
+      </div>
+      ${isOpen && html`<div class="tn-note">${row.player} · ${row.positions}: ${row.notes.join(' · ')}</div>`}`;
+    })}
+  </section>`;
+}
+
 export function Roster({ league, version, wide }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -244,9 +289,12 @@ export function Roster({ league, version, wide }) {
     ${liveError && html`<div class="error" role="alert">Live points: ${liveError}</div>`}
     ${!data.games_today && html`<div class="empty">No NHL games on ${data.day}: the roster, no lineup to set.</div>`}
     ${data.empty_slots > 0 && data.games_today && html`<div class="error">${data.empty_slots} empty lineup slot${data.empty_slots > 1 ? 's' : ''} tonight</div>`}
-    <div class="table-scroll"><table class="roster">
+    ${shownView === 'tonight'
+      ? html`<div class="tn-list">${groups.map((g) => html`<${TonightGroup} key=${g.name} group=${g} live=${live}
+          open=${open} onToggle=${(id) => setOpen(open === id ? null : id)} />`)}</div>`
+      : html`<div class="table-scroll"><table class="roster">
       ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${shownView} columns=${data.columns} span=${span}
         live=${live} open=${open} onToggle=${(id) => setOpen(open === id ? null : id)}
         sort=${sort} onSort=${sortBy} />`)}
-    </table></div>`;
+    </table></div>`}`;
 }
