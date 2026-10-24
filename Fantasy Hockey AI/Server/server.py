@@ -211,7 +211,7 @@ class Worker:
                 scheduled.run(job.mode, self.today(), job.echo, self.args.jobs_db)
                 job.state = "done"
                 return
-            results = self.planner.run(job.mode, self.now(), job.echo, only=job.only)
+            results = self.planner.run(job.mode, self.now(), job.echo, only=job.only, today=self.today())
             failed = {name: r for name, r in results.items() if isinstance(r, BaseException)}
             job.plan_files = {name: r for name, r in results.items() if name not in failed}
             if failed:

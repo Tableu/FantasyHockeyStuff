@@ -192,14 +192,16 @@ def last_read_path(league) -> Path:
 
 
 def plan_leagues(league_names, day: dt.date, now: dt.datetime, league_file=None, platform_season=None,
-                 echo=print, reuse_read=False, read_only=False) -> dict:
+                 echo=print, reuse_read=False, read_only=False, keep_read=True) -> dict:
     """Each league's read, plan and save, in this process: {league name: {"file": the saved plan's
     name, "read_at": when its league was read} or {"error": why it stopped}} -- one league's failure
     (its platform down) leaves the others' plans. Each read is kept (`last_read_path`).
     `reuse_read` plans on today's kept read instead of reading again -- True: every league's (a
     re-plan on the user's choices: about 2 s, not 9), reading only when there is none from today;
     a collection of names: those leagues' only, just read by a `read_only` pass (Planner.run).
-    `read_only`: the read and its kept copy alone, no plan ({"read_at"} per league)."""
+    `read_only`: the read and its kept copy alone, no plan ({"read_at"} per league).
+    `keep_read` False: a fresh read is not kept -- tonight's re-plan once the plan is tomorrow's
+    (Planner.run), whose read is for today and must not stand in for tomorrow's."""
     import leagues as registry
 
     results = {}
@@ -217,7 +219,7 @@ def plan_leagues(league_names, day: dt.date, now: dt.datetime, league_file=None,
             else:
                 snapshot = read_league(league, day, league_file, platform_season, say, now=now)
                 read_at = dt.datetime.now()
-                if not league_file:
+                if not league_file and keep_read:
                     snapshot.dump(livepaths.ensure(kept.parent) / kept.name)
             if read_only:
                 results[name] = {"read_at": read_at.isoformat(timespec="seconds")}
@@ -233,7 +235,7 @@ def plan_leagues(league_names, day: dt.date, now: dt.datetime, league_file=None,
 
 
 def plan_in_child(league_names, day: dt.date, now: dt.datetime, league_file=None, platform_season=None,
-                  echo=print, reuse_read=False, read_only=False) -> dict:
+                  echo=print, reuse_read=False, read_only=False, keep_read=True) -> dict:
     """plan_leagues in a child process (this file's command line), its progress echoed as it
     comes; the same result. A child that dies or overruns PLAN_TIMEOUT_S fails every league with
     the end of what it printed."""
@@ -249,6 +251,8 @@ def plan_in_child(league_names, day: dt.date, now: dt.datetime, league_file=None
         command += [f"--reuse-read-of={name}" for name in reuse_read]
     if read_only:
         command.append("--read-only")
+    if not keep_read:
+        command.append("--no-keep-read")
     child = subprocess.Popen(command, cwd=Path(__file__).resolve().parent, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                              env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"})
@@ -292,7 +296,7 @@ class Planner:
         self.last = {}                     # data step -> when it last ran
         self.league_last = {league.name: {} for league in self.leagues}
 
-    def run(self, mode: str, now: dt.datetime, echo=print, only=None) -> dict:
+    def run(self, mode: str, now: dt.datetime, echo=print, only=None, today: dt.date | None = None) -> dict:
         """One refresh of the leagues `only` (default all): {league name: its saved plan's file
         name -- or, for a league that failed (its platform down; the others still plan), the error
         as an exception}. The modes (MODES):
@@ -305,6 +309,11 @@ class Planner:
             league  each league read again and planned on today's projections, no reports (a
                     move made on the platform); on a day with none yet, the projections first
             plan    each league planned again on its kept read (the user's choices changed)
+
+        `today`, when the Planner's day is tomorrow (today's games have all started): a refresh
+        that read the leagues (full, quick, league) plans today again too, on its own read for
+        today, so today's roster shows a move made since today's last plan (the user,
+        2026-10-23: D'Astous, picked up after the last puck, missing from Today).
         """
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}, not {mode!r}")
@@ -317,6 +326,7 @@ class Planner:
             if "projections" not in self.last:      # a Planner is one day's: none yet today
                 tonight(self.day, echo)
                 self.last["projections"] = dt.datetime.now()
+            self._replan_today(names, today, now, echo)
             return self._results(chosen, plan_in_child(names, self.day, now, self.league_file,
                                                        self.platform_season, echo))
         # The leagues' settings check and (full, quick) read run while the data steps do (they
@@ -331,8 +341,22 @@ class Planner:
         # A league whose read failed is read again by the planning child: never planned on an
         # older read when a fresh one was asked for.
         reuse = {name for name, got in read.items() if "read_at" in got} if fresh_read else True
+        if fresh_read:
+            self._replan_today(names, today, now, echo)
         return self._results(chosen, plan_in_child(names, self.day, now, self.league_file,
                                                    self.platform_season, echo, reuse_read=reuse))
+
+    def _replan_today(self, names, today, now, echo):
+        """Today planned again on a read for today, not kept (plan_leagues' keep_read): only
+        when this Planner's day is tomorrow. Before tomorrow's plan, so plan_latest.md stays the
+        plan day's. Its failure is echoed; tomorrow's plans still run."""
+        if today is None or today == self.day or self.league_file:
+            return
+        echo(f"today's roster: planning {today:%a} again on a read for it")
+        for name, got in plan_in_child(names, today, now, None, self.platform_season, echo,
+                                       keep_read=False).items():
+            if "error" in got:
+                echo(f"{name}: today's re-plan failed ({got['error']}); today shows its last plan")
 
     def _results(self, chosen, outcome) -> dict:
         """plan_in_child's outcome as run's result; each planned league's read time kept."""
@@ -398,11 +422,13 @@ def main():
     parser.add_argument("--reuse-read-of", action="append", default=[], metavar="LEAGUE",
                         help="plan this league on today's kept read (repeat for several)")
     parser.add_argument("--read-only", action="store_true", help="read and keep each league, no plan")
+    parser.add_argument("--no-keep-read", action="store_true", help="plan on a fresh read without keeping it")
     args = parser.parse_args()
     result = plan_leagues(args.league, dt.date.fromisoformat(args.date), dt.datetime.fromisoformat(args.now),
                           args.league_file, args.platform_season,
                           echo=lambda text: print(CHILD_ECHO + str(text), flush=True),
-                          reuse_read=args.reuse_read or set(args.reuse_read_of), read_only=args.read_only)
+                          reuse_read=args.reuse_read or set(args.reuse_read_of), read_only=args.read_only,
+                          keep_read=not args.no_keep_read)
     print(CHILD_RESULT + json.dumps(result), flush=True)
 
 
