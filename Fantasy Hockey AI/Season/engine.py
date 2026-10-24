@@ -1018,6 +1018,13 @@ class Season:
                 return float("nan"), float("nan")
             return float(np.mean([g > 0 for g in values])), float(np.mean(values))
 
+        # Rentals that dropped a player an upgrade added the same day (streaming.keep_upgrades).
+        upgraded = {(m["date"], m["player_id"]) for m in self.state.transactions
+                    if m["team"] == team_index and m["kind"] in ("upgrade", "package")}
+        undone = sum(1 for m in self.state.transactions
+                     if m["team"] == team_index and m["kind"] == "rental"
+                     and (m["date"], m["dropped"]) in upgraded)
+
         hit, per = summary(gains)
         rhit, rper = summary(rentals)
         return {"move_hit_rate": hit, "realized_gain_per_move": per,
@@ -1026,4 +1033,5 @@ class Season:
                 "regular_drops": regulars,
                 # adddrop's packages (a swap with its refill, Decisions/adddrop.py): adds made in one.
                 "package_adds": sum(1 for m in self.state.transactions
-                                    if m["team"] == team_index and m["kind"] == "package")}
+                                    if m["team"] == team_index and m["kind"] == "package"),
+                "rentals_dropping_upgrade": undone}

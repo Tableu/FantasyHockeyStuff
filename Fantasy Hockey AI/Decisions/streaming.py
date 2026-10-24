@@ -82,6 +82,9 @@ class StreamParams:
                                 # rebuild worth more (WeekPlanner._restart); 0 = off
     replacement_depth: str      # what a drop is priced against: "best" = the best eligible free
                                 # agent; "expected" = the one we would get back (`Replacement`)
+    keep_upgrades: bool         # a rental never drops a player today's upgrades added (the
+                                # orchestrator's `kept_today`): espn-la 2026-10-24 added Coronato
+                                # for Greaves, then rented Dostal for Coronato
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -102,7 +105,8 @@ class StreamParams:
                 f"{f' mg={self.min_gain:g}' if self.mode == 'week' and self.min_gain else ''}"
                 f"{' prune' if self.mode == 'week' and self.prune else ''}"
                 f"{f' rs={self.restarts}' if self.mode == 'week' and self.restarts else ''}"
-                f"{' rep=exp' if self.replacement_depth == 'expected' else ''}")
+                f"{' rep=exp' if self.replacement_depth == 'expected' else ''}"
+                f"{' keep' if self.keep_upgrades else ''}")
 
 
 # How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
@@ -282,7 +286,7 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
                 and p not in getattr(view, "no_rentals", ())     # the live plan's day-to-day FAs
                 and not is_goalie(eligibility, p)]
         holders = [p for p in spots(view, params, horizon, source, pool, eligibility)
-                   if p not in reserved]
+                   if p not in reserved and p not in getattr(view, "kept_today", ())]
         outgoing_options = ([None] if view.roster_room() > 0 else []) + holders
         if not outgoing_options:
             break

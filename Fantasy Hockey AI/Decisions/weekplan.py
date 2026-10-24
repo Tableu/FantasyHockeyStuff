@@ -166,6 +166,10 @@ class WeekPlanner:
             if line:
                 self.spots = [p for p in self.spots if not streaming.is_goalie(eligibility, p)
                               or (view.ros_rate(p) or 0.0) < params.starter_share * line]
+        # `keep_upgrades`: today's upgrades' adds are no rental's drop (the orchestrator's
+        # `kept_today`); the user's own pick may still drop one (`seeded`, own_drop).
+        kept = getattr(view, "kept_today", frozenset())
+        self.spots = [p for p in self.spots if p not in kept]
         self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True,
                                            depth=params.replacement_depth)
         self.own = set(self.roster)

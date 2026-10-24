@@ -136,7 +136,7 @@ def compare(base, alt, replications):
             # (engine REGULAR_RANK), a season.
             **{f"{side}_{m}": float(table.loc[mine, m].mean())
                for side, table in (("shipped", base), ("candidate", alt))
-               for m in ("rentals", "regular_drops", "package_adds") if m in table},
+               for m in ("rentals", "regular_drops", "package_adds", "rentals_dropping_upgrade") if m in table},
             "replications": replications}
 
 
@@ -175,6 +175,10 @@ def summary(result) -> str:
         lines.append(f"adds made in a package (adddrop.packages) a season: shipped "
                      f"{result['shipped_package_adds']:.1f}, candidate "
                      f"{result['candidate_package_adds']:.1f}")
+    if "candidate_rentals_dropping_upgrade" in result:
+        lines.append(f"rentals dropping that day's upgrade (streaming.keep_upgrades) a season: shipped "
+                     f"{result['shipped_rentals_dropping_upgrade']:.1f}, candidate "
+                     f"{result['candidate_rentals_dropping_upgrade']:.1f}")
     return "\n".join(lines)
 
 

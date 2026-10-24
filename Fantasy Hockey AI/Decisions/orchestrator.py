@@ -84,6 +84,10 @@ class DailyPlan:
         upgrades = adddrop.run(view, m.params, m.slot_order, m.accepts, m._fieldable)
         m.move_log += upgrades
         entry["upgrades"] = len(upgrades)
+        # `keep_upgrades`: what the upgrades just added is not a rental's drop today -- the
+        # upgrade priced him over its horizon, and renting him away undoes it for a second move.
+        view.kept_today = (frozenset(u["incoming"] for u in upgrades)
+                           if self.stream_params.keep_upgrades else frozenset())
 
         if self.stream_params.mode == "week":
             rentals, self.week_plans = weekplan.run(
