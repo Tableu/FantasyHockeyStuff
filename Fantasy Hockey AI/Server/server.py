@@ -36,7 +36,7 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /roster               the app's Roster screen from the newest plan: lineup as it stands,
                                bench, IR, tonight's projection, season in the league's scoring (roster.py)
     GET  /choices              what you chose in the plan window (Live/choices.py): {league,
-                               choices: {upgrade_drops, days: {date: {moves}}}}
+                               choices: {days: {date: {moves}}, together}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
                                until a refresh (or a 'plan') -- the window says so
     POST /choices/together {on, week}   the week plans planned after today's upgrades (true) or apart

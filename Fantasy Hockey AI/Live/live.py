@@ -585,11 +585,9 @@ class LiveRunner:
         decision_points = self._draws(skaters, goalies)
 
         state = self._state(snapshot, day)
-        # What the user chose in the plan window (Live/choices.py): who upgrades may drop (AI
-        # Suggestions; None or empty: the model chooses). The Weekly planner tab's picks are the window's
-        # alone -- never planned on here (the user, 2026-10-08).
+        # What the user chose in the plan window (Live/choices.py). The Weekly planner tab's picks
+        # are the window's alone -- never planned on here (the user, 2026-10-08).
         self.choices = choices_module.load(self.league.name, self.day)
-        self.upgrade_drops = choices_module.upgrade_drops(self.choices)
         week = self.calendar.week_from(day)
         phase = "playoffs" if week and week > self.regular_weeks else "regular"
 
@@ -630,7 +628,6 @@ class LiveRunner:
                 ros_games=self.ros_games, board_scale=self.board_scale)
             v = view_module.SlateView(**{**fields, **changes})
             v.goalie_absence = self.strategy.adddrop.goalie_absence   # valuation.player_value
-            v.upgrade_drops = self.upgrade_drops      # adddrop
             v.ir_ok = ir_ok                           # view.healthy_on_ir
             v.no_rentals = no_rentals                 # streaming.run, weekplan
             v.goalie_nights = goalie_nights_          # managers._week_projection
@@ -671,15 +668,6 @@ class LiveRunner:
                 f"{platform}'s week turns over at {turns_over} and last week "
                 f"has no moves left: make today's moves after {turns_over}; they "
                 f"count against this week's {cap}")
-        # The upgrades' drop list carried into a new matchup week is easy to forget (it overrides
-        # who may be dropped until cleared): say when it was set.
-        if self.upgrade_drops is not None:
-            set_on = choices_module.saved_on(self.choices)
-            set_week = self.calendar.week_from(pd.Timestamp(set_on)) if set_on else None
-            if week is not None and set_week is not None and set_week < week:
-                problems.append(f"the upgrades' OK-to-drop list ({len(self.upgrade_drops)} player(s)) "
-                                f"was set on {set_on:%a %b %d} in week {set_week} and is still active "
-                                "-- upgrades drop only them; clear or change it above the upgrades in AI Suggestions")
         hidden = (list(snapshot.teams[snapshot.me].get("unmatched", []))
                   + [p for p in snapshot.teams[snapshot.me]["roster"] if p not in self.eligibility])
         if hidden:
