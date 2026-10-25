@@ -177,6 +177,13 @@ class Feed:
             self.version += 1
 
 
+def decided(box) -> bool:
+    """Whether a box score has both teams' goalie decisions (W, and L or O)."""
+    stats = box.get("playerByGameStats", {})
+    return all(any(p.get("decision") for p in stats.get(side, {}).get("goalies", []))
+               for side in ("awayTeam", "homeTeam"))
+
+
 def goal_key(game, goal) -> str:
     return (f"{game['id']}:{(goal.get('periodDescriptor') or {}).get('number')}:"
             f"{goal.get('timeInPeriod')}:{goal.get('playerId')}")
@@ -362,8 +369,13 @@ class Games:
     def game_feed(self, game_id, part) -> dict:
         feed = self.feed(f"{API}/gamecenter/{game_id}/{part}")
         body = feed.get()
-        if body.get("gameState") in FINAL_STATES or self._is_final(game_id):
-            feed.final = True               # this copy was fetched after the end: keep it
+        # Kept for good only once this copy is itself final (the scoreboard's word only for a part
+        # with no game state, the right rail): the scoreboard can say the game is over while the
+        # box score is still the last minute's, without the goalies' decisions (2026-10-24: a
+        # shutout win frozen at 59:13 with no W or SO).
+        final = body["gameState"] in FINAL_STATES if "gameState" in body else self._is_final(game_id)
+        if final and (part != "boxscore" or decided(body)):
+            feed.final = True
         return body
 
     def _is_final(self, game_id) -> bool:
