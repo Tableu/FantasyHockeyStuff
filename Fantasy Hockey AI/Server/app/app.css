@@ -184,10 +184,12 @@ table.roster tr.note td span { display: block; position: sticky; left: 0; max-wi
 .tn-row .p.warn { color: var(--warn); }
 .tn-row .x, .tn-row .live { text-align: right; font-family: var(--mono); font-size: 14px; font-weight: 600; }
 .tn-row .live { color: var(--you); }
-.tn-row .tags { grid-column: 2 / 4; display: flex; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; }
-.tn-row .tag { flex: none; padding: 1px 4px; border-radius: 3px; background: var(--ground-3); font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text); }
-.tn-row .tag .k { font-family: var(--sans); font-weight: 500; color: var(--text-3); }
-.tn-row .tag.zero { color: var(--text-3); font-weight: 400; }
+.tn-row .tags { grid-column: 2 / 4; }
+:is(.tn-row, table.roster) .tags { display: flex; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; }
+:is(.tn-row, table.roster) .tag { flex: none; padding: 1px 4px; border-radius: 3px; background: var(--ground-3); font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text); }
+:is(.tn-row, table.roster) .tag .k { font-family: var(--sans); font-weight: 500; color: var(--text-3); }
+/* The PC table's tonight box line: the same tags in one cell. */
+table.roster .box { text-align: left; padding: 0 8px; }
 .tn-note { padding: 6px 12px 8px; background: var(--ground-2); border-bottom: 1px solid var(--rule); color: var(--text-2); font-size: 12px; }
 table.roster button.sort { padding: 0 2px; min-height: 36px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
 table.roster button.sort.on { color: var(--you); }

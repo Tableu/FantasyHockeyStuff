@@ -2,8 +2,8 @@
 // plan), with tonight's games and live points from GET /tonight. Tonight / Season switch the
 // columns (Season: tap a header to sort); tap a name for what the plan says about him. Tonight on
 // a phone is a card per player (the user, 2026-10-20): name, P% and game, xPts on the right,
-// his box line and TOI as tags below, live points under xPts. On a PC (`wide`) the table
-// has room for both: tonight's columns, then the season's, no switch.
+// his scoring stats and TOI as tags below, live points under xPts. On a PC (`wide`) the table
+// has room for both: tonight's columns (the box line as the same tags), then the season's, no switch.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 import { NoPlan, Photo } from './layout.js';
@@ -50,21 +50,28 @@ function playChance(row, live, goalie) {
   return { prob: String(Math.round(row.p_plays * 100)), probWarn: row.p_plays < 0.9 };
 }
 
-function tonightCells(row, live, goalie) {
+// His box line as tags: the league's scoring stats, the Season columns (the user, 2026-10-24), a
+// goalie's SV% after them, then TOI; a stat he has none of tonight is left out.
+function boxTags(line, goalie, columns) {
+  if (!line) return [];
+  const tags = columns.filter(([key]) => line[key]).map(([key, label]) => [label, line[key]]);
+  if (goalie && line.shots_against) tags.push(['SV%', (line.saves / line.shots_against).toFixed(3).replace(/^0/, '')]);
+  if (line.toi) tags.push(['TOI', line.toi]);
+  return tags;
+}
+
+const Tags = ({ tags }) => html`<span class="tags">${tags.map(([k, v]) => html`<span class="tag"><span class="k">${k}</span> ${v}</span>`)}</span>`;
+
+function tonightCells(row, live, goalie, columns) {
   const line = live && live.line;
   const { prob, probWarn } = playChance(row, live, goalie);
-  const cells = [
+  // His box line as tags in one cell (the user, 2026-10-24), as on the phone's cards.
+  return [
     { text: f2(row.xpts), cls: 'f', weight: 600 },
     { text: line ? f2(line.fantasy) : '', cls: 'f you', weight: 600 },
     { text: prob, cls: `f ${probWarn ? 'warn' : 'dim'}` },
+    { tags: boxTags(line, goalie, columns), cls: 'box' },
   ];
-  // A goalie's five stats take the skaters' six columns (a blank before TOI), so the groups line up.
-  const stats = !line ? ['', '', '', '', '', '']
-    : goalie
-      ? [line.shots_against, line.saves, line.goals_against,
-         line.shots_against ? (line.saves / line.shots_against).toFixed(3).replace(/^0/, '') : '', '', line.toi]
-      : [line.goals, line.assists, line.shots, line.hits, line.blocks, line.toi];
-  return cells.concat(stats.map((v) => ({ text: v === undefined || v === null ? '' : String(v) })));
 }
 
 function seasonCells(row, columns) {
@@ -88,8 +95,7 @@ const TITLES = {
 
 function heads(view, goalie, columns) {
   const F = (label, strong) => ({ label, cls: 'f', strong });
-  const tonight = () => [F('xPts', true), F('Live'), F('P%'),
-    ...(goalie ? ['SA', 'SV', 'GA', 'SV%', '', 'TOI'] : ['G', 'A', 'SOG', 'HIT', 'BLK', 'TOI']).map((label) => ({ label }))];
+  const tonight = () => [F('xPts', true), F('Live'), F('P%'), { label: 'Box score', cls: 'box' }];
   const season = () => [{ ...F('FP'), key: 'fp' }, { ...F('FP/g', true), key: 'fp_per_game' }, { ...F('ROS'), key: 'ros' },
     ...columns.map(([key, label]) => ({ label, key })), ...(goalie ? [{ label: 'SV%', key: 'sv_pct' }] : [])];
   const cols = view === 'tonight' ? tonight() : view === 'season' ? season()
@@ -135,7 +141,7 @@ function Group({ group, view, columns, span, live, open, onToggle, sort, onSort 
       ${pad.map(() => html`<th aria-hidden="true"></th>`)}
     </tr>
     ${rows.map((row) => {
-      const tonightRow = () => tonightCells(row, live && live[row.player_id], group.goalie);
+      const tonightRow = () => tonightCells(row, live && live[row.player_id], group.goalie, group.goalie ? columns.goalie : columns.skater);
       const seasonRow = () => seasonCells(row, group.goalie ? columns.goalie : columns.skater);
       const cells = view === 'tonight' ? tonightRow() : view === 'season' ? seasonRow()
         : [...tonightRow(), ...seasonRow().map((c, i) => (i ? c : { ...c, cls: `${c.cls} sep` }))];
@@ -152,7 +158,7 @@ function Group({ group, view, columns, span, live, open, onToggle, sort, onSort 
               ${view !== 'season' && html`<span class="game">${gameLine(row, live && live[row.player_id] && live[row.player_id].game)}</span>`}
             </span>
           </th>
-          ${cells.map((c) => html`<td class=${c.cls || ''} style=${c.weight ? `font-weight: ${c.weight}` : ''}>${c.text}</td>`)}
+          ${cells.map((c) => html`<td class=${c.cls || ''} style=${c.weight ? `font-weight: ${c.weight}` : ''}>${c.tags ? html`<${Tags} tags=${c.tags} />` : c.text}</td>`)}
           ${pad.map(() => html`<td></td>`)}
         </tr>
         ${isOpen && html`<tr class="note"><td colspan=${Math.max(span, cols.length) + 1}><span>${row.player} · ${row.positions}: ${row.notes.join(' · ')}</span></td></tr>`}`;
@@ -160,25 +166,15 @@ function Group({ group, view, columns, span, live, open, onToggle, sort, onSort 
   </tbody>`;
 }
 
-// His box line as tags: a skater's G A SOG HIT BLK, a goalie's SA SV GA SV%; then TOI.
-function boxTags(line, goalie) {
-  if (!line) return [];
-  if (goalie) {
-    return [['SA', line.shots_against], ['SV', line.saves], ['GA', line.goals_against],
-      ['SV%', line.shots_against ? (line.saves / line.shots_against).toFixed(3).replace(/^0/, '') : ''], ['TOI', line.toi]];
-  }
-  return [['G', line.goals], ['A', line.assists], ['SOG', line.shots], ['HIT', line.hits], ['BLK', line.blocks], ['TOI', line.toi]];
-}
-
 // Tonight on a phone: one card per player, the group's name sticking at the top.
-function TonightGroup({ group, live, open, onToggle }) {
+function TonightGroup({ group, columns, live, open, onToggle }) {
   return html`<section class="tn" aria-label=${group.name}>
     <h3 class="tn-head">${group.name}<span class="cap">Expected points</span></h3>
     ${group.rows.map((row) => {
       const mine = live && live[row.player_id];
       const line = mine && mine.line;
       const { prob, probWarn } = playChance(row, mine, group.goalie);
-      const tags = boxTags(line, group.goalie);
+      const tags = boxTags(line, group.goalie, group.goalie ? columns.goalie : columns.skater);
       const isOpen = open === row.player_id && row.notes.length > 0;
       return html`<div class=${`tn-row ${isOpen ? 'sel' : ''}`}>
         <span class="slot">${row.slot}</span>
@@ -192,7 +188,7 @@ function TonightGroup({ group, live, open, onToggle }) {
         </span>
         <span class="x" title="Expected fantasy points tonight">${f2(row.xpts)}</span>
         ${line && html`
-          <span class="tags">${tags.map(([k, v]) => html`<span class=${`tag ${v ? '' : 'zero'}`}><span class="k">${k}</span> ${v ?? ''}</span>`)}</span>
+          <${Tags} tags=${tags} />
           <span class="live" title="Fantasy points so far tonight">${f2(line.fantasy)}</span>`}
       </div>
       ${isOpen && html`<div class="tn-note">${row.player} · ${row.positions}: ${row.notes.join(' · ')}</div>`}`;
@@ -290,7 +286,7 @@ export function Roster({ league, version, wide }) {
     ${!data.games_today && html`<div class="empty">No NHL games on ${data.day}: the roster, no lineup to set.</div>`}
     ${data.empty_slots > 0 && data.games_today && html`<div class="error">${data.empty_slots} empty lineup slot${data.empty_slots > 1 ? 's' : ''} tonight</div>`}
     ${shownView === 'tonight'
-      ? html`<div class="tn-list">${groups.map((g) => html`<${TonightGroup} key=${g.name} group=${g} live=${live}
+      ? html`<div class="tn-list">${groups.map((g) => html`<${TonightGroup} key=${g.name} group=${g} columns=${data.columns} live=${live}
           open=${open} onToggle=${(id) => setOpen(open === id ? null : id)} />`)}</div>`
       : html`<div class="table-scroll"><table class="roster">
       ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${shownView} columns=${data.columns} span=${span}
