@@ -40,7 +40,7 @@ from tkinter import ttk
 import pandas as pd
 from tksheet import Sheet
 
-import serverlayer  # noqa: F401 -- puts the engine (and Season/) on sys.path; see serverlayer.py
+import serverlayer  # noqa: F401 -- puts the engine (and Core/) on sys.path; see serverlayer.py
 import draft_assistant as da
 import draft_board
 import sheets

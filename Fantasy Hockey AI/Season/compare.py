@@ -27,6 +27,7 @@ import json
 import numpy as np
 import pandas as pd
 
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import paths
 
 SEASON = "2025-26"

@@ -88,7 +88,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import auth  # noqa: E402
-import seasonlayer  # noqa: E402,F401 -- puts Season/ on sys.path; see seasonlayer.py
+import corelayer  # noqa: E402,F401 -- puts Core/ on sys.path; see corelayer.py
 import choices  # noqa: E402
 import games as live_games  # noqa: E402
 import league as league_module  # noqa: E402

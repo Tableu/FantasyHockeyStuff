@@ -29,6 +29,7 @@ import sys
 import numpy as np
 import pandas as pd
 
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import inputs
 import ladder
 import league as league_module

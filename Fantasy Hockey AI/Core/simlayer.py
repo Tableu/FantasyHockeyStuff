@@ -2,7 +2,7 @@
 
 `Simulation/` uses flat modules -- `import marginals`, `import paths` -- which works because that
 folder is the working directory when it runs. Importing from it puts two sibling folders on
-`sys.path` at once, and then **the module names collide**: `Season/paths.py` shadows
+`sys.path` at once, and then **the module names collide**: `Core/paths.py` (Season/'s until 2026-10-24) shadows
 `Simulation/paths.py`, so `Simulation/correlations.py` asking for `paths.dispersion_path` gets this
 folder's paths module and fails. The same collision already forced `calendar.py` to become
 `schedule.py`.
@@ -21,7 +21,7 @@ dispersion and the fitted copula structure -- are JSON files, and JSON read by p
 every other layer in this stack consumes the one below it.
 
 **On `scoring`:** it does `import paths` and asks for `paths.SCORESETS_DIR`, which resolves to
-*this* folder's paths module. It works because `Season/paths.py` and `Simulation/paths.py` both
+*this* folder's paths module. It works because `Core/paths.py` and `Simulation/paths.py` both
 point `SCORESETS_DIR` at the shared `Settings/scoring/` folder. That agreement is
 load-bearing, so it is written down here and asserted below rather than left to be discovered
 when one of the two changes.
@@ -55,7 +55,7 @@ def assert_scoreset_dirs_agree() -> None:
     text = _sim_paths.read_text(encoding="utf-8")
     if 'SCORESETS_DIR = PROJECT_ROOT.parent / "Settings" / "scoring"' not in text:
         raise RuntimeError(f"{_sim_paths} no longer points SCORESETS_DIR at Settings/scoring; "
-                           f"Simulation/scoring.py resolves it against Season/paths.py under the "
+                           f"Simulation/scoring.py resolves it against Core/paths.py under the "
                            f"flat-module convention, so the two have to agree. See simlayer.py.")
     if not paths.SCORESETS_DIR.exists():
         raise RuntimeError(f"{paths.SCORESETS_DIR} does not exist, so no scoring file can load")

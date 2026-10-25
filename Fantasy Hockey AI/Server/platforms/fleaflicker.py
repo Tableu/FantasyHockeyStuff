@@ -413,7 +413,7 @@ RULES_PAGE = "https://www.fleaflicker.com/nhl/leagues/{league}/rules"
 UNLIMITED_MOVES = 99      # the harness needs a number; no real week comes near it
 POSITIONS = ("C", "LW", "RW", "D", "G")
 WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
-# The rules page's wording for the rules Season/league.py names, as league 12090 shows it
+# The rules page's wording for the rules Core/league.py names, as league 12090 shows it
 # (2026-10-07), matched on how the text starts. Wording missing here fails the read with the text:
 # add it from the league's settings page, never guess.
 LINEUP_LOCKS = {"At game start": "per_game"}
@@ -489,7 +489,7 @@ def _scoring(api: dict, notes: list) -> dict:
 
 
 def settings_from(api: dict, page: str, scoreboard: dict, board: dict, teams: int) -> dict:
-    """The league's settings in Season/league.py's terms -- {"settings": a Settings/rosters body
+    """The league's settings in Core/league.py's terms -- {"settings": a Settings/rosters body
     (no name, description or eligibility), "scoring": {"skaters", "goalies"}, "notes": [what
     the league does that those terms cannot hold]}: slots, sizes and scoring from
     FetchLeagueRules, the weeks from FetchLeagueScoreboard, the draft order from the board, the

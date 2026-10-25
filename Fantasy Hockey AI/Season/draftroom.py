@@ -13,6 +13,7 @@ from collections import Counter
 
 import pandas as pd
 
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 from decisionlayer import draft as draft_policy
 from decisionlayer import slots as slots_module
 

@@ -26,7 +26,7 @@ import dataclasses
 import json
 from pathlib import Path
 
-import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import paths as season_paths
 
 LEAGUES_DIR = season_paths.SETTINGS_DIR / "leagues"

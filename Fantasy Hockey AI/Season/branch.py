@@ -34,7 +34,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
-import paths
+import corelayer  # puts Core/ on sys.path; see corelayer.py
 import ladder
 import oneseat
 import tune
@@ -142,8 +142,7 @@ def main():
                "eligibility": ctx.eligibility, "scoreset": ctx.scoreset, "layout": base_layout,
                "decision_sims": 200, "shipped": shipped, "candidate": candidate}
     workers = args.workers or ladder.default_workers(args.replications)
-    if sys.path[0] != str(paths.PROJECT_ROOT):
-        sys.path.insert(0, str(paths.PROJECT_ROOT))
+    corelayer.front()            # Core/ and Season/ ahead of Simulation/ for the workers (ladder.py)
     with ProcessPoolExecutor(max_workers=workers, initializer=_init, initargs=(payload,)) as pool:
         drafts = list(pool.map(play, range(args.replications)))
 

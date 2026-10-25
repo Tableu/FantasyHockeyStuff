@@ -1,8 +1,8 @@
 """Where the engine reads and writes -- the locations only Server/ uses.
 
 Shared data locations (ModelFeatures' features, Projections' reports, Settings/) stay in
-Season/'s `paths`, which Server/ imports through `seasonlayer`. This module is named `livepaths`,
-not `paths`, so it can never shadow that one (see seasonlayer.py).
+Core/'s `paths`, which Server/ imports through `corelayer`. This module is named `livepaths`,
+not `paths`, so it can never shadow that one (see corelayer.py).
 
     reports/<league>/   that league's draft boards, draft-assistant view and daily plans (gitignored)
     fixtures/   made-up leagues for exercising the tools before a league has rosters
@@ -10,7 +10,7 @@ not `paths`, so it can never shadow that one (see seasonlayer.py).
 
 from pathlib import Path
 
-import seasonlayer  # noqa: F401 -- Season/ on sys.path
+import corelayer  # noqa: F401 -- Core/ on sys.path
 import paths as season_paths
 
 ENGINE_DIR = Path(__file__).resolve().parent

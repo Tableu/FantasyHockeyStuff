@@ -31,6 +31,7 @@ import subprocess
 import sys
 import time
 
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import paths  # noqa: F401  (Season's paths first, as oneseat imports it)
 
 if os.environ.get("SPEED_AB_PATCH"):

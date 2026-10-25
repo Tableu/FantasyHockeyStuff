@@ -49,7 +49,7 @@ sys.exit(code)
 PLAN = """
 import datetime as dt, sys, time
 sys.path.insert(0, "")
-import seasonlayer, leagues, live, planpass
+import corelayer, leagues, live, planpass
 league, day = leagues.load(leagues.DEFAULT_LEAGUE), dt.date.today()
 now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0)
 t = time.perf_counter(); runner = live.LiveRunner(day, league)

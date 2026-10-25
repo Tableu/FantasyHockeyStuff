@@ -34,7 +34,7 @@ import sys
 
 import pandas as pd
 
-import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import leagues
 import livepaths
 import inputs

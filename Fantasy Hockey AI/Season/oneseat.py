@@ -45,6 +45,7 @@ import numpy as np
 import pandas as pd
 
 import draftroom
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import paths
 import tune
 from decisionlayer import load_strategy

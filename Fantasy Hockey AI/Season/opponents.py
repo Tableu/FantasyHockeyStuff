@@ -42,6 +42,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import league as league_module
 import paths
 import schedule as schedule_module

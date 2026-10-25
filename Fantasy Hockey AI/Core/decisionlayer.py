@@ -3,14 +3,16 @@
 Season measures; `Decisions/` chooses. Every manager the ladder seats, the lineup solver, the draft
 rule and rung 3's box-score estimator live in that sibling folder so a live runner can use the same
 code a backtest scored. This module is how Season reaches it, the way `simlayer.py` is how it
-reaches `Simulation/`.
+reaches `Simulation/`. It lives in Core/ (since 2026-10-24) because the live plan reaches Decisions/
+through it too.
 
 **The hazard is the flat-module convention.** Each folder is put on `sys.path` and imported by bare
 module name, so two folders defining the same name means whichever comes first on the path wins,
-silently. It has already happened once: `Season/paths.py` shadows `Simulation/paths.py`, which is
+silently. It has already happened once: `Core/paths.py` shadows `Simulation/paths.py`, which is
 why `simlayer.py` can import only the parts of Simulation that never touch `paths`. So before
-`Decisions/` goes on the path, every one of its module names is checked against Season's and
-Simulation's, and a collision stops the run instead of quietly handing a manager the wrong module.
+`Decisions/` goes on the path, every one of its module names is checked against Core's, Season's
+and Simulation's, and a collision stops the run instead of quietly handing a manager the wrong
+module.
 """
 
 import sys
@@ -18,11 +20,11 @@ import sys
 import paths
 
 _decision_modules = {p.stem for p in paths.DECISIONS_DIR.glob("*.py")}
-_elsewhere = {p.stem for directory in (paths.PROJECT_ROOT, paths.SIMULATION_DIR)
+_elsewhere = {p.stem for directory in (paths.CORE_DIR, paths.SEASON_DIR, paths.SIMULATION_DIR)
               for p in directory.glob("*.py")}
 _collisions = sorted(_decision_modules & _elsewhere)
 if _collisions:
-    raise ImportError(f"Decisions/ and Season/ or Simulation/ both define {_collisions}; under the "
+    raise ImportError(f"Decisions/ and Core/, Season/ or Simulation/ both define {_collisions}; under the "
                       f"flat-module convention one would silently shadow the other. Rename one. "
                       f"See decisionlayer.py.")
 

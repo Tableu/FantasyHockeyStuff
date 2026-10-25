@@ -15,7 +15,7 @@ Days are ISO text ("2026-10-08"); a claim clearing during a day carries its time
 ("2026-10-09T03:00:00"), which sorts after that day's night, so it counts from the next.
 """
 
-import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 from decisionlayer import slots as slots_module
 
 

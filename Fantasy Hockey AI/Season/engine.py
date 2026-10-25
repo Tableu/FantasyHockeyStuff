@@ -26,6 +26,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import paths
 import view as view_module
 from inputs import goalie_line                  # the league-average goalie start (see there)

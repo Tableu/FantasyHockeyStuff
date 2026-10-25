@@ -4,7 +4,7 @@
     Settings/rosters/<league>.json    teams, slots, bench, IR, moves, waivers, locks, schedule, playoffs
     Settings/scoring/<league>.json    points per stat
 
-What the settings MEAN is Season/league.py's (RULE_CHOICES and the rest of the rosters schema); how
+What the settings MEAN is Core/league.py's (RULE_CHOICES and the rest of the rosters schema); how
 a platform spells them is its adapter's `league_settings()` (platforms/). Nothing in a written
 file is edited by hand: what no platform reports (a backtest's merged first week, a replayed
 season's shorter schedule) is the registry's `overrides` (Settings/leagues/<league>.json), laid
@@ -25,7 +25,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
-import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import leagues
 import livepaths
 import paths

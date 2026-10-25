@@ -21,6 +21,7 @@ import pandas as pd
 
 import engine as engine_module
 import field as field_module
+import corelayer  # puts Core/ on sys.path; see corelayer.py
 import inputs
 import league as league_module
 import paths
@@ -335,15 +336,13 @@ def run_replications(args, config, calendar, data, eligibility, scoreset, rungs,
         return [run_one(config, calendar, data, eligibility, scoreset, rungs, r,
                         args.verbose_weeks, args.decision_sims, strategy, candidate)
                 for r in indices]
-    import sys
     from concurrent.futures import ProcessPoolExecutor
 
     # A spawned worker starts from this process's sys.path, where simlayer has put Simulation/
-    # first -- so its `import paths` would find Simulation's paths module, not this folder's.
-    # Season first, as it is when a run starts; simlayer puts Simulation back in front of the
-    # rest once `paths` is imported, exactly as here.
-    if sys.path[0] != str(paths.PROJECT_ROOT):
-        sys.path.insert(0, str(paths.PROJECT_ROOT))
+    # first -- so its `import paths` would find Simulation's paths module, not Core's. Core and
+    # Season first, as they are when a run starts (corelayer.front); simlayer puts Simulation back
+    # in front of the rest once `paths` is imported, exactly as here.
+    corelayer.front()
     payload = {"config": config, "calendar": calendar, "data": data, "eligibility": eligibility,
                "scoreset": scoreset, "rungs": rungs, "verbose_weeks": args.verbose_weeks,
                "decision_sims": args.decision_sims, "strategy": strategy,

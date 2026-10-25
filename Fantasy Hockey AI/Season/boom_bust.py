@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 import field as field_module
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import inputs
 import league as league_module
 import paths

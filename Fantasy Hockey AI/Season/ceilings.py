@@ -49,6 +49,7 @@ import pandas as pd
 
 import engine as engine_module
 import field as field_module
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import inputs
 import ladder
 import paths

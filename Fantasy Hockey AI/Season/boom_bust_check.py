@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 import boom_bust as bb
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import league as league_module
 import paths
 import simlayer

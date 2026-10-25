@@ -66,7 +66,7 @@ STAT_NAMES = {13: "G", 14: "A", 15: "+/-", 16: "PTS", 17: "PIM", 18: "PPG", 19: 
 GOALIE_KEYS = {"wins", "losses", "ot_losses", "shutouts", "saves", "goals_against"}
 
 
-# ESPN's codes for the rules Season/league.py names, as seen in leagues so far (espn-la 2026-27,
+# ESPN's codes for the rules Core/league.py names, as seen in leagues so far (espn-la 2026-27,
 # a private 14-team league 2025-26/2026-27). A code missing here fails `league_settings` with its
 # name: look it up on the league's settings page and add it, never guess.
 LINEUP_LOCKS = {"INDIVIDUAL_GAME": "per_game"}
@@ -107,7 +107,7 @@ def espn_year(season: str) -> int:
 
 
 def settings_from(s: dict) -> dict:
-    """The league's settings in Season/league.py's terms -- {"settings": a Settings/rosters body
+    """The league's settings in Core/league.py's terms -- {"settings": a Settings/rosters body
     (no name, description or eligibility), "scoring": {"skaters", "goalies"}, "notes": [what
     the league does that those terms cannot hold]}. ESPN's codes are translated here and only
     here; a code not in the tables below fails the read rather than mapping to the nearest.

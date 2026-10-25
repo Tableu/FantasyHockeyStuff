@@ -56,6 +56,7 @@ import numpy as np
 import pandas as pd
 
 import field as field_module
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import inputs
 import ladder
 import league as league_module
@@ -70,7 +71,7 @@ FINAL_SEASON = "2025-26"
 SHIPPED, CAND = 17, managers_module.CANDIDATE
 BASE_FIELD = (2, 5, 6, SHIPPED)            # the shipped league
 CAND_FIELD = (2, 5, 6, CAND)               # the same league, the candidate in rung 17's seats
-CODE_DIRS = ("Decisions", "Season", "Simulation", "Settings")
+CODE_DIRS = ("Core", "Decisions", "Season", "Simulation", "Settings")
 
 
 # ---------------------------------------------------------------------------------------------

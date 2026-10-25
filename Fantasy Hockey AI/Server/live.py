@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import livepaths
 import draft_board
 import choices as choices_module

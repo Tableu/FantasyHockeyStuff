@@ -29,6 +29,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
+import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import paths
 
 log = logging.getLogger("wire_depletion")
@@ -81,7 +82,7 @@ def survival(free_by_day: dict, ahead, days) -> pd.DataFrame:
 
 def real(season=SEASON):
     ahead, days, universe = future_points(season)
-    log_path = paths.PROJECT_ROOT.parent / "ModelFeatures" / "data" / "features" / \
+    log_path = paths.SIBLINGS / "ModelFeatures" / "data" / "features" / \
         f"fleaflicker_transactions_{LEAGUE_ID}.parquet"
     t = pd.read_parquet(log_path)
     t = t[(t["season"] == season) & t["player_id"].notna()].sort_values("time_utc")

@@ -1,4 +1,8 @@
-"""Where the season simulator reads and writes.
+"""Where the league model and the season simulator read and write.
+
+The shared locations for Core/ (this folder), the backtest harness in Season/ and the live plan in
+Server/ -- one paths module, so all three resolve the same files. Until 2026-10-24 this was
+Season/paths.py; the harness's own outputs (REPORTS_DIR, DOCS_DIR) are still Season/'s.
 
 Section 6 starts from files three siblings produced and opens no database of its own:
 
@@ -13,14 +17,16 @@ It is the first folder in the stack that also imports *code* from a sibling -- `
 sampler, scoring and copula -- because drawing a night is a computation, not a file. That one
 dependency is declared in `engine.py` and nowhere else; everything else arrives by path.
 
-REPORTS_DIR holds the ladder results and is gitignored; DOCS_DIR holds committed prose that
-`report.py` generates rather than anyone typing.
+REPORTS_DIR holds the ladder results (and the boom/bust runs the draft board reads) and is
+gitignored; DOCS_DIR holds committed prose that `report.py` generates rather than anyone typing.
+Both are Season/'s.
 """
 
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-SIBLINGS = PROJECT_ROOT.parent
+CORE_DIR = Path(__file__).resolve().parent
+SIBLINGS = CORE_DIR.parent
+SEASON_DIR = SIBLINGS / "Season"
 
 SIMULATION_DIR = SIBLINGS / "Simulation"
 # The decision policies -- managers, the lineup solver, the draft rule. Code, not files, so it is
@@ -38,8 +44,8 @@ ROSTERS_DIR = SETTINGS_DIR / "rosters"
 FEATURES_DIR = SIBLINGS / "ModelFeatures" / "data" / "features"
 LINEUPS_DIR = SIBLINGS / "ModelFeatures" / "data" / "lineups"
 
-REPORTS_DIR = PROJECT_ROOT / "reports"
-DOCS_DIR = PROJECT_ROOT / "docs"
+REPORTS_DIR = SEASON_DIR / "reports"
+DOCS_DIR = SEASON_DIR / "docs"
 
 LEAGUE_CONFIG = ROSTERS_DIR / "league.json"
 
