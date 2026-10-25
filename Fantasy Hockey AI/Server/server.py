@@ -7,7 +7,7 @@ Settings/leagues/ (beagles, espn-la), one refresh at a time.
     python server.py --league beagles                  # one league (repeat --league for several)
     python server.py --host 0.0.0.0                    # in the container (compose publishes 8000)
     python server.py --league beagles --date 2026-09-29 \
-        --league-file ../Live/fixtures/beagles/fake_league.json --skip-snapshots --no-auto   # rehearsal
+        --league-file fixtures/beagles/fake_league.json --skip-snapshots --no-auto   # rehearsal
 
 Every call but the job's takes ?league=<name> (default: the first league served, beagles):
 
@@ -35,7 +35,7 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                line and fantasy points; your lineup's live total (games.py)
     GET  /roster               the app's Roster screen from the newest plan: lineup as it stands,
                                bench, IR, tonight's projection, season in the league's scoring (roster.py)
-    GET  /choices              what you chose in the app (Live/choices.py): {league,
+    GET  /choices              what you chose in the app (choices.py): {league,
                                choices: {days: {date: {moves}}, together}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
                                until a refresh (or a 'plan')
@@ -80,9 +80,6 @@ import threading
 import time
 from pathlib import Path
 
-LIVE = Path(__file__).resolve().parents[1] / "Live"
-sys.path.insert(0, str(LIVE))
-
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 import uvicorn  # noqa: E402
@@ -96,6 +93,7 @@ import choices  # noqa: E402
 import games as live_games  # noqa: E402
 import league as league_module  # noqa: E402
 import leagues  # noqa: E402
+import livepaths  # noqa: E402
 import matchup as matchup_module  # noqa: E402
 import roster  # noqa: E402
 import suggestions  # noqa: E402
@@ -364,7 +362,7 @@ class Pick(BaseModel):
 def make_app(worker: Worker) -> FastAPI:
     app = FastAPI(title="Fantasy hockey plan server", docs_url=None, redoc_url=None, openapi_url=None)
     auth.install(app, auth.Login())
-    store = live_games.FeedStore(LIVE / "reports" / "goals")
+    store = live_games.FeedStore(livepaths.REPORTS_DIR / "goals")
     threading.Thread(target=store.watch_loop, daemon=True).start()
     scoresets = {name: simlayer.load_scoreset(league.scoring) for name, league in worker.leagues.items()}
     # Each league's lineup slots in its own order (C C LW LW ... G G), as the window's calendar,

@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 DESKTOP_DIR = Path(__file__).resolve().parent
-ENGINE_DIR = DESKTOP_DIR.parent / "Live"
+ENGINE_DIR = DESKTOP_DIR.parent / "Server"
 
 if str(ENGINE_DIR) not in sys.path:
     sys.path.insert(0, str(ENGINE_DIR))

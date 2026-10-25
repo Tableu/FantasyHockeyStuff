@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PIPELINE = ROOT / "pipeline"
 AI = ROOT / "Fantasy Hockey AI"
-FEATURES, PROJECTIONS, LIVE = AI / "ModelFeatures", AI / "Projections", AI / "Live"
+FEATURES, PROJECTIONS, ENGINE = AI / "ModelFeatures", AI / "Projections", AI / "Server"
 LATE_SEASON = "2026-03-14"
 SEASON = "2026-27"
 
@@ -45,7 +45,7 @@ finally:
 sys.exit(code)
 """
 
-# The league read and the plan, timed part by part (Live/ on the path, as plan steps run).
+# The league read and the plan, timed part by part (Server/ on the path, as plan steps run).
 PLAN = """
 import datetime as dt, sys, time
 sys.path.insert(0, "")
@@ -70,7 +70,7 @@ def steps(today: str, game_id, nightly: bool):
     yield f"build_tonight, late season ({LATE_SEASON})", FEATURES, ["build_tonight.py", "--date", LATE_SEASON]
     yield "goalie_workload", PROJECTIONS, ["goalie_workload.py", "--build", "--season", SEASON, "--date", today]
     yield "project_tonight", PROJECTIONS, ["project_tonight.py", "--date", today]
-    yield "league read + plan", LIVE, None
+    yield "league read + plan", ENGINE, None
     if game_id:
         yield f"re-ingest game {game_id}", PIPELINE, ["run_daily.py", "--game-id", str(game_id)]
     if nightly:

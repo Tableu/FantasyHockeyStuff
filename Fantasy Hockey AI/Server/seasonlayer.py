@@ -1,7 +1,8 @@
-"""The one place Live/ reaches into Season/ -- the shared league core, imported by bare name.
+"""The one place Server/ reaches into Season/ -- the shared league core, imported by bare name.
 
-Live/ holds the tools that act on a real league (the draft board, the draft assistant and window,
-the live runner). They share Season/'s league model rather than copying it:
+Server/ holds the server and the engine that acts on a real league (the live runner, the plan
+pass, the platform adapters, the draft board; until 2026-10-24 these were Live/). They share
+Season/'s league model rather than copying it:
 
     league      the league's rules, as data (Settings/rosters/)
     state       rosters, the move budget, waivers, IR legality
@@ -14,37 +15,37 @@ the live runner). They share Season/'s league model rather than copying it:
     decisionlayer  the bridge to Decisions/ (managers, draft, slots, strategy ...)
 
 Season/ and its bridges use the flat-module convention (each folder on sys.path, imported by bare
-name), so importing this module first puts Season/ on sys.path and every Live module then imports
-those names as Season/ itself does. **The hazard is a name collision**: a module in Live/ named
-like one in Season/ (or Decisions/, Simulation/) would shadow it for everyone. So Live/ has no
+name), so importing this module first puts Season/ on sys.path and every Server module then imports
+those names as Season/ itself does. **The hazard is a name collision**: a module in Server/ named
+like one in Season/ (or Decisions/, Simulation/) would shadow it for everyone. So Server/ has no
 `paths.py` -- its own locations are in `livepaths.py` -- and `assert_no_collisions` checks the
 folder at import time rather than trusting it.
 
-Season/ never imports Live/: the simulator must not touch a platform or the network.
+Season/ never imports Server/: the simulator must not touch a platform or the network.
 """
 
 import sys
 from pathlib import Path
 
-LIVE_DIR = Path(__file__).resolve().parent
-SEASON_DIR = LIVE_DIR.parent / "Season"
+ENGINE_DIR = Path(__file__).resolve().parent
+SEASON_DIR = ENGINE_DIR.parent / "Season"
 
 if str(SEASON_DIR) not in sys.path:
     sys.path.append(str(SEASON_DIR))
 
 
 def assert_no_collisions() -> None:
-    """No module in Live/ may share a name with one in Season/, Decisions/ or Simulation/."""
+    """No module in Server/ may share a name with one in Season/, Decisions/ or Simulation/."""
     def names(folder):   # modules and packages alike: either one shadows a bare import
         return ({p.stem for p in folder.glob("*.py")}
                 | {p.name for p in folder.iterdir() if (p / "__init__.py").exists()})
 
-    mine = names(LIVE_DIR)
+    mine = names(ENGINE_DIR)
     for sibling in ("Season", "Decisions", "Simulation"):
-        theirs = names(LIVE_DIR.parent / sibling)
+        theirs = names(ENGINE_DIR.parent / sibling)
         clash = mine & theirs
         if clash:
-            raise RuntimeError(f"Live/ modules {sorted(clash)} shadow {sibling}/'s under the flat-module "
+            raise RuntimeError(f"Server/ modules {sorted(clash)} shadow {sibling}/'s under the flat-module "
                                f"convention; rename them (see seasonlayer.py)")
 
 

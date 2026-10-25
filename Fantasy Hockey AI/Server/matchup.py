@@ -1,6 +1,6 @@
 """The phone app's Matchup screen (plan phone-app-pwa.md, P5): the week's score and P(win), each day's
 points for you and your opponent (final, live, projected), tonight's live against projected, and
-the league's week so far. The scores are the platform's own, read here (Live/platforms:
+the league's week so far. The scores are the platform's own, read here (platforms/:
 scoreboard, daily_points) and kept a minute, so the screen is current between the plan's refreshes;
 the projection and P(win) are the newest plan's (matchup_projection, p_win).
 
