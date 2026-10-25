@@ -1,4 +1,4 @@
-"""Read-only tksheet tables for the Live windows (draft_gui.py, plan_gui.py).
+"""Read-only tksheet tables for the draft window (draft_gui.py).
 
     bind_header_clicks(sheet, on_column)   a click on a header calls on_column(index); a drag
                                            across it (resizing a column) does not

@@ -37,7 +37,7 @@ import time
 
 import pandas as pd
 
-import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
+import serverlayer  # noqa: F401 -- puts the engine (and Season/) on sys.path; see serverlayer.py
 import leagues
 import livepaths
 import platforms
