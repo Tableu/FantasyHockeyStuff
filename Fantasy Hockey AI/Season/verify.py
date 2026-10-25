@@ -40,7 +40,8 @@ season-level result rather than as an error:
     live strategy   a league without its own Settings/strategy-<league>.json, or one differing from
                     strategy.json in more than the league-level choices (LIVE_CHOICES: tail, streaming
                     mode/gate/next_week/goalies/spots/spot_tolerance, rate_source, ...)
-    modules         a Decisions/ module name that would shadow one in Season/ or Simulation/
+    modules         a Decisions/ module name that would shadow one in Core/, Season/ or Simulation/
+    server core     a server process loading any module of Season/ -- the live plan runs on Core/
     boom bust       boom/bust odds outside [0, 1], a par curve that rises, season draws or room
                     drafts that differ between two runs with one seed, or the saved-run reader
                     disagreeing with the table it was saved beside
@@ -1507,6 +1508,37 @@ def check_modules() -> str:
     return f"no collisions; Decisions/ provides {', '.join(sorted(decisionlayer.__all__))}"
 
 
+def check_server_core() -> str:
+    """The server and its engine, imported in a fresh process from Server/, load Core/ and no
+    module of this folder (the Season core split, 2026-10-24): a stray import of the harness
+    would put the backtest code back under the live plan without a word."""
+    import subprocess
+
+    # Resolved paths, not string prefixes: a module found through a sys.path entry spelled another
+    # way (forward slashes, a relative path) must still count as Season/'s.
+    probe = ("import sys, runpy\n"
+             "from pathlib import Path\n"
+             "import planpass, live, draft_board, weekbook, choices, sync_league_settings\n"
+             "runpy.run_path('server.py', run_name='probe')\n"
+             "def under(folder):\n"
+             "    folder = Path(folder).resolve()\n"
+             "    return sorted(m for m, v in list(sys.modules.items()) if getattr(v, '__file__', None)\n"
+             "                  and Path(v.__file__).resolve().parent == folder)\n"
+             f"print('SEASON=' + ','.join(under({str(paths.SEASON_DIR)!r})))\n"
+             f"print('CORE=' + ','.join(under({str(paths.CORE_DIR)!r})))\n")
+    done = subprocess.run([sys.executable, "-c", probe], cwd=paths.SIBLINGS / "Server",
+                          capture_output=True, text=True, timeout=300)
+    if done.returncode:
+        raise AssertionError(f"the server's modules did not import: {done.stderr.strip()[-500:]}")
+    found = {key: [m for m in value.split(",") if m] for key, _, value in
+             (line.partition("=") for line in done.stdout.splitlines() if line.startswith(("SEASON=", "CORE=")))}
+    season, core = found.get("SEASON", []), found.get("CORE", [])
+    if season:
+        raise AssertionError(f"a server process loaded Season/ modules {season}: the harness must "
+                             "stay off the live plan (Server/corelayer.py)")
+    return f"a server process loads {len(core)} Core/ modules ({', '.join(core)}) and none of Season/"
+
+
 CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard),
           ("leakage", check_leakage),
           ("draws", check_draws), ("invariants", check_invariants),
@@ -1528,7 +1560,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("first week", check_first_week), ("candidate", check_candidate),
           ("tune guard", check_tune_guard), ("opponents", check_opponents),
           ("boom bust", check_boom_bust), ("live strategy", check_live_strategy),
-          ("modules", check_modules)]
+          ("modules", check_modules), ("server core", check_server_core)]
 
 
 def main():
