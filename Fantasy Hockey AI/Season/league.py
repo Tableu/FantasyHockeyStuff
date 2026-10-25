@@ -41,7 +41,7 @@ NHL_TO_FANTASY = {"C": "C", "L": "LW", "R": "RW", "D": "D", "G": "G"}
 # (`slot_positions` in the roster file), tested by set intersection in `Decisions/slots.py`.
 POSITIONS = frozenset(SKATER_POSITIONS) | {GOALIE_POSITION}
 
-# A league's rules as the platform has them (Live/sync_league_settings.py detects them), not as the
+# A league's rules as the platform has them (Server/sync_league_settings.py detects them), not as the
 # harness happens to simulate them. Each choice maps every value a real league can carry to how the
 # harness simulates it: None = exactly; a sentence = the approximation, kept on the config
 # (`approximations`) so a report says what it ran. A value missing from its table is refused at

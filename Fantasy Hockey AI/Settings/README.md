@@ -141,7 +141,7 @@ Changing a strategy needs no model rebuild -- the projections do not know how th
 |---|---|---|---|
 | `adddrop` (rung 5+) | `horizon_weeks` | 3 | weeks past the current one both sides of a swap are priced over |
 | | `margin` | 1.0 | sds of its own gain a move must clear; `"inf"` never moves (rung 6) |
-| | `rate_source` | `ros` | `ros` (the model's rest-of-season projection, updated through the season), `per_game`, or `board` (the preseason consensus per team game, frozen all season -- what the live plan prices skaters on today, Live/live.py ros_seed; goalies on their start share). `board` is a backtest arm for that comparison (2026-10-02). `blend`: on a skater both cover, the board scaled to the model's level and the model, the board's weight 7/(7+games he has played this season) (`valuation.BLEND_GAMES`), anyone else as `ros`. The live leagues' choice since 2026-10-06 (strategy-beagles, strategy-espn-la), the user's call on neutral results so one short injury-exit game cannot halve a player (Jake Sanderson, 4:29 on opening night: 309 -> 164 rest-of-season points, rented away on espn-la): 2024-25, beagles, 56 drafts, +0.94 +/- 0.84 pts/wk, win +0.016 +/- 0.018, halves +2.05 / -0.17, moves unchanged; confirmed 2025-26, 56 drafts: reverting to `ros` -4.19 +/- 1.01 pts/wk, win -0.038 +/- 0.017, halves -3.25 / -5.14 -- the blend is worth about 4 pts/wk there. The calendar blend before it (board 0.7 -> 0.4 over six weeks, 2026-10-03) read +1.5 +/- 1.0 |
+| | `rate_source` | `ros` | `ros` (the model's rest-of-season projection, updated through the season), `per_game`, or `board` (the preseason consensus per team game, frozen all season -- what the live plan prices skaters on today, Server/live.py ros_seed; goalies on their start share). `board` is a backtest arm for that comparison (2026-10-02). `blend`: on a skater both cover, the board scaled to the model's level and the model, the board's weight 7/(7+games he has played this season) (`valuation.BLEND_GAMES`), anyone else as `ros`. The live leagues' choice since 2026-10-06 (strategy-beagles, strategy-espn-la), the user's call on neutral results so one short injury-exit game cannot halve a player (Jake Sanderson, 4:29 on opening night: 309 -> 164 rest-of-season points, rented away on espn-la): 2024-25, beagles, 56 drafts, +0.94 +/- 0.84 pts/wk, win +0.016 +/- 0.018, halves +2.05 / -0.17, moves unchanged; confirmed 2025-26, 56 drafts: reverting to `ros` -4.19 +/- 1.01 pts/wk, win -0.038 +/- 0.017, halves -3.25 / -5.14 -- the blend is worth about 4 pts/wk there. The calendar blend before it (board 0.7 -> 0.4 over six weeks, 2026-10-03) read +1.5 +/- 1.0 |
 | | `claim_premium` | 0.0 | extra points a waiver claim must clear; `"inf"` never claims |
 | | `shortlist` | 10 | free agents priced on the roster per pass |
 | | `drop_shortlist` | 4 | cheapest fieldable drops tried against each |
@@ -278,7 +278,7 @@ Keys starting with `_` are notes (sources, dates), not settings.
 
 ## leagues/
 
-One file per league we play (`Live/leagues.py` loads and validates them; unknown or missing keys
+One file per league we play (`Server/leagues.py` loads and validates them; unknown or missing keys
 fail). Every Live tool takes `--league <name>` (default `beagles`), and the pipeline's Fleaflicker
 importer and snapshot job read the active Fleaflicker league's id from here.
 
@@ -309,11 +309,11 @@ importer and snapshot job read the active Fleaflicker league's id from here.
   Cookies -> espn.com). They expire when you log out of ESPN; a 401 means copy fresh ones. `null`
   for a public league.
 - `rules` / `scoring` for a readable league are DETECTED from the platform, never typed:
-  `Live/sync_league_settings.py --league <name> --write` writes `rosters/<name>.json` and
+  `Server/sync_league_settings.py --league <name> --write` writes `rosters/<name>.json` and
   `scoring/<name>.json` (ESPN: mSettings; Fleaflicker: FetchLeagueRules, the scoreboard, the draft
   board and the league's /rules page). The plan server re-detects them once a day and the plan
   says when a setting changed (`reports/<league>/settings_changes.json`). `--check` translates the
-  platform answers saved in `Live/fixtures/settings/` offline and compares them with the files.
+  platform answers saved in `Server/fixtures/settings/` offline and compares them with the files.
 - `overrides`: settings no platform reports, laid over the detected ones -- the backtest's
   `min_first_week_games` and the replayed seasons' lengths (`regular_season_weeks_by_season`).
 - `draft_window`: the draft window's saved settings (⚙ Save as default writes them here): playoff

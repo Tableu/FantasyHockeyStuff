@@ -133,7 +133,7 @@ def from_dict(payload: dict, name: str = "") -> Strategy:
                          f"{playoffs['future_week_weight']!r}")
     draft = payload["draft"]
     # adp_platform / eligibility_platform used to live here; they are per league now
-    # (Settings/leagues/, read by Live/leagues.py), so a strategy file still carrying them fails.
+    # (Settings/leagues/, read by Server/leagues.py), so a strategy file still carrying them fails.
     draft_keys = {"vor_values", "min_sources", "undated_sources"}
     if set(draft) != draft_keys:
         raise ValueError(f"strategy {name} draft: needs exactly {sorted(draft_keys)}; "

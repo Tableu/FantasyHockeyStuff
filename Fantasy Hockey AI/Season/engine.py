@@ -322,7 +322,7 @@ class Season:
                         rows["start_share"].astype(float) * self.goalie_line_mean))
 
         # The preseason consensus as a rate per team game, frozen all season: what the live plan
-        # priced skaters' rest of season on until 2026-10-03 (Live/live.py ros_seed -- the board's
+        # priced skaters' rest of season on until 2026-10-03 (Server/live.py ros_seed -- the board's
         # value over his team's games), for a seat on rate source `board` (valuation.rate).
         # Skaters only, as live: a goalie keeps his start share x the league line from `latest_ros`.
         self.board_ros = {}

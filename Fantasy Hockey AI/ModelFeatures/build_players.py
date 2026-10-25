@@ -13,7 +13,7 @@ Certified, Trainee or Goalie) -- as `injury_risk.parquet`, which the draft windo
 each player's latest `Live.PlayerStatus` row -- the pipeline's merge of the Fleaflicker, ESPN and
 Daily Faceoff injury reports (OUT, SUSP, DTD, ACTIVE; a game-time decision; IR-eligible) -- as
 `injury_status.parquet`, the draft window's Status column. The scheduled injury snapshot
-(pipeline/run_live_snapshot.cmd) and the plan window's snapshot step (Live/planpass.py) rerun this
+(pipeline/run_live_snapshot.cmd) and the plan window's snapshot step (Server/planpass.py) rerun this
 after each injury or line-chart snapshot, so that file follows the reports.
 
 `player_teams.parquet` is the team each player is signed with, per season: his open

@@ -1,5 +1,5 @@
 """The fantasy leagues we play, read from the registry the model side keeps:
-`Fantasy Hockey AI/Settings/leagues/<name>.json` (see `Fantasy Hockey AI/Live/leagues.py` for the
+`Fantasy Hockey AI/Settings/leagues/<name>.json` (see `Fantasy Hockey AI/Server/leagues.py` for the
 fields). The pipeline only needs which platform league to read -- e.g. the Fleaflicker league whose
 positions, player ids and injury designations it imports -- so it reads the JSON by path rather
 than importing that folder's code.

@@ -71,7 +71,7 @@ def sync_espn(cursor, year: int, season_id: int) -> dict:
         db.delete_where(cursor, "Fantasy.PlayerADP", {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 
     # ESPN's own player ids too (Fantasy.PlatformPlayerIDs), so a live ESPN league's rosters and
-    # draft picks -- which arrive by those ids -- name a player exactly (Live/platforms/).
+    # draft picks -- which arrive by those ids -- name a player exactly (Server/platforms/).
     ensure_ids_table(cursor)
     db.delete_where(cursor, IDS_TABLE, {"FantasyPlatformID": platform_id, "SeasonID": season_id})
 

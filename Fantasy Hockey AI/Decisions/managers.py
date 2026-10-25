@@ -536,7 +536,7 @@ class FullSystem(Manager):
                     continue
                 nights.setdefault(night, []).append(player_id)
 
-        # A goalie's later nights each their own (live: Live/live.goalie_nights, his P(start) with
+        # A goalie's later nights each their own (live: Server/live.goalie_nights, his P(start) with
         # the night's back-to-back in it); otherwise one number for the week, tonight's if he plays
         # tonight. Backtests have none, and are unchanged.
         goalie_nights = getattr(view, "goalie_nights", None) or {}

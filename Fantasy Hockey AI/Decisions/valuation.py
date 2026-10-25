@@ -64,7 +64,7 @@ def rate(view, player_id, source="per_game") -> float:
         which a comparison cancels (the board scaled to the model's level: +24.1 vs +22.4).
       * With the player's own multi-season prior (Projections/ros_baselines.py, `history`) the
         model is level with the board: +3.4 +/- 1.1 on 2024-25 (64 drafts), -0.0 +/- 1.5 on
-        2025-26. The live plan prices on it since (Live/live.py skater_ros).
+        2025-26. The live plan prices on it since (Server/live.py skater_ros).
       * Not kept: blends of the board with the model. Board 0.4 / position-prior model 0.6:
         +21.2 (the board's level). A weight sliding 0.7 -> 0.4 over six weeks: +1.7 +/- 0.8 over
         the board at 64 drafts, then +1.5 +/- 1.0 over the history-prior model alone (halves

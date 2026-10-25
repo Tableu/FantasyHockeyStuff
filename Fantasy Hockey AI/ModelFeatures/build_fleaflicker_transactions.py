@@ -200,7 +200,7 @@ def main():
     table.insert(0, "league_id", args.league)
     table["season"] = season_of(table["time_utc"])
     # League time: Fleaflicker's scoring day turns over at 6:00 AM Eastern, and a week runs
-    # Monday to Sunday of those days (Live/platforms/fleaflicker.py).
+    # Monday to Sunday of those days (Server/platforms/fleaflicker.py).
     local = (table["time_utc"].dt.tz_localize("UTC").dt.tz_convert("America/New_York")
              .dt.tz_localize(None) - pd.Timedelta(hours=6))
     table["league_day"] = local.dt.normalize()

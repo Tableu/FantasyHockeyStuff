@@ -732,8 +732,8 @@ replacement. Only 12-team banger rung 2 still leans negative, within noise. Agai
 board the consensus is ahead or level except 12-team points (−2.5 ± 1.3 with rung 7), and our model
 is not available at a real draft anyway.
 
-**The live board** (`draft_board.py`) and the draft-night tools moved to `Live/` on 2026-09-25;
-see `Live/README.md`.
+**The live board** (`draft_board.py`) and the draft-night tools moved to `Live/` on 2026-09-25; since
+2026-10-24 the board is the engine's (`Server/`) and the draft tools are in `Desktop/` (see `Desktop/README.md`).
 
 The same work found one eligibility collision: Carolina's Sebastian Aho was listed C/D, sharing a
 name with the Islanders' defenceman, which put him third on the VOR board. Forward/defence mixes are

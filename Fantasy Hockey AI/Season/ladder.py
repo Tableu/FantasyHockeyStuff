@@ -209,7 +209,7 @@ def consensus_values(data, scoreset, strategy):
     """Each player's season value from the external sources' consensus, published before the
     opener (last season's line where fewer than vor_min_sources project him): the consensus VOR
     board's values, and what the live plan prices skaters' rest of season on -- frozen at the
-    preseason (Live/live.py ros_seed; the `board` rate source)."""
+    preseason (Server/live.py ros_seed; the `board` rate source)."""
     board = data["prior"][scoreset.name][0]
     board.index = board.index.astype(int)
     opener = data["projections"]["game_date"].min()

@@ -540,7 +540,7 @@ def check_team_plans(alternatives=3) -> str:
 
 def check_week_choices() -> str:
     """Pinned moves as weekplan takes them (WeekPlanner.seeded; the plan window's Weekly planner
-    places its picks by the same rules, Live/weekbook.py), on the first day of a season that plans
+    places its picks by the same rules, Server/weekbook.py), on the first day of a season that plans
     later moves, planned without making anything: a pinned move -- the worst free agent playing
     that night, which no bar would pass, with its own drop -- is in every plan, marked; every
     plan's calendar nights (nights_view) are legal lineups on the roster held; the Weekly

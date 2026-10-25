@@ -585,7 +585,7 @@ class LiveRunner:
         decision_points = self._draws(skaters, goalies)
 
         state = self._state(snapshot, day)
-        # What the user chose in the plan window (Live/choices.py). The Weekly planner tab's picks
+        # What the user chose in the plan window (choices.py). The Weekly planner tab's picks
         # are the window's alone -- never planned on here (the user, 2026-10-08).
         self.choices = choices_module.load(self.league.name, self.day)
         week = self.calendar.week_from(day)
@@ -1217,7 +1217,7 @@ class LiveRunner:
         def bench_rows(w):
             """The Weekly planner tab's workbench (weekplan.WeekPlanner.workbench), dates as text and each
             player with his name, positions, status and rate: the window builds the user's week
-            from it (Live/weekbook.py)."""
+            from it (weekbook.py)."""
             return {**{k: w[k] for k in ("room", "moves_left", "costs", "free_today")},
                     "nights": [day_text(n) for n in w["nights"]], "today": day_text(w["today"]),
                     "moves_from": day_text(w["moves_from"]), "roster": [int(q) for q in w["roster"]],
@@ -1314,7 +1314,7 @@ class LiveRunner:
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "options": choices, "week_plan": week_plan, "week_plans": week_plans,
             # On the week's last day, next week's plans too (_next_week_plans); else none.
-            # What the user chose (Live/choices.py) as the plan applied it -- player ids.
+            # What the user chose (choices.py) as the plan applied it -- player ids.
             "choices": self.choices,
             # After the day's first puck, in a league that holds adds until tomorrow
             # (rules.add_effective): the day today's adds take effect; else None.

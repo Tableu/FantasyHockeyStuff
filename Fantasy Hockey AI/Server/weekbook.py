@@ -4,7 +4,7 @@ so it never waits for the plan server to plan again).
 
 The plan server's plan A carries a workbench (Decisions/weekplan.py, WeekPlanner.workbench): the
 week's nights, the roster it starts from, its open spots, the move budget, and the players a pick
-can involve, each with his value on every night he plays. A Week puts your picks (Live/choices.py)
+can involve, each with his value on every night he plays. A Week puts your picks (choices.py)
 into it by the planner's rules for a pinned move (WeekPlanner.seeded) -- in day order, each with
 its own drop or into an open spot, inside the week's move budget -- and solves each night's lineup
 on the roster that leaves (Decisions/slots.py, as the server does). A pick that cannot go in keeps
@@ -61,7 +61,7 @@ class Week:
     # ---------- your picks, put in ----------
 
     def picks(self, chosen: dict) -> list:
-        """Your picks (Live/choices.py) on this week's move days, put in (`place`)."""
+        """Your picks (choices.py) on this week's move days, put in (`place`)."""
         days = set(self.move_days)
         return self.place([(d, m["add"], m["drop"]) for d, c in chosen.get("days", {}).items()
                            if d in days for m in c["moves"]])

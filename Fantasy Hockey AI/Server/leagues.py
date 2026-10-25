@@ -66,7 +66,7 @@ class League:
 
     @property
     def readable(self) -> bool:
-        """Whether the tools can read this league from its platform (Live/platforms/)."""
+        """Whether the tools can read this league from its platform (platforms/)."""
         return self.platform in ("fleaflicker", "espn") and self.league_id is not None
 
 

@@ -3,7 +3,7 @@ server's /choices:
 
     {"days":{"2026-10-08": {"moves": [{"add": id, "drop": id or null}]}},   the Weekly planner tab's picks
                                                     that day, with that drop or (null) into an open
-                                                    spot: your own week (Live/weekbook.py),
+                                                    spot: your own week (weekbook.py),
                                                     never planned on (the user, 2026-10-08)
      "together": true,                              AI Suggestions: the week plans planned after
                                                     today's upgrades (true, the default) or apart,
@@ -15,7 +15,7 @@ Days before the plan's day are ignored and dropped on the next save.
 
 Until 2026-10-07 this was droppable.py: one list for upgrades and rentals alike (the Roster tab).
 Until 2026-10-08 each day also had an OK-to-drop list for the plan's own rentals; the user now
-picks each rental's drop with it (the window builds the week, Live/weekbook.py). Until 2026-10-24
+picks each rental's drop with it (the window builds the week, weekbook.py). Until 2026-10-24
 an "upgrade_drops" list limited who upgrades may drop; removed with the plan window (the user's
 call), an old file's key is dropped on its next save.
 """

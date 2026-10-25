@@ -5,7 +5,7 @@
     Settings/scoring/<league>.json    points per stat
 
 What the settings MEAN is Season/league.py's (RULE_CHOICES and the rest of the rosters schema); how
-a platform spells them is its adapter's `league_settings()` (Live/platforms/). Nothing in a written
+a platform spells them is its adapter's `league_settings()` (platforms/). Nothing in a written
 file is edited by hand: what no platform reports (a backtest's merged first week, a replayed
 season's shorter schedule) is the registry's `overrides` (Settings/leagues/<league>.json), laid
 over the detected settings. What a league does that the schema cannot hold -- a scored stat our

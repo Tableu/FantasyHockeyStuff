@@ -1,40 +1,19 @@
-# Live
+# Desktop
 
-The tools that act on a real league: the preseason draft board, the draft-night assistant and
-window, and the in-season runner that writes each day's plan. Recommend-only throughout -- nothing
-here submits a pick or a move to a platform.
+The draft tools, set aside here when the plan window retired (2026-10-24) and kept for the next
+drafts. Everything else the desktop windows did is the app's now (Server/app/, phone or PC browser).
 
 ```
-draft_board.py      the VOR board from the external sources' consensus (reports/<league>/draft_board_*)
 draft_assistant.py  draft night in the terminal: follows the live draft (Fleaflicker), or --standalone
-draft_gui.py        the same in a window
-live.py             the live runner: the shipped manager on the real league (see its docstring)
-plan_gui.py         the day's plan in a window, from the plan server (Server/server.py): its newest
-                    plan on opening, Full / Quick refresh buttons that run on the server, and the
-                    server's own re-plan ~30 min before each group of games followed as it runs;
-                    Games, Goals and Lines tabs follow tonight's games live (Server/games.py)
-run_live.py         the same pass in the terminal (reports/<league>/plans/plan_{date}_*.md)
-planpass.py         the pass's steps, shared by both: snapshots, tonight, read league, plan, save
-sheets.py           the windows' read-only tksheet tables: row colours by tag, header-click sorting
-leagues.py          the league registry (Settings/leagues/<name>.json): --league on every tool
-choices.py          what you chose in the plan window (reports/<league>/choices.json): who upgrades
-                    may drop, and the Week tab's day by day drop lists and pinned pickups
-platforms/          read-only platform adapters: fleaflicker.py (draft board, rosters + IR, lineup
-                    slots, moves used this week, matchup, league settings), espn.py (settings + scoring,
-                    rosters + IR, lineup slots, matchup, draft; private leagues via cookies),
-                    standalone.py. Platform ids -> PlayerIDs via platforms.PlayerIds
-sync_league_settings.py  detects a league's settings (Settings/rosters + scoring) from its platform;
-                    the adapters' league_settings() translate, Season/league.py says what they mean
-seasonlayer.py      the one bridge into Season/ (league, state, view, schedule, inputs, ...)
-livepaths.py        Live's own locations (never named paths.py -- see seasonlayer.py)
-fixtures/           made-up leagues for exercising the tools before a league has rosters
-reports/<league>/   one folder per league: draft boards, the draft-assistant view, plans (gitignored)
+draft_gui.py        the same in a window (tkinter + tksheet)
+sheets.py           the window's read-only tksheet tables: row colours by tag, header-click sorting
+serverlayer.py      the one bridge into the engine (Server/: leagues, platforms, draft_board, ...) and
+                    through it Season/ -- the flat-module convention, names checked at import
+requirements.txt    the desktop packages (tksheet) on top of the engine's
 ```
 
-Moved out of `Season/` on 2026-09-25: `Season/` is the backtest simulator and never touches a
-platform or the network; this folder does both. It shares `Season/`'s league model through
-`seasonlayer.py` (the flat-module convention: Season/ goes on `sys.path`, and no module here may
-share a name with one in Season/, Decisions/ or Simulation/ -- checked at import).
+The board they show is the engine's `draft_board.py` (Server/), and the latest view is written to
+`Server/reports/<league>/draft_assistant.md`.
 
 ```
 python draft_assistant.py                                   # follow the draft (league beagles)
@@ -43,13 +22,6 @@ python draft_assistant.py --league <an espn league>         # an ESPN draft, onc
 python draft_gui.py --league espn-la --standalone --slot 1  # a live ESPN draft: double-click every pick
 python draft_assistant.py --league espn --slot 10           # an unreadable draft: type picks
 python draft_gui.py                                         # the window
-python plan_gui.py                                          # today's plan from the server at 127.0.0.1:8000
-python plan_gui.py --league espn-la                        # the ESPN league's plan, from the same server
-python plan_gui.py --server http://host:8000                # another server
-python run_live.py --make-fake                              # fixtures/beagles/fake_league.json
-python run_live.py --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --refresh
-python run_live.py --date 2026-09-29 --platform-season 2025          # rehearse on 12090's 2025 rosters
-python run_live.py --window --refresh                       # in season: reads the league from Fleaflicker
 ```
 
 **ESPN drafts cannot be followed live.** ESPN's read API (`mDraftDetail`) lists every pick slot
@@ -58,50 +30,6 @@ the moment it finished), and ESPN re-draws the pick order when the draft starts.
 draft runs `--standalone --slot <your slot once the order is drawn>`, every pick double-clicked;
 the adapter reads the finished draft fine.
 
-**In season on ESPN** (`--league espn-la`) the runner reads rosters, IR, lineup slots and the
-matchup from ESPN, and who is on waivers until when (`Espn.waivers`, so an unrostered player on
-waivers is a claim, not an add), and moves used this week (each team's
-`transactionCounter.matchupAcquisitionTotals`) against this week's limit (`Espn.acquisitions`):
-`matchupAcquisitionLimit`, per day when `matchupLimitPerScoringPeriod` -- espn-la's 1 a day is 6 in
-its 6-day week 1 and 7 in a full week. `acquisitionLimit` is not it (-1 on espn-la). Both count
-in the week a move made now takes effect (`Espn.move_period`, from `transactionScoringPeriod`):
-after the day's first puck that is tomorrow, so a Sunday-night move counts toward next week.
-
-Plans run in the plan server (Server/server.py: when the window asks, and its auto window) or
-when you call run_live.py. Task Scheduler keeps the injury snapshots and the nightly ingest
-running; the server's `--skip-snapshots` uses those instead of taking new ones, and its `--date`,
-`--league-file` and `--now` are the rehearsal options plan_gui.py used to take.
-
-The in-season inputs come from the other folders: tonight's projections from
-`ModelFeatures/build_tonight.py` + `Projections/project_tonight.py` (run by `--refresh`), the
-live injury and lineup reports from `pipeline/snapshot_live.py`.
-
-**Moves are priced on the rest-of-season model** (since 2026-10-03; `live.LiveRunner.skater_ros`):
-each skater's rate per team game is the newest `Projections/reports/ros_projections_<season>_<date>.parquet`
-on or before the plan's day, scored under the league's own scoring. The nightly ingest
-(`pipeline/run_nightly_ingest.cmd`) rebuilds the season's feature table and runs `ros_predict.py`
-after the games. A skater it has not projected (not dressed yet) gets the preseason board scaled
-to the model's level, so one comparison never mixes the two; goalies keep their start share. With
-no projection file the plan prices on the board alone and lists that under its problems. Until
-then the plan priced on the preseason board, frozen; the history-prior model measured level with
-it in the realistic league and, unlike the board, follows the season (Decisions/valuation.py
-`rate`). The Roster and Free agents tabs' Rate and ROS pts are these numbers.
-
-**Blended with the board since 2026-10-06** (`adddrop.rate_source = "blend"` in both live strategies):
-a skater on both gets the board, scaled to the model's level, weighted 7/(7+games he has played this
-season), and the model for the rest (Decisions/valuation.py `BLEND_GAMES`). Jake Sanderson left
-espn-la's opener after 4:29; the model alone cut him from 309 to 164 rest-of-season points and the plan
-rented him away for Cam York. Blended he is 1.82 a team game, not 1.15, and kept. Neutral in the
-realistic league (+0.94 +/- 0.84 pts/wk, 2024-25, 56 drafts); the user's call. Confirmed on 2025-26
-(56 drafts): reverting to the model alone -4.19 +/- 1.01, both halves negative.
-
-## The draft board
-
-**The live board**: `python draft_board.py --season 2026-27 --weights points-league` writes
-`reports/<league>/draft_board_2026-27_<scoring>.csv/.md` -- rank, player, team, positions, value, VOR,
-the position he is measured against, sources, what the value rests on, and Yahoo and ESPN ADP beside
-it for reading whether a target will last to the next pick. 2026-27 goalies have three sources
-(Dailyfaceoff, Dom, Lineup Experts), so a goalie needs two of them or falls back.
 
 ## Draft night: `draft_assistant.py`
 

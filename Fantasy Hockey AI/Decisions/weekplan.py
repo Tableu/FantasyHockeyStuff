@@ -151,7 +151,7 @@ class WeekPlanner:
         pool = self.addable + self.claimable
         self.spots = streaming.spots(view, params, horizon, source, pool, eligibility,
                                      goalies=self.goalies)
-        # The user's picks in the live plan (Live/choices.py, the Weekly planner tab), never in a backtest:
+        # The user's picks in the live plan (Server/choices.py, the Weekly planner tab), never in a backtest:
         # pinned moves [(day, add, drop or None: an open spot)] put in before any the plan picks
         # (`seeded`).
         self.pinned = list(getattr(view, "pinned", None) or [])
@@ -379,7 +379,7 @@ class WeekPlanner:
     def seeded(self) -> tuple:
         """The user's pinned moves put in first, in day order: (moves, spent, open spots). Each
         takes its own drop, or none -- an open roster spot; no bar test -- the user chose it.
-        The plan window places the user's own picks by these rules (Live/weekbook.py).
+        The plan window places the user's own picks by these rules (Server/weekbook.py).
         A free agent on waivers is a claim made today, paying from when he clears, unless he
         clears by the pinned day, when he is an add then. A pin that cannot go in -- not a free
         agent, no drop that keeps the lineup fieldable, or over the budget -- is skipped and
@@ -604,7 +604,7 @@ class WeekPlanner:
                 continue
             # A claim's drop may be a player the plan only picks up before the claim clears (a
             # rental chain). The platform wants a drop you hold when the claim is entered, so the
-            # live plan names who holds that spot today (Live/live.py); a pending claim's drop can
+            # live plan names who holds that spot today (Server/live.py); a pending claim's drop can
             # be changed before it processes. Requiring a drop held today, and never taking back a
             # player dropped the same day, cost the shipped system 1.74 +/- 0.65 pts/wk in the
             # realistic league (2024-25, 64 drafts, 2026-09-29) -- neither is enforced.
@@ -740,7 +740,7 @@ class WeekPlanner:
         return out
 
     def workbench(self, recommended=(), shown=150) -> dict:
-        """What the plan window builds the user's week from as they pick (Live/weekbook.py), with
+        """What the plan window builds the user's week from as they pick (Server/weekbook.py), with
         no planning: the nights, the roster the week starts from, its open spots, the move budget
         (`fits`'s: moves left, each day's reserve, the costs) and the players a pick can involve --
         the roster, the `shown` best free agents each night by points, and the `recommended` ones

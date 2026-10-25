@@ -7,7 +7,7 @@ rem      P(start) reads as its in-season history (Projections/project_tonight.py
 rem   3. ModelFeatures: the skaters' season lines so far, for the plan window's stats
 rem   4. ModelFeatures: players' draft positions and career lines (the rookie build's prospect
 rem      features) and the season's feature table so far, then Projections: every skater's
-rem      rest-of-season projection from it, which the plan prices moves on (Live/live.py skater_ros)
+rem      rest-of-season projection from it, which the plan prices moves on (Server/live.py skater_ros)
 cd /d "%~dp0"
 if not exist logs\live mkdir logs\live
 set PYTHONIOENCODING=utf-8

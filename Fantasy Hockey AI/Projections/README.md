@@ -180,7 +180,7 @@ for goals per 60 and from 49% to 17% for assists, while ice time and availabilit
 within a few weeks. In the realistic league the history-prior model is level with the frozen
 consensus (+3.4 +/- 1.1 pts/wk on 2024-25 at 64 drafts, -0.0 +/- 1.5 on 2025-26) -- the 2024-25
 and 2025-26 holdouts and the 2026-27 deployment build are built with it, and the live plan prices
-moves on it (Live/live.py `skater_ros`). The position-prior builds are kept as
+moves on it (Server/live.py `skater_ros`). The position-prior builds are kept as
 `ros_predictions_season_<season>_position.parquet` and `models/<season>/ros_season_position`.
 
 ### Aging, and a rookie build (2026-10-03)
