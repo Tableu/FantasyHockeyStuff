@@ -16,7 +16,7 @@ defencemen and bottom-six grinders well above their standard-league value.
 draft.vor_values): the external sources' consensus (`consensus_board`, over the preseason sheets
 in the database) -- the only values a real draft has, since our own model's opening-week rows
 (`preseason_values`, kept as a backtest reference) need the season's own games. The sheets were
-published before the season, so they are clean for a 2025-26 replay; `Season/inputs.
+published before the season, so they are clean for a 2025-26 replay; `Core/inputs.
 load_external_projections` refuses any that were not.
 
 **Positional need is enforced, not hoped for.** Best-available alone will happily leave a team with

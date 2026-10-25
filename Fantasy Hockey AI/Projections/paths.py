@@ -75,7 +75,7 @@ def predictions(variant: str, season: str, tag: str | None = None) -> Path:
 
     Keyed so that a build holding out 2024-25 cannot overwrite the 2025-26 one, and so that a
     reader asking for one season can never be handed the other. The unkeyed name used to be the
-    only name, and `Season/inputs.load_projections("2024-25")` quietly returned 2025-26.
+    only name, and `Core/inputs.load_projections("2024-25")` quietly returned 2025-26.
     """
     suffix = f"_{tag}" if tag else ""       # an ablation build (--tag) never overwrites the real one
     return REPORTS_DIR / f"predictions_{variant}_{season}{suffix}.parquet"

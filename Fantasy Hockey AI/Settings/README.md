@@ -127,7 +127,7 @@ python ladder.py --strategy my-strategy          # a name here, or a path
 python ladder.py --margin 0.5 --streams 3        # single values, over the file's
 ```
 
-`Season/decisionlayer.py` (`load_strategy`) reads the file; `Decisions/strategy.py` parses it into
+`Core/decisionlayer.py` (`load_strategy`) reads the file; `Decisions/strategy.py` parses it into
 a `Strategy` and `managers.build_field` hands it to every seat. **Every key is required** and
 unknown keys are refused: a value the file forgets is an error, never a default quietly inherited
 from code. Write `"inf"` for an unbounded number and `"season"` for a horizon of the rest of the

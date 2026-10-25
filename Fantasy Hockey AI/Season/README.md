@@ -12,29 +12,39 @@ Season/          a won week                            "does using any of it bea
 
 Nothing before this folder asks the last question. That is the gap this closes.
 
+**The league model is in `Core/` since 2026-10-24** (paths, league, schedule, inputs, state, view,
+odds, simlayer, decisionlayer): the live plan in `Server/` runs on it too, without this folder.
+Season/ is the harness that measures with it; every module here imports `corelayer.py` first,
+which puts Core/ on `sys.path` (see `Core/README.md`). File names below that moved say so.
+
 **It opens no database.** Like `Projections/` and `Simulation/`, everything arrives by path. It is
 the first folder that imports *code* from a sibling — `Simulation/`'s sampler, copula and scoring —
-because drawing a night is a computation rather than a file. That dependency lives in `simlayer.py`
+because drawing a night is a computation rather than a file. That dependency lives in `Core/simlayer.py`
 and nowhere else, and it is narrower than it looks: `Simulation/simulate.py` and `correlations.py`
-**cannot** be imported at all, because `Season/paths.py` shadows `Simulation/paths.py` under the
+**cannot** be imported at all, because `Core/paths.py` shadows `Simulation/paths.py` under the
 flat-module convention both folders use. The two fitted JSONs they would have supplied are read by
 path instead, which is how every other layer here consumes the one below it.
 
 **It measures; `Decisions/` chooses.** Every policy the ladder seats -- the four rungs, the lineup
 solver, the draft rule, rung 3's box-score estimator -- lives in the sibling `Decisions/` folder so
-a live runner can use the same code a backtest scored. It is reached through `decisionlayer.py`,
-which refuses to start if a module name in `Decisions/` also exists here or in `Simulation/`.
+a live runner can use the same code a backtest scored. It is reached through `Core/decisionlayer.py`,
+which refuses to start if a module name in `Decisions/` also exists in Core/, here or in `Simulation/`.
 
 ```
-paths.py      where every input lives
-league.py     the format as data: slots, bench, IR, the move cap, the playoff shape
-schedule.py   game days and Mon-Sun matchup weeks, derived from the schedule, never assumed
-inputs.py     the loaders, and the provenance assertion that makes the measurement honest
-state.py      rosters, IR, the free-agent pool, waivers, the weekly move counter
-view.py       SlateView -- the only thing a manager sees
+Core/ (shared with the live plan; Core/README.md):
+  paths.py      where every input lives
+  league.py     the format as data: slots, bench, IR, the move cap, the playoff shape
+  schedule.py   game days and Mon-Sun matchup weeks, derived from the schedule, never assumed
+  inputs.py     the loaders, the provenance assertion that makes the measurement honest, goalie_line
+  state.py      rosters, IR, the free-agent pool, waivers, the weekly move counter
+  view.py       SlateView -- the only thing a manager sees
+  odds.py       reading a saved boom/bust run (boom_bust.py writes it)
+  simlayer.py   the bridge to Simulation/, and the module-name collision it works around
+  decisionlayer.py  the bridge to Decisions/ (managers, slots, draft, estimators, valuation, adddrop)
+
+Season/:
+corelayer.py  puts Core/ on sys.path (front() for the process pools); checks names against it
 draftroom.py  the draft as an event: seat order, the snake; the pick itself is Decisions/draft.py
-simlayer.py   the bridge to Simulation/, and the module-name collision it works around
-decisionlayer.py  the bridge to Decisions/ (managers, slots, draft, estimators, valuation, adddrop)
 engine.py     the day loop: lock, resolve, accumulate by week
 ladder.py     CLI                                          -> reports/ladder_<season>.json
 report.py     the results as prose                         -> docs/ladder-<config>.md

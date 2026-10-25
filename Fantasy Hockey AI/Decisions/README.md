@@ -20,10 +20,11 @@ here. The split exists so a live runner (section 10) can call the same code a ba
 - **No `paths.py`, no file reads, no database.** Every input arrives as an argument: a view of the
   slate, a league config, a scoreset, tables. What a policy may see is decided by whoever builds
   its view, not here.
-- **Imports nothing from `Season/`.** Season reaches this folder through `Season/decisionlayer.py`,
-  which puts it on `sys.path` and refuses to start if a module name here also exists in `Season/`
-  or `Simulation/`. Under the flat-module convention a duplicate name silently shadows the other
-  one — the same way `Season/paths.py` shadows `Simulation/paths.py`.
+- **Imports nothing from `Season/` or `Core/`.** Both the backtests and the live plan reach this
+  folder through `Core/decisionlayer.py` (Season/'s until 2026-10-24), which puts it on `sys.path`
+  and refuses to start if a module name here also exists in `Core/`, `Season/` or `Simulation/`.
+  Under the flat-module convention a duplicate name silently shadows the other one — the same way
+  `Core/paths.py` shadows `Simulation/paths.py`.
 
 ## Files
 
@@ -62,7 +63,7 @@ The add/drop rule's results, and the sensitivity reading behind its defaults, ar
 
 ## The interface a manager is handed
 
-A manager gets one view per team per night (`Season/view.py`'s `SlateView` in the backtest), and
+A manager gets one view per team per night (`Core/view.py`'s `SlateView`, in the backtest and the live plan alike), and
 reads only these:
 
 | Group | Members |

@@ -76,16 +76,19 @@ sync_league_settings.py  detects a league's settings (Settings/rosters + scoring
                     daily in the server; --check translates the saved answers in fixtures/settings/
 platforms/          read-only platform adapters: fleaflicker.py, espn.py (private leagues via
                     cookies), standalone.py. Platform ids -> PlayerIDs via platforms.PlayerIds
-seasonlayer.py      the one bridge into Season/ (league, state, view, schedule, inputs, ...)
-livepaths.py        this folder's own locations (never named paths.py -- see seasonlayer.py)
+corelayer.py        the one bridge into Core/ (league, state, view, schedule, inputs, odds, ...);
+                    refuses to start with Season/ (the backtest harness) on sys.path
+livepaths.py        this folder's own locations (never named paths.py -- see corelayer.py)
 fixtures/           made-up leagues and saved platform answers
 reports/<league>/   one folder per league: plans, choices, the last read, draft boards (gitignored)
 ```
 
-Recommend-only throughout -- nothing submits a pick or a move to a platform. `Season/` is the
-backtest simulator and never touches a platform or the network; the engine shares its league
-model through `seasonlayer.py` (the flat-module convention: Season/ goes on `sys.path`, and no
-module here may share a name with one in Season/, Decisions/ or Simulation/ -- checked at import).
+Recommend-only throughout -- nothing submits a pick or a move to a platform. The league model
+the backtests score with is `Core/` (since 2026-10-24; it was part of `Season/`), and the engine
+runs on it through `corelayer.py` (the flat-module convention: Core/ goes on `sys.path`, and no
+module here may share a name with one in Core/, Decisions/ or Simulation/ -- checked at import).
+`Season/`, the backtest harness, is never on the server's path; it never touches a platform or
+the network either.
 
 **On ESPN** (`espn-la`) the runner reads rosters, IR, lineup slots and the matchup from ESPN, and
 who is on waivers until when (`Espn.waivers`, so an unrostered player on waivers is a claim, not
