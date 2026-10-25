@@ -41,7 +41,7 @@ import inputs
 import league as league_module
 import paths
 import simlayer
-import boom_bust
+import odds as odds_module
 from decisionlayer import draft as draft_module
 from decisionlayer import load_strategy
 
@@ -295,7 +295,7 @@ def boom_bust_odds(season, scoreset, config):
         weights = json.loads(paths.scoreset(name).read_text())
         if (_same_weights(weights.get("skaters", {}), scoreset.skaters)
                 and _same_weights(weights.get("goalies", {}), scoreset.goalies)):
-            odds, scoring = boom_bust.load_odds(season, name), name
+            odds, scoring = odds_module.load_odds(season, name), name
             break
     if odds is None:
         log.info("no boom/bust run for %s under %s's weights -- run Season/boom_bust.py "

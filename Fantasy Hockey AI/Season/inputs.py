@@ -357,6 +357,33 @@ def load_goalie_history(season: str) -> pd.DataFrame:
     return table
 
 
+# The league-average goalie line, in fantasy points per start. Measured, not assumed: this is what
+# `build_goalie_starts.py` reports for the season being replayed, and the standing treatment is
+# `P(start) x this` because per-start goalie quality is not projectable (R2 -0.8%).
+# The league-average goalie line is NOT a constant: it is a property of the scoring file. Under
+# points-league a start is worth 4.39 with a spread of 4.03; a banger league prices saves at 0.20
+# instead of 0.25 and pays nothing for a loss, which moves both. Hard-coding either number makes
+# every goalie decision wrong in exactly the formats the ladder is run against to find out whether
+# a verdict travels. So it is measured from the same export the harness resolves nights with,
+# under whichever scoreset is in play.
+#
+# The spread matters out of proportion to the mean, which is why it is carried at all: goalies are
+# not sampled until phase 3, so rung 4 gets their variance in closed form from the
+# Bernoulli-times-line mixture, Var = p(sigma^2 + mu^2) - (p mu)^2. A skater floors at 0.00 and a
+# pulled goalie does not.
+#
+# Moved from engine.py (2026-10-24) so the live plan reads it without the day loop.
+def goalie_line(goalie_starts, scoreset):
+    """(mean, sd) of one start's fantasy points under this scoring, from the realized export.
+
+    Pass the seasons BEFORE the one replayed (`data["goalie_history"]`, `load_goalie_history`). It
+    used to be the replayed season's own starts -- one league-level number, but a leak all the
+    same."""
+    started = goalie_starts[goalie_starts["is_starter"].astype(bool)]
+    points = scoreset.score_columns(started, side="goalies")
+    return float(points.mean()), float(points.std())
+
+
 def load_season(season: str, variant: str = "A", ros_tag: str | None = None) -> dict:
     """Everything a run needs, loaded once and shared across every manager and replication."""
     return {

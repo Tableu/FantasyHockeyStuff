@@ -40,7 +40,6 @@ import seasonlayer  # noqa: F401 -- puts Season/ on sys.path; see seasonlayer.py
 import livepaths
 import draft_board
 import choices as choices_module
-import engine as engine_module
 import inputs
 import league as league_module
 import paths
@@ -490,7 +489,7 @@ class LiveRunner:
         self.game_days = set(pd.to_datetime(games["game_date"]).dt.date)
 
         history = inputs.load_goalie_history(self.season)
-        self.goalie_line_mean, self.goalie_line_sd = engine_module.goalie_line(history, self.scoreset)
+        self.goalie_line_mean, self.goalie_line_sd = inputs.goalie_line(history, self.scoreset)
 
         # The board's season totals as a rate per team game: the rest-of-season seed (skaters, as
         # the engine's `ros` is) and the per-game seed for everyone nothing has projected yet.

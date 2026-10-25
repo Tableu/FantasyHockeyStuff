@@ -8,8 +8,8 @@ Season/'s league model rather than copying it:
     state       rosters, the move budget, waivers, IR legality
     view        what a manager may see
     schedule    the calendar and matchup weeks
-    engine      goalie_line only (the league-average goalie start)
-    inputs      season inputs (external projections, actuals, goalie history)
+    inputs      season inputs (external projections, actuals, goalie history, the goalie line)
+    odds        a saved boom/bust run, read for the draft board
     paths       Season/'s paths -- shared data locations (FEATURES_DIR, schedule(), players() ...)
     simlayer    the bridge to Simulation/ (scoring files, the sampler)
     decisionlayer  the bridge to Decisions/ (managers, draft, slots, strategy ...)
