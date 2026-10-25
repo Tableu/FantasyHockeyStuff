@@ -19,7 +19,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"  # the server's API, from this PC only (Phase 1.5)
     working_dir: "/app/Fantasy Hockey AI/Server"
-    # The plan server (plan_gui.py and the app show it). --jobs: it runs the daily jobs (scheduled.py)
+    # The plan server (the app shows it). --jobs: it runs the daily jobs (scheduled.py)
     # in place of the Windows tasks; the nightly ends by copying the database back into the PC's.
     command: ["python", "server.py", "--host", "0.0.0.0", "--jobs"]
     restart: unless-stopped    # back up when Docker Desktop starts, until `docker compose down`

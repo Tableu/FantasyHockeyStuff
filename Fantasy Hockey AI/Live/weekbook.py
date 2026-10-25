@@ -1,4 +1,4 @@
-"""Your week in the plan window, built from your picks as you make them: the Weekly planner tab's calendar,
+"""Your week in the app, built from your picks as you make them: the Weekly planner tab's calendar,
 slot picker and drop list (the user, 2026-10-08: the calendar is a tool for making your own plan,
 so it never waits for the plan server to plan again).
 
@@ -8,7 +8,7 @@ can involve, each with his value on every night he plays. A Week puts your picks
 into it by the planner's rules for a pinned move (WeekPlanner.seeded) -- in day order, each with
 its own drop or into an open spot, inside the week's move budget -- and solves each night's lineup
 on the roster that leaves (Decisions/slots.py, as the server does). A pick that cannot go in keeps
-its reason (`problem`) and changes nothing. Your picks are the window's alone: the server never
+its reason (`problem`) and changes nothing. Your picks are yours alone: the server never
 plans on them -- the AI Suggestions (today's moves, the plans) are its own (the user, 2026-10-08).
 
 Days are ISO text ("2026-10-08"); a claim clearing during a day carries its time
@@ -22,7 +22,7 @@ from decisionlayer import slots as slots_module
 def recommended(plans, day) -> dict:
     """{player id: (the plans that pick him on `day` -- "A", or "B alt" for a slot's other
     option --, his best edge, the plan's drop)}: the slot picker lists these first. `plans`: the
-    week plans of the week shown. (Moved from plan_gui, 2026-10-10, for the app's server too.)"""
+    week plans of the week shown. (Moved from plan_gui, 2026-10-10, for the app's server.)"""
     out = {}
     for plan in plans:
         for m in plan.get("moves", []):

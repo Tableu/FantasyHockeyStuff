@@ -1,9 +1,9 @@
-"""What the user chose in the plan window, per league -- reports/<league>/choices.json, through the
+"""What the user chose in the app, per league -- reports/<league>/choices.json, through the
 server's /choices:
 
     {"days":{"2026-10-08": {"moves": [{"add": id, "drop": id or null}]}},   the Weekly planner tab's picks
                                                     that day, with that drop or (null) into an open
-                                                    spot: the window's own week (Live/weekbook.py),
+                                                    spot: your own week (Live/weekbook.py),
                                                     never planned on (the user, 2026-10-08)
      "together": true,                              AI Suggestions: the week plans planned after
                                                     today's upgrades (true, the default) or apart,
@@ -67,7 +67,7 @@ def together(chosen: dict) -> bool:
     return chosen.get("together", True)
 
 
-# ---------- your picks, edited (the plan window and the app's server) ----------
+# ---------- your picks, edited (the app's server) ----------
 # Moved from plan_gui.PlanWindow (2026-10-10) so the phone app's server edits picks the same way.
 
 def day_choice(chosen: dict, day: str) -> dict:

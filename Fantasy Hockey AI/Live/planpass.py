@@ -1,5 +1,5 @@
-"""One plan pass, as steps run_live.py (the terminal) and the plan server (Server/server.py,
-which plan_gui.py shows) call. Nothing here is scheduled -- a pass runs when one of them asks.
+"""One plan pass, as steps the plan server (Server/server.py, which the app shows) calls. Nothing
+here is scheduled -- a pass runs when the server asks.
 
     snapshots(kinds)   fresh injury / line-chart / starting-goalie reports into the Live schema
                        (pipeline/snapshot_live.py -- lines and goalies run only from here; injuries
@@ -29,6 +29,12 @@ is a few hundred MB that a long-running process would keep after use (2026-10-02
 about 480 MiB with two leagues planned, of which under 1 MB per league was anything it kept); a
 child returns it at exit, so the server's memory no longer grows with the leagues it plans. Building
 a league's board and sampler takes about half a second, so nothing is kept between refreshes.
+
+Before a league has rosters, a made-up one to rehearse on (every seat drafting the consensus board):
+
+    python planpass.py --league beagles --date 2026-09-29 --make-fake   # -> fixtures/beagles/fake_league.json
+
+and a rehearsal server plans on it (server.py --league-file ... --no-auto).
 """
 
 import argparse
@@ -410,12 +416,33 @@ class Planner:
         self.last["projections"] = dt.datetime.now()
 
 
+def make_fake(league_name: str, day: dt.date, me: int, opponent: int, seed: int) -> Path:
+    """A made-up league (every seat drafting the consensus board) to rehearse on before a league has
+    rosters: fixtures/<league>/fake_league.json. Moved from run_live.py (2026-10-24)."""
+    import leagues as registry
+
+    league = registry.load(league_name)
+    runner = live.LiveRunner(day, league)
+    fake = live.make_fake_league(runner.board, runner.config, runner.eligibility, me, opponent, seed,
+                                 my_name=league.team_name or "My team")
+    path = livepaths.ensure(livepaths.FIXTURES_DIR / league.name) / "fake_league.json"
+    path.write_text(json.dumps(fake, indent=1), encoding="utf-8")
+    print(f"wrote {path} ({len(fake['teams'])} teams x {len(fake['teams'][0]['roster'])} players)")
+    return path
+
+
 def main():
-    """The planning child (plan_in_child): progress and result as tagged lines on stdout."""
+    """The planning child (plan_in_child): progress and result as tagged lines on stdout. Or, with
+    --make-fake, the first --league's made-up league (make_fake) and nothing else."""
     parser = argparse.ArgumentParser(description="Plan leagues: each one's read, plan and save")
     parser.add_argument("--league", action="append", required=True)
     parser.add_argument("--date", required=True)
-    parser.add_argument("--now", required=True, help="UTC moment for the per-game lock")
+    parser.add_argument("--now", help="UTC moment for the per-game lock (required to plan)")
+    parser.add_argument("--make-fake", action="store_true",
+                        help="write a made-up league to fixtures/<league>/fake_league.json, no plan")
+    parser.add_argument("--me", type=int, default=9, help="--make-fake: my seat (0-based; draft slot 10 = 9)")
+    parser.add_argument("--opponent", type=int, default=0, help="--make-fake: this week's opponent seat")
+    parser.add_argument("--seed", type=int, default=0, help="--make-fake: the draft's seed")
     parser.add_argument("--league-file", default=None)
     parser.add_argument("--platform-season", type=int, default=None)
     parser.add_argument("--reuse-read", action="store_true", help="plan on today's kept league read")
@@ -424,6 +451,11 @@ def main():
     parser.add_argument("--read-only", action="store_true", help="read and keep each league, no plan")
     parser.add_argument("--no-keep-read", action="store_true", help="plan on a fresh read without keeping it")
     args = parser.parse_args()
+    if args.make_fake:
+        make_fake(args.league[0], dt.date.fromisoformat(args.date), args.me, args.opponent, args.seed)
+        return
+    if not args.now:
+        parser.error("--now is required to plan")
     result = plan_leagues(args.league, dt.date.fromisoformat(args.date), dt.datetime.fromisoformat(args.now),
                           args.league_file, args.platform_season,
                           echo=lambda text: print(CHILD_ECHO + str(text), flush=True),

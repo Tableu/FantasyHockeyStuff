@@ -1,6 +1,5 @@
 """The phone app's Weekly planner (plan phone-app-pwa.md, P3): your week, built from your picks on
-the newest plan's plan A workbench, as the window's Weekly planner tab (Live/plan_gui.py) --
-weekbook.Week puts the picks in and solves each night's lineup; choices.py edits them. Your picks
+the newest plan's plan A workbench -- weekbook.Week puts the picks in and solves each night's lineup; choices.py edits them. Your picks
 are yours alone: the server never plans on them (the user, 2026-10-08).
 
     Book(plan, chosen, week, slot_order, accepts)    the week shown, its picks put in

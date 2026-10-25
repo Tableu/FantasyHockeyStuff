@@ -1,7 +1,7 @@
 """The phone app's AI suggestions screen (plan phone-app-pwa.md, P2): the newest plan's three
-sections as the window's AI Suggestions tab shows them (Live/plan_gui.py) -- today's moves, the
-upgrades, and the week plans with their slots and options -- each option marked when you picked
-him into your week (Live/choices.py). No "OK to drop" list or Re-plan here (the user, 2026-10-10).
+sections -- today's moves, the upgrades, and the week plans with their slots and options -- each
+option marked when you picked him into your week (Live/choices.py). No "OK to drop" list or
+Re-plan here (the user, 2026-10-10; the list itself removed 2026-10-24).
 The week plans are planned after today's upgrades or apart from them, as you chose (`together`).
 
     suggestions_view(plan, chosen, week)    {day, platform, today, upgrades, together, week: {...}}

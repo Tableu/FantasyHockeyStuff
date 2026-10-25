@@ -1,7 +1,6 @@
 """The phone app's Roster screen (plan phone-app-pwa.md, P1): the newest plan's roster as it stands
 now -- the lineup (the plan's lineup_now), the bench and IR -- each player with tonight's projection,
-his season so far in the league's scoring, and the plan's word on him. The window's Tonight table
-shows the same rows (Live/plan_gui.py, PlanWindow.show). Live points come apart from these, from
+his season so far in the league's scoring, and the plan's word on him. Live points come apart from these, from
 games.Games.tonight: they change every 20 s, these only with a new plan.
 
     roster_view(plan, scoreset, slot_rows, photo)

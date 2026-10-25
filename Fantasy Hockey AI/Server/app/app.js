@@ -23,7 +23,7 @@ const MODE_LABELS = { full: 'Full', quick: 'Quick', news: 'News', league: 'Leagu
   nightly: 'Nightly import', player_teams: 'Player teams', injuries: 'Injury listing' };
 const STALE_MIN = 120;          // a step older than this shows amber
 const PULL_PX = 70;             // how far down a pull at the top of a screen must go to refresh
-const STATUS_EVERY_MS = 60000;  // follows the server's auto refreshes, as plan_gui does
+const STATUS_EVERY_MS = 60000;  // follows the server's auto refreshes
 const JOB_EVERY_MS = 1000;
 
 const store = {

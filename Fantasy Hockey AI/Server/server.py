@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """The phone app's server (Fantasy Hockey Phone App Plan, Phase 1.5): the plan refreshes behind a
-small HTTP API, which the plan window (Live/plan_gui.py) shows. Every active league in
+small HTTP API, which the app (app/) shows. Every active league in
 Settings/leagues/ (beagles, espn-la), one refresh at a time.
 
     python server.py                                   # the active leagues, today, 127.0.0.1:8000
@@ -35,10 +35,10 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                line and fantasy points; your lineup's live total (games.py)
     GET  /roster               the app's Roster screen from the newest plan: lineup as it stands,
                                bench, IR, tonight's projection, season in the league's scoring (roster.py)
-    GET  /choices              what you chose in the plan window (Live/choices.py): {league,
+    GET  /choices              what you chose in the app (Live/choices.py): {league,
                                choices: {days: {date: {moves}}, together}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
-                               until a refresh (or a 'plan') -- the window says so
+                               until a refresh (or a 'plan')
     POST /choices/together {on, week}   the week plans planned after today's upgrades (true) or apart
                                (false); saved (choices.py), re-planned once the app asks for a 'plan'
     GET  /suggestions?week=    the app's AI suggestions from the newest plan: today's moves, the
@@ -68,7 +68,7 @@ others' plans. The auto window runs here: a refresh about 30 minutes before each
 per group -- Full when the line charts are none today or over 4 h old, else Quick -- for every league, and one more once today's last game has started -- the plan is then
 tomorrow's (moves, lineup and projections), since tonight has no lineup left to set. The live games' NHL feeds are fetched once for all leagues; each league
 sees them with its own rosters and scoring. Every call but /login, /logout and the app's files needs
-a session (the app's password) or plan_gui's key (auth.py; `python auth.py set-password` first).
+a session (the app's password; auth.py, `python auth.py set-password` first).
 """
 
 import argparse
@@ -332,7 +332,7 @@ class AppFiles(StaticFiles):
 class Refresh(BaseModel):
     mode: str = "quick"
     # Which leagues: "league" the ?league= one, "all" every league served. Default: "all" for
-    # full and quick (plan_gui's buttons, as before), "league" for news, league and plan.
+    # full and quick, "league" for news, league and plan.
     scope: str | None = None
 
 

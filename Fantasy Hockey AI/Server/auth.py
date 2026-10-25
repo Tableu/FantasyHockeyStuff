@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """The plan server's login (Phone App Remote Access plan): the server is reachable from the internet
-through the tunnel, so every call but the app's own files needs a session (the phone, by password)
-or the key (plan_gui on this PC). Everything lives under "plan-server" in Settings/secrets.json
-(gitignored): the password's scrypt hash, the secret that signs sessions, the key.
+through the tunnel, so every call but the app's own files needs a session (by password). Everything
+lives under "plan-server" in Settings/secrets.json (gitignored): the password's scrypt hash and the
+secret that signs sessions. (Until 2026-10-24 a key let plan_gui in too; it went with the window.)
 
     python auth.py set-password                 # asks twice; signs every phone out
     python auth.py set-password --stdin         # the password on standard input (scripts, tests)
@@ -62,18 +62,16 @@ def load_entry(path: Path | None = None) -> dict | None:
     if not path.exists():
         return None
     entry = json.loads(path.read_text(encoding="utf-8")).get(ENTRY)
-    if not entry or not all(entry.get(k) for k in ("password_hash", "session_secret", "api_key")):
+    if not entry or not all(entry.get(k) for k in ("password_hash", "session_secret")):
         return None
     return entry
 
 
 def set_password(password: str, path: Path | None = None) -> dict:
-    """A new hash and signing secret (every session ends); the key stays, plan_gui keeps working."""
+    """A new hash and signing secret (every session ends)."""
     path = path or secrets_path()
     data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    old = data.get(ENTRY) or {}
-    data[ENTRY] = {"password_hash": hash_password(password), "session_secret": secrets.token_hex(32),
-                   "api_key": old.get("api_key") or secrets.token_urlsafe(32)}
+    data[ENTRY] = {"password_hash": hash_password(password), "session_secret": secrets.token_hex(32)}
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return data[ENTRY]
 
@@ -112,12 +110,6 @@ class Login:
         left = int(expires) - time.time()
         return left if left > 0 else None
 
-    def key_ok(self, header: str | None) -> bool:
-        entry = self.settings()
-        if not header or entry is None or not header.startswith("Bearer "):
-            return False
-        return hmac.compare_digest(header[len("Bearer "):].encode("utf-8"), entry["api_key"].encode("utf-8"))
-
     def wait_left(self, address: str) -> int:
         """Seconds this address must wait before another try (0: it may try now)."""
         now = time.time()
@@ -135,7 +127,7 @@ class Login:
 
 def install(app, login: Login):
     """The login on a FastAPI app: POST /login and /logout, and every other call but the app's
-    files refused without a session or the key."""
+    files refused without a session."""
     from fastapi import HTTPException, Request
     from fastapi.responses import JSONResponse, Response
     from pydantic import BaseModel
@@ -158,8 +150,6 @@ def install(app, login: Login):
             return await call_next(request)
         if login.settings() is None:
             return JSONResponse({"detail": "no login set on the server: python auth.py set-password"}, status_code=503)
-        if login.key_ok(request.headers.get("authorization")):
-            return await call_next(request)
         left = login.session_left(request.cookies.get(COOKIE))
         if left is None:
             return JSONResponse({"detail": "log in"}, status_code=401)
@@ -203,7 +193,7 @@ def main():
     if len(password) < 8:
         raise SystemExit("at least 8 characters; nothing changed")
     set_password(password)
-    print(f"password set in {secrets_path()} ({ENTRY}): every phone logs in again; plan_gui's key unchanged")
+    print(f"password set in {secrets_path()} ({ENTRY}): everyone logs in again")
 
 
 if __name__ == "__main__":
