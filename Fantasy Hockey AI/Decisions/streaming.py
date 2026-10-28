@@ -85,6 +85,8 @@ class StreamParams:
     keep_upgrades: bool         # a rental never drops a player today's upgrades added (the
                                 # orchestrator's `kept_today`): espn-la 2026-10-24 added Coronato
                                 # for Greaves, then rented Dostal for Coronato
+    replacement_addable: bool   # a drop's replacement is a free agent who can be added today: not
+                                # on waivers, not injured (`replacement_pool`)
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -106,7 +108,8 @@ class StreamParams:
                 f"{' prune' if self.mode == 'week' and self.prune else ''}"
                 f"{f' rs={self.restarts}' if self.mode == 'week' and self.restarts else ''}"
                 f"{' rep=exp' if self.replacement_depth == 'expected' else ''}"
-                f"{' keep' if self.keep_upgrades else ''}")
+                f"{' keep' if self.keep_upgrades else ''}"
+                f"{' radd' if self.replacement_addable else ''}")
 
 
 # How a manager streams: "daily" decides each day's rentals on their own, against a bar that falls
@@ -208,6 +211,14 @@ class Replacement:
         return frozenset(used)
 
 
+def replacement_pool(view, params, pool) -> list:
+    """The free agents a drop is priced against. With `replacement_addable`, only those who can be
+    added today: espn-la 2026-10-27 rented away Fox against Dobson, on waivers and never claimed."""
+    if not params.replacement_addable:
+        return pool
+    return [p for p in pool if not view.on_waivers(p) and p not in view.injured]
+
+
 def roster_rank(view, player_id, source):
     """His rank on the roster by rest-of-season value (1 = the best), or None for no player: the
     backtest's record of how often a rental drops a regular (Season/engine.py). Unknown players
@@ -243,8 +254,8 @@ def spots(view, params, horizon, source, pool, eligibility, goalies=False) -> li
     # rest of season), and Hanifin below Letang on seven straight days with a HIGHER rate. A short
     # schedule gap is what a rental exploits, not what makes a player replaceable.
     horizon = None
-    replacement = Replacement(view, pool, horizon, source, eligibility, after_week=False,
-                              depth=params.replacement_depth)
+    replacement = Replacement(view, replacement_pool(view, params, pool), horizon, source,
+                              eligibility, after_week=False, depth=params.replacement_depth)
     scored = []
     for p in view.roster:
         if (is_goalie(eligibility, p) and not goalies) or not valuation.known(view, p, source):
@@ -298,8 +309,8 @@ def run(view, params: StreamParams, horizon, source, slot_order, accepts, fielda
 
         rates = {p: valuation.rate(view, p, source) for p in roster + candidates}
         nights = valuation.RosterNights(view, roster, rates, 0, slot_order, eligibility, accepts)
-        after = Replacement(view, pool, horizon, source, eligibility, after_week=True,
-                            depth=params.replacement_depth)
+        after = Replacement(view, replacement_pool(view, params, pool), horizon, source,
+                            eligibility, after_week=True, depth=params.replacement_depth)
         # Today's earlier drops of the roster's own players have used up the top of the pool.
         taken = after.claimed([d["outgoing"] for d in done
                                if d["outgoing"] is not None and not d["outgoing_picked_up"]])

@@ -170,7 +170,8 @@ class WeekPlanner:
         # `kept_today`); the user's own pick may still drop one (`seeded`, own_drop).
         kept = getattr(view, "kept_today", frozenset())
         self.spots = [p for p in self.spots if p not in kept]
-        self.after = streaming.Replacement(view, pool, horizon, source, eligibility, after_week=True,
+        self.after = streaming.Replacement(view, streaming.replacement_pool(view, params, pool),
+                                           horizon, source, eligibility, after_week=True,
                                            depth=params.replacement_depth)
         self.own = set(self.roster)
         self.horizon = horizon

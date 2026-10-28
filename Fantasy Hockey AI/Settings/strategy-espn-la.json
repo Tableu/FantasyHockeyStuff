@@ -33,8 +33,9 @@
     "min_gain": 0.0,
     "prune": true,
     "restarts": 3,
-    "replacement_depth": "best",
-    "keep_upgrades": true
+    "replacement_depth": "expected",
+    "keep_upgrades": true,
+    "replacement_addable": true
   },
   "rung3_streamer": {
     "horizon_weeks": 1

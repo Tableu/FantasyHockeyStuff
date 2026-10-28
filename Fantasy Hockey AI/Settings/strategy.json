@@ -34,7 +34,8 @@
     "prune": true,
     "restarts": 0,
     "replacement_depth": "best",
-    "keep_upgrades": false
+    "keep_upgrades": false,
+    "replacement_addable": false
   },
   "rung3_streamer": {
     "horizon_weeks": 1
