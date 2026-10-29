@@ -8,6 +8,8 @@ run_player_teams.cmd and run_live_snapshot.cmd:
                                     the copy-back of it into the PC's (sync_back.py)
     player_teams   05:00            import_player_teams, build_players
     injuries       10:00, 15:00     the full injury listing (snapshot_live --kind injuries), build_players
+    settings_check 15:45            each live choice put back to strategy.json's, on today's read: does
+                                    the plan change (settings_check.py; no database)
 
 A job is due once its latest scheduled time has passed and it has not run for that time, so a
 sleep or a restart runs what was missed when the server is back (what catch_up.ps1 did on Windows):
@@ -38,6 +40,7 @@ JOBS = {
     "nightly": {"label": "Nightly import", "times": ["04:00"], "log": "nightly.log"},
     "player_teams": {"label": "Player teams", "times": ["05:00"], "log": "player_teams.log"},
     "injuries": {"label": "Injury listing", "times": ["10:00", "15:00"], "log": "injuries.log"},
+    "settings_check": {"label": "Settings check", "times": ["15:45"], "log": "settings_check.log"},
 }
 
 
@@ -65,6 +68,8 @@ def steps(name: str, day: dt.date, copy_from: str | None = None) -> list:
         return [(PIPELINE, ["import_player_teams.py"]), (MODEL_FEATURES, ["build_players.py"])]
     if name == "injuries":
         return [(PIPELINE, ["snapshot_live.py", "--kind", "injuries"]), (MODEL_FEATURES, ["build_players.py"])]
+    if name == "settings_check":
+        return [(HERE, ["settings_check.py"])]
     raise KeyError(name)
 
 
