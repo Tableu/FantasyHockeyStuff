@@ -53,6 +53,8 @@ GAME_TABLES = [
     ("Game.Games", "GameID = ?"),
 ]
 GAME_TABLE_NAMES = {table for table, _ in GAME_TABLES}
+# How long a login is retried, and how often (connect).
+CONNECT_WAIT_S, CONNECT_RETRY_S = 300, 15
 
 
 def connect(server: str, database: str) -> pyodbc.Connection:
@@ -60,9 +62,22 @@ def connect(server: str, database: str) -> pyodbc.Connection:
     for flag in ("-S", "-U", "-P", "-d"):
         parser.add_argument(flag)
     creds, _ = parser.parse_known_args(shlex.split(CREDENTIALS.read_text(encoding="utf-8").strip())[1:])
-    conn = pyodbc.connect("DRIVER={ODBC Driver 18 for SQL Server};"
-                          f"SERVER={server};DATABASE={database};UID={creds.U};PWD={creds.P};"
-                          "Encrypt=yes;TrustServerCertificate=yes;")
+    # After a reboot the scheduler's catch-up runs the nightly about a minute after Windows starts,
+    # before the PC's SQL Server takes logins (2026-10-28: login timeout at 07:44, booted 07:42):
+    # keep trying for CONNECT_WAIT_S.
+    deadline = time.monotonic() + CONNECT_WAIT_S
+    while True:
+        try:
+            conn = pyodbc.connect("DRIVER={ODBC Driver 18 for SQL Server};"
+                                  f"SERVER={server};DATABASE={database};UID={creds.U};PWD={creds.P};"
+                                  "Encrypt=yes;TrustServerCertificate=yes;")
+            break
+        except pyodbc.OperationalError as error:
+            if time.monotonic() >= deadline:
+                raise
+            print(f"{server}: cannot log in yet ({error.args[0]}), retrying in {CONNECT_RETRY_S} s",
+                  flush=True)
+            time.sleep(CONNECT_RETRY_S)
     conn.autocommit = False
     return conn
 
