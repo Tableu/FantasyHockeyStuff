@@ -54,6 +54,7 @@ boom_bust.py  boom/bust odds vs the pick spent: room drafts, par  -> reports/boo
 boom_bust_check.py  grades those odds at real ADP, actual seasons       -> docs/boom-bust-check.md
 oneseat.py    the realistic league: our system in ONE seat, paired runs -> reports/oneseat/*.json
 opponents.py  rung 8's calibration: 12088's weekly activity and strength, and the check against them
+fire_rate.py  how often a flipped setting changes the test seat's day (a shadow planner), and its worth
 verify.py     the eighteen checks that have to pass before a number means anything
 ```
 
