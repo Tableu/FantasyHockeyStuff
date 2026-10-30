@@ -37,7 +37,7 @@ import pandas as pd
 import requests
 
 import livepaths
-from platforms.base import Matchup, PlayerIds, Scoreboard, TeamRoster, WeekScore
+from platforms.base import DayLineup, Matchup, PlayerIds, Scoreboard, TeamRoster, WeekScore
 
 SEASON_API = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fhl/seasons/{year}"
 API = SEASON_API + "/segments/0/leagues/{league_id}"
@@ -192,16 +192,19 @@ class Espn:
         self.cookies = {k: cookies[k] for k in ("espn_s2", "SWID")} if cookies else {}
         self._cache = {}
 
-    def _get(self, view: str) -> dict:
-        if view not in self._cache:
-            r = requests.get(API.format(year=self.season, league_id=self.league_id), params={"view": view},
+    def _get(self, view: str, scoring_period: int | None = None) -> dict:
+        """A view, kept: `scoring_period` asks for one day's (mRoster: that day's lineup slots)."""
+        key = view if scoring_period is None else (view, scoring_period)
+        if key not in self._cache:
+            params = {"view": view, **({"scoringPeriodId": scoring_period} if scoring_period else {})}
+            r = requests.get(API.format(year=self.season, league_id=self.league_id), params=params,
                              cookies=self.cookies, headers={"User-Agent": "python-requests"}, timeout=30)
             if r.status_code == 401:
                 raise SystemExit(f"ESPN league {self.league_id}: not authorized -- a private league needs "
                                  f"fresh espn_s2/SWID cookies in Settings/secrets.json (they expire on logout)")
             r.raise_for_status()
-            self._cache[view] = r.json()
-        return self._cache[view]
+            self._cache[key] = r.json()
+        return self._cache[key]
 
     # ---------- the league ----------
 
@@ -318,6 +321,17 @@ class Espn:
                     return {self._scoring_day(int(sp)): (float(mine.get(sp, 0.0)), float(theirs.get(sp, 0.0)))
                             for sp in sorted(set(mine) | set(theirs), key=int)}
         return {}
+
+    def day_lineup(self, team_id: int, day: dt.date) -> DayLineup | None:
+        """The team's lineup on a day gone as ESPN kept it (mRoster for that scoring period, kept --
+        a day gone doesn't change) and its points that day (daily_points). None: no such team."""
+        period = (day - self._scoring_day(1)).days + 1
+        team = next((t for t in self._get("mRoster", period)["teams"] if t["id"] == team_id), None)
+        if team is None:
+            return None
+        slots = {e["playerId"]: SLOT_LABELS.get(e["lineupSlotId"], str(e["lineupSlotId"]))
+                 for e in team.get("roster", {}).get("entries", [])}
+        return DayLineup(slots=slots, points=self.daily_points(team_id).get(day, (None, None))[0])
 
     def moves_used(self, team_id: int, day=None, when=None) -> int:
         """Acquisitions in the matchup period a move made now counts toward (`move_period`): the

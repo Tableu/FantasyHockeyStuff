@@ -6,12 +6,28 @@ games.Games.tonight: they change every 20 s, these only with a new plan.
     roster_view(plan, scoreset, slot_rows, photo)
                                               {day, proj_tonight, next_puck, columns, groups:
                                                [{name, goalie, rows}]}
+    ahead(view, plan, date, workbench)        the same for a night ahead with no plan of its own
+    regroup(view, slots, slot_rows)           a day gone's rows in the slots the platform kept that day
+    week_dates(day, starts_on)                the fantasy week's seven days, for the day picker
 """
 
+import datetime as dt
 import re
 
 GOALIE_KEYS = ("wins", "losses", "ot_losses", "shutouts", "saves", "goals_against")
 TEAM_SUFFIX = re.compile(r"\s*\(([A-Z]{2,3})\)\s*$")
+WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+
+
+def week_dates(day: dt.date, starts_on: str) -> list:
+    """The seven days of the fantasy week `day` is in (the league's week_starts_on)."""
+    start = day - dt.timedelta(days=(day.weekday() - WEEKDAYS.index(starts_on)) % 7)
+    return [start + dt.timedelta(days=i) for i in range(7)]
+
+
+def proj_of(plan: dict) -> float:
+    """The plan's lineup's expected points on its day: its lineup as it stands, players with a game."""
+    return round(sum(s["mean"] for s in plan.get("lineup_now", []) if s.get("player") and s.get("puck_utc")), 2)
 
 
 def split_name(full: str) -> tuple:
@@ -94,18 +110,54 @@ def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, t
     ir = [row_of(r, None, "ir") for r in plan.get("roster", []) if r.get("on_ir")]
     tonight = [s for s in plan.get("lineup_now", []) if s.get("player") and s.get("puck_utc")]
     ahead = sorted(s["puck_utc"] for s in tonight if not s.get("locked"))
+    return {
+        "day": plan.get("game_date"), "games_today": plan.get("games_today", True),
+        "team": plan.get("team"), "file_generated_at": plan.get("generated_at"),
+        "proj_tonight": proj_of(plan),
+        "next_puck": ahead[0] if ahead else None, "empty_slots": empty,
+        "columns": {"skater": [c for c in columns if c[0] not in GOALIE_KEYS],
+                    "goalie": [["gp", "GP"]] + [c for c in columns if c[0] in GOALIE_KEYS]},
+        "groups": groups_of(lineup, bench, ir),
+    }
+
+
+def groups_of(lineup: list, bench: list, ir: list) -> list:
+    """The screen's groups: lineup, bench and IR, skaters apart from goalies, empty ones left out."""
     groups = [("Lineup", False, [x for x in lineup if not x["goalie"]]),
               ("Lineup · G", True, [x for x in lineup if x["goalie"]]),
               ("Bench", False, [x for x in bench if not x["goalie"]]),
               ("Bench · G", True, [x for x in bench if x["goalie"]]),
               ("IR", False, [x for x in ir if not x["goalie"]]),
               ("IR · G", True, [x for x in ir if x["goalie"]])]
-    return {
-        "day": plan.get("game_date"), "games_today": plan.get("games_today", True),
-        "team": plan.get("team"), "file_generated_at": plan.get("generated_at"),
-        "proj_tonight": round(sum(s["mean"] for s in tonight), 2),
-        "next_puck": ahead[0] if ahead else None, "empty_slots": empty,
-        "columns": {"skater": [c for c in columns if c[0] not in GOALIE_KEYS],
-                    "goalie": [["gp", "GP"]] + [c for c in columns if c[0] in GOALIE_KEYS]},
-        "groups": [{"name": name, "goalie": goalie, "rows": rows} for name, goalie, rows in groups if rows],
-    }
+    return [{"name": name, "goalie": goalie, "rows": rows} for name, goalie, rows in groups if rows]
+
+
+def regroup(view: dict, slots: dict, slot_rows: list) -> dict:
+    """A day gone as the platform kept it (the user, 2026-10-30): `view`'s rows (that day's plan)
+    put in that day's slots ({player id: slot label}) -- the lineup in the league's slot order,
+    then the bench (BN) and IR. A player the platform had that day but the plan didn't is left out
+    (`missing` counts them); one the plan had but the platform didn't, too."""
+    rank = {slot: i for i, slot in enumerate(dict.fromkeys(slot_rows))}
+    rows = {int(r["player_id"]): r for g in view["groups"] for r in g["rows"]}
+    placed = [{**rows[pid], "slot": label, "where": "ir" if label == "IR" else "bench" if label == "BN" else "lineup"}
+              for pid, label in slots.items() if pid in rows]
+    lineup = sorted((r for r in placed if r["where"] == "lineup"), key=lambda r: rank.get(r["slot"], len(rank)))
+    return {**view, "groups": groups_of(lineup, [r for r in placed if r["where"] == "bench"],
+                                        [r for r in placed if r["where"] == "ir"]),
+            "missing": sum(pid not in rows for pid in slots)}
+
+
+def ahead(view: dict, plan: dict, date: str, workbench: dict | None) -> dict:
+    """A night ahead with no plan of its own (the day picker): `view` (today's plan's roster_view)
+    with each player's expected points that night from plan A's workbench -- none without a game
+    -- and the lineup's from the plan's matchup projection (else the lineup's sum). No P%: the
+    workbench's values have the chance he plays in them."""
+    values = {int(k): p.get("values", {}) for k, p in ((workbench or {}).get("players") or {}).items()}
+    rows = [r for g in view["groups"] for r in g["rows"]]
+    for r in rows:
+        r.update(xpts=values.get(int(r["player_id"]), {}).get(date), p_plays=None, puck_utc=None, locked=False)
+    proj = (((plan.get("matchup_projection") or {}).get("me") or {}).get("nights") or {}).get(date)
+    if proj is None:
+        proj = sum(r["xpts"] or 0 for r in rows if r["where"] == "lineup")
+    return {**view, "day": date, "proj_tonight": round(proj, 2), "next_puck": None, "empty_slots": 0,
+            "games_today": any(r["xpts"] is not None for r in rows)}

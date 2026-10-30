@@ -188,11 +188,32 @@ table.roster tr.note td span { display: block; position: sticky; left: 0; max-wi
 :is(.tn-row, table.roster) .tags { display: flex; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; }
 :is(.tn-row, table.roster) .tag { flex: none; padding: 1px 4px; border-radius: 3px; background: var(--ground-3); font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text); }
 :is(.tn-row, table.roster) .tag .k { font-family: var(--sans); font-weight: 500; color: var(--text-3); }
-/* The PC table's tonight box line: the same tags in one cell. */
-table.roster .box { text-align: left; padding: 0 8px; }
+/* The PC table's day view: the game, then the box line in its own columns. */
+table.roster .game-col { text-align: left; font-family: var(--sans); width: 170px; min-width: 170px; }
 .tn-note { padding: 6px 12px 8px; background: var(--ground-2); border-bottom: 1px solid var(--rule); color: var(--text-2); font-size: 12px; }
 table.roster button.sort { padding: 0 2px; min-height: 36px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
 table.roster button.sort.on { color: var(--you); }
+.elig { margin-left: 5px; font-size: 11px; font-weight: 500; color: var(--text-3); }
+/* The day picker (the fantasy week) and the Season button beside it. */
+.bar.start { justify-content: flex-start; gap: 6px; }
+.day-pick { position: relative; flex: none; }
+.day-btn { display: flex; align-items: stretch; height: 32px; border-radius: 4px; border: 1px solid var(--rule-strong); overflow: hidden; color: var(--text); }
+.day-btn.on { border-color: var(--text); background: var(--text); color: var(--ground); }
+.day-btn button { padding: 0 4px 0 10px; border: 0; background: none; color: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.day-btn button.arrow { display: flex; align-items: center; justify-content: center; width: 28px; padding: 0; }
+.toggle { height: 32px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--rule-strong); background: transparent; color: var(--text-3); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.toggle.on { border-color: var(--text); background: var(--text); color: var(--ground); }
+.day-scrim { position: fixed; inset: 0; z-index: 20; }
+.day-list { position: absolute; top: 36px; left: 0; z-index: 21; width: 232px; padding: 4px 0; border-radius: 6px; border: 1px solid var(--rule-strong); background: var(--ground-3); box-shadow: 0 10px 28px rgba(0, 0, 0, .55); }
+.day-list button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; padding: 0 12px; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.day-list button.on { background: #1B2740; box-shadow: inset 3px 0 0 var(--you); }
+.day-list button:disabled { opacity: .45; cursor: default; }
+.day-list .what { display: flex; flex-direction: column; line-height: 1.2; }
+.day-list .nm { font-size: 13.5px; font-weight: 500; }
+.day-list button.on .nm { font-weight: 700; }
+.day-list .st { font-size: 11px; color: var(--text-3); }
+.day-list .st.you { color: var(--you); }
+.day-list .pts { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
 
 /* AI suggestions (ai.js), as the design's AI suggestions artboard */
 .subtabs { position: sticky; top: 0; z-index: 2; display: flex; height: 40px; border-bottom: 1px solid var(--rule); background: var(--ground-2); }
@@ -454,6 +475,8 @@ table.list.box thead th.n { overflow: visible; }
   .btn.primary:not(:disabled):hover { filter: brightness(1.08); }
   .game-card:hover { border-color: var(--rule-strong); }
   .choice:hover, .log-row:hover, button.plan:hover { background: var(--ground-3); }
+  .day-list button:not(:disabled):not(.on):hover { background: var(--ground-sel); }
+  .toggle:not(.on):hover { color: var(--text); }
 }
 
 /* The PC layout (layout.js WIDE_PX): the sidebar, then the header and the screen, across the whole
@@ -475,6 +498,7 @@ table.roster .sep { border-left: 1px solid var(--rule-strong); }
 /* On a PC the table spans the screen: the stat columns share the width instead of stopping at 46 px. */
 .app.wide table.roster { width: 100%; }
 .app.wide table.roster .f { max-width: none; }
+.app.wide table.roster .stick { width: 220px; min-width: 220px; max-width: 220px; }
 
 /* Planner: the calendar beside the picker, each scrolling on its own. */
 .split { display: flex; height: 100%; }

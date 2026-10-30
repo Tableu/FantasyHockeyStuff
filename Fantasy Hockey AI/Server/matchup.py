@@ -5,6 +5,8 @@ scoreboard, daily_points) and kept a minute, so the screen is current between th
 the projection and P(win) are the newest plan's (matchup_projection, p_win).
 
     Matchups(leagues).view(league, plan)    the screen's data
+    Matchups().day_lineup(league, day)      your lineup on a day gone as the platform kept it (the
+                                            Roster's day picker), in our player ids, and the day's points
 """
 
 import datetime as dt
@@ -19,6 +21,14 @@ KEEP_S = 60                      # a league's scores are read again only after t
 class Matchups:
     def __init__(self):
         self.adapters, self.kept, self.lock = {}, {}, threading.Lock()
+        self.ids = {}                    # platform -> platforms.PlayerIds
+        self.days = {}                   # (league, day) -> day_lineup's answer: a day gone doesn't change
+
+    def _adapter(self, league):
+        adapter = self.adapters.get(league.name)
+        if adapter is None:
+            adapter = self.adapters[league.name] = platforms.for_league(league)
+        return adapter
 
     def _scores(self, league):
         """(scoreboard, daily points) for the league, read at most once a minute."""
@@ -26,12 +36,37 @@ class Matchups:
             hit = self.kept.get(league.name)
             if hit is not None and time.monotonic() - hit[0] < KEEP_S:
                 return hit[1]
-            adapter = self.adapters.get(league.name)
-            if adapter is None:
-                adapter = self.adapters[league.name] = platforms.for_league(league)
+            adapter = self._adapter(league)
             value = (adapter.scoreboard(), adapter.daily_points(league.team_id))
             self.kept[league.name] = (time.monotonic(), value)
             return value
+
+    def day_lineup(self, league, day: dt.date) -> dict | None:
+        """{slots: {player id: slot label}, points, unknown: platform ids with no player id} for your
+        team on a day gone; None when the platform has no lineup for it (no game that period, no
+        platform)."""
+        key = (league.name, day)
+        with self.lock:
+            if key in self.days:
+                return self.days[key]
+            adapter = self._adapter(league)
+            if adapter is None:
+                return None
+            got = adapter.day_lineup(league.team_id, day)
+            if got is None:
+                return None
+            ids = self.ids.get(adapter.platform)
+            if ids is None:
+                ids = self.ids[adapter.platform] = platforms.PlayerIds(adapter.platform)
+            slots, unknown = {}, []
+            for external, label in got.slots.items():
+                player_id = ids.get(external)
+                if player_id is None:
+                    unknown.append(external)
+                else:
+                    slots[player_id] = label
+            self.days[key] = {"slots": slots, "points": got.points, "unknown": unknown}
+            return self.days[key]
 
     def view(self, league, plan: dict | None) -> dict:
         board, daily = self._scores(league)

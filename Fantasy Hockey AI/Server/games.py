@@ -20,6 +20,7 @@ database.
                    could not have seen arrive (scored before it first looked at that game)
     tonight()      every player you and your opponent hold: his game today and, once it starts,
                    his box-score line with fantasy points (the app's Roster screen)
+    day(date, held) the same for another day's games (score/{date}), for the Roster's day picker
     game(id)       one game: line score, shots by period, team stats, box score with fantasy
                    points, the plays after a sortOrder
     lines(id)      each team's forward lines, defence pairs and special-teams units as used, from
@@ -523,7 +524,34 @@ class Games:
         is your lineup's points so far (the plan's lineup as it stands; bench points don't count).
         Only the started games with someone held in them are fetched."""
         data, owners = self.score_now(), self._owners()
-        games, held_teams = {}, {h["team"] for h in owners.held}
+        on = self._players_on(data, owners.held, owners)
+        players, live = {}, 0.0
+        for h in owners.held:
+            line = on[h["player_id"]]["line"]
+            in_lineup = h["owner"] == "me" and h["player_id"] in owners.lineup
+            if line and in_lineup:
+                live += line["fantasy"]
+            players[h["player_id"]] = {"owner": h["owner"], "in_lineup": in_lineup,
+                                       "game": on[h["player_id"]]["game"], "line": line}
+        return {"date": data.get("currentDate"), "team": owners.names["me"], "opponent": owners.names["opp"],
+                "lineup_live": round(live, 2), "players": players}
+
+    def day(self, date: dt.date, held: list) -> dict:
+        """Another day's games (the Roster's day picker): for each of `held` ({player_id, nhl_id,
+        team}), his team's game that day and, once it started, his box line -- tonight()'s players
+        without the owners. `final`: every one of their games that day is over."""
+        data = self.feed(f"{API}/score/{date.isoformat()}").get()
+        players = self._players_on(data, held, self._owners())
+        games = [p["game"] for p in players.values() if p["game"]]
+        return {"date": date.isoformat(), "players": players,
+                "final": all(g["state"] in FINAL_STATES for g in games)}
+
+    def _players_on(self, data, held, owners) -> dict:
+        """{player_id: {game, line}} for `held` ({player_id, nhl_id, team}) in a score feed's games:
+        his team's game (or None) and, once it has started, his box-score line. Only the started
+        games with one of them in it are fetched."""
+        games, held_teams = {}, {h["team"] for h in held}
+        wanted = {h["nhl_id"] for h in held if h["nhl_id"] is not None}
         lines = {}
         for g in data.get("games", []):
             away, home = g["awayTeam"], g["homeTeam"]
@@ -544,18 +572,11 @@ class Games:
                             if {"faceoff_wins", "faceoff_losses"} & set(self.scoreset.skaters) else None)
                 for side in ("awayTeam", "homeTeam"):
                     for p in self._box_players(box, side, special, owners, faceoffs):
-                        if p["owner"]:
+                        if p["id"] in wanted:
                             lines[p["id"]] = p
-        players, live = {}, 0.0
-        for h in owners.held:
-            line = lines.get(h["nhl_id"]) if h["nhl_id"] is not None else None
-            in_lineup = h["owner"] == "me" and h["player_id"] in owners.lineup
-            if line and in_lineup:
-                live += line["fantasy"]
-            players[h["player_id"]] = {"owner": h["owner"], "in_lineup": in_lineup,
-                                       "game": games.get(h["team"]), "line": line}
-        return {"date": data.get("currentDate"), "team": owners.names["me"], "opponent": owners.names["opp"],
-                "lineup_live": round(live, 2), "players": players}
+        return {h["player_id"]: {"game": games.get(h["team"]),
+                                 "line": lines.get(h["nhl_id"]) if h["nhl_id"] is not None else None}
+                for h in held}
 
     # ---------- one game ----------
 

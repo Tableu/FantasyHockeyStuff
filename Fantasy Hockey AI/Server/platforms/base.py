@@ -21,6 +21,14 @@ class TeamRoster:
 
 
 @dataclasses.dataclass
+class DayLineup:
+    """One team's lineup on a day gone, as the platform kept it -- {platform player id: slot label}
+    (the lineup's own labels, BN, IR) -- and the team's points that day."""
+    slots: dict
+    points: float | None
+
+
+@dataclasses.dataclass
 class WeekScore:
     """One team's points in a scoring period so far (today's live points in), its opponent, and --
     when the platform shows them (Fleaflicker) -- how many of its lineup slots are still to play,

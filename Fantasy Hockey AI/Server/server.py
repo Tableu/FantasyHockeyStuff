@@ -33,8 +33,12 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
     GET  /tonight              every player you and your opponent hold: his game today, his live box
                                line and fantasy points; your lineup's live total (games.py)
-    GET  /roster               the app's Roster screen from the newest plan: lineup as it stands,
-                               bench, IR, tonight's projection, season in the league's scoring (roster.py)
+    GET  /roster?day=          the app's Roster screen from the newest plan: lineup as it stands,
+                               bench, IR, tonight's projection, season in the league's scoring (roster.py).
+                               day: 'today', 'tomorrow' or a date in this fantasy week -- a day
+                               before today shows that day's plan with its games' box lines, a day
+                               ahead its games and the projection. `week`: each day's state, projection
+                               and (a day gone) its lineup's points, for the day picker
     GET  /choices              what you chose in the app (choices.py): {league,
                                choices: {days: {date: {moves}}, together}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
@@ -72,6 +76,7 @@ a session (the app's password; auth.py, `python auth.py set-password` first).
 """
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import itertools
 import json
@@ -415,33 +420,116 @@ def make_app(worker: Worker) -> FastAPI:
         return {"league": chosen.name, "file": path.name,
                 "saved_at": iso(dt.datetime.fromtimestamp(path.stat().st_mtime)), "plan": plan}
 
+    matchups = matchup_module.Matchups()
+    plans_read = {}             # plan path -> (mtime, plan): the week's plans, read once each
+
+    def read_plan(path):
+        mtime = path.stat().st_mtime
+        hit = plans_read.get(path)
+        if hit is None or hit[0] != mtime:
+            hit = plans_read[path] = (mtime, json.loads(path.read_text(encoding="utf-8")))
+        return hit[1]
+
+    def held_of(chosen, plan):
+        """The plan's roster as games.Games.day wants it: {player_id, nhl_id, team}."""
+        ids = views[chosen.name].owners._nhl_ids(paths.players())
+        return [{"player_id": int(r["player_id"]), "nhl_id": ids.get(int(r["player_id"])),
+                 "team": roster.split_name(r["player"])[1]} for r in plan.get("roster", [])]
+
+    def platform_day(chosen, date):
+        """Your lineup and points on a day gone as the platform kept them (matchup.Matchups.day_lineup),
+        or None: no platform, or it can't be read now (down, the call limit) -- then the plan's."""
+        try:
+            return matchups.day_lineup(chosen, date)
+        except (Exception, SystemExit) as error:  # noqa: BLE001 -- the plan's lineup stands in
+            print(f"{chosen.name} {date}: platform lineup unread: {type(error).__name__}: {error}", file=sys.stderr)
+            return None
+
+    def scored(chosen, date, plan):
+        """A day gone's points: the platform's (the user, 2026-10-30); without it, the box points of
+        that day's plan's lineup at its last save. None when neither can be read."""
+        got = platform_day(chosen, date)
+        if got is not None and got["points"] is not None:
+            return round(got["points"], 2)
+        try:
+            day = views[chosen.name].day(date, held_of(chosen, plan))
+        except requests.RequestException:
+            return None
+        lineup = {s["player_id"] for s in plan.get("lineup_now", []) if s.get("player_id") is not None}
+        return round(sum(p["line"]["fantasy"] for pid, p in day["players"].items() if pid in lineup and p["line"]), 2)
+
+    def week_of(chosen, today, today_plan):
+        """The day picker's days: each one's state, whether a plan was saved for it, its projection
+        (its own plan's, else today's plan's matchup projection) and a day gone's points."""
+        nights = ((((today_plan or {}).get("matchup_projection") or {}).get("me") or {}).get("nights") or {})
+        days = []
+        for date in roster.week_dates(today, configs[chosen.name].week_starts_on):
+            saved = planpass.saved_plans(chosen, date)
+            plan = read_plan(saved[-1]) if saved else None
+            state = "final" if date < today else "today" if date == today else "ahead"
+            days.append({"date": date.isoformat(), "state": state, "planned": plan is not None,
+                         "proj": roster.proj_of(plan) if plan else nights.get(date.isoformat()),
+                         "scored": None, "_plan": plan})
+        gone = [d for d in days if d["state"] == "final" and d["_plan"] is not None]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            for d, points in zip(gone, pool.map(lambda d: scored(chosen, dt.date.fromisoformat(d["date"]), d["_plan"]), gone)):
+                d["scored"] = points
+        for d in days:
+            del d["_plan"]
+        return days
+
     @app.get("/roster")
     def get_roster(league: str | None = None, day: str | None = None):
         """day: 'today' or 'tomorrow' -- that day's newest plan, and which days have one (the
         user, 2026-10-13: a switch, not the roll to tomorrow once today's games have started);
-        none given, the plan's day as before."""
+        or a date in this fantasy week (the day picker): a day gone is that day's plan, a day
+        ahead its own plan once saved, else today's with the workbench's projection for it.
+        None given, the plan's day as before."""
         chosen = worker.league(league)
         today = worker.today()
         days = {"today": today, "tomorrow": today + dt.timedelta(days=1)}
         saved = {name: planpass.saved_plans(chosen, d) for name, d in days.items()}
+        date = None
         if day is None:
             path = worker.newest_plan(chosen)
         elif day in days:
             path = saved[day][-1] if saved[day] else None
         else:
-            raise HTTPException(400, f"day is 'today' or 'tomorrow', not {day}")
+            try:
+                date = dt.date.fromisoformat(day)
+            except ValueError:
+                raise HTTPException(400, f"day is 'today', 'tomorrow' or a date, not {day}")
+            week = roster.week_dates(today, configs[chosen.name].week_starts_on)
+            if date not in week:
+                raise HTTPException(400, f"{day} is not in this fantasy week ({week[0]} to {week[-1]})")
+            own = planpass.saved_plans(chosen, date)
+            path = own[-1] if own else saved["today"][-1] if date > today and saved["today"] else None
         if path is None:
-            raise HTTPException(404, f"no {chosen.name} plan saved for {(days.get(day) or worker.day()).isoformat()} yet")
-        plan = json.loads(path.read_text(encoding="utf-8"))
+            raise HTTPException(404, f"no {chosen.name} plan saved for {(date or days.get(day) or worker.day()).isoformat()} yet")
+        plan = read_plan(path)
         nhl_ids = views[chosen.name].owners._nhl_ids(paths.players())
         plan_day = dt.date.fromisoformat(plan["game_date"]) if plan.get("game_date") else today
 
         def photo(player_id, team):
             return live_games.headshot(nhl_ids.get(int(player_id)), team, plan_day)
 
+        view = roster.roster_view(plan, scoresets[chosen.name], slot_rows[chosen.name], photo)
+        if date is not None and date < today:
+            # A day gone in the slots the platform kept that day, not the plan's (the user, 2026-10-30).
+            got = platform_day(chosen, date)
+            if got is not None:
+                view = roster.regroup(view, got["slots"], slot_rows[chosen.name])
+            view["lineup_from"] = "platform" if got is not None else "plan"
+        if date is not None and date != today:
+            if date != plan_day:
+                view = roster.ahead(view, plan, date.isoformat(),
+                                    (suggestions.plans_shown(plan, "this") or [{}])[0].get("workbench"))
+            # Not today: no /tonight to poll, so its games and box lines come with it.
+            view["players"] = nhl(league, "day", date, held_of(chosen, plan))["players"]
+        today_plan = read_plan(saved["today"][-1]) if saved["today"] else None
         return {"league": chosen.name, "file": path.name,
                 "days": {name: {"date": d.isoformat(), "planned": bool(saved[name])} for name, d in days.items()},
-                **roster.roster_view(plan, scoresets[chosen.name], slot_rows[chosen.name], photo)}
+                "week": week_of(chosen, today, today_plan), **view}
 
     @app.get("/choices")
     def get_choices(league: str | None = None):
@@ -490,7 +578,6 @@ def make_app(worker: Worker) -> FastAPI:
         _, _, _, shown = book(league, body.week)
         return {"league": chosen.name, "file": path.name, "choices": saved, **shown.view(slot_rows[chosen.name])}
 
-    matchups = matchup_module.Matchups()
 
     @app.get("/matchup")
     def get_matchup(league: str | None = None):

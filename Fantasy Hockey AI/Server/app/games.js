@@ -44,7 +44,7 @@ function SituationLine({ s }) {
 }
 
 // "2nd 14:21", "INT · end 1st", "Final", "Final/OT", or the start time.
-function stateLabel(g) {
+export function stateLabel(g) {
   if (DONE.has(g.state)) return g.period_type && g.period_type !== 'REG' ? `Final/${g.period_type}` : 'Final';
   if (LIVE.has(g.state)) {
     if (g.intermission) return `INT · end ${periodName(g.period, g.period_type)}`;
