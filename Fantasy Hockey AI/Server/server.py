@@ -67,6 +67,8 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /matchup              the app's Matchup: the week's score, each day's points for you and your
                                opponent, the league's week, from the platform (kept a minute), with
                                the plan's projection and P(win) (matchup.py)
+    GET  /matchup/players      the Matchup's head-to-head: every player either side held this week,
+                               each day's slot (the platform's), projection, game and points (headtohead.py)
     POST /login {password}     a session cookie for the app (auth.py); 401 wrong, 429 too many tries
     POST /logout               ends this phone's session
     GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
@@ -102,6 +104,7 @@ import auth  # noqa: E402
 import corelayer  # noqa: E402,F401 -- puts Core/ on sys.path; see corelayer.py
 import choices  # noqa: E402
 import games as live_games  # noqa: E402
+import headtohead  # noqa: E402
 import league as league_module  # noqa: E402
 import leagues  # noqa: E402
 import livepaths  # noqa: E402
@@ -644,6 +647,36 @@ def make_app(worker: Worker) -> FastAPI:
             return {"league": chosen.name, **matchups.view(chosen, plan)}
         except Exception as error:  # noqa: BLE001 -- the platform unreachable or changed: say so
             raise HTTPException(502, f"{chosen.platform}: {type(error).__name__}: {error}")
+
+    @app.get("/matchup/players")
+    def get_matchup_players(league: str | None = None):
+        chosen = worker.league(league)
+        today = worker.today()
+        dates = roster.week_dates(today, configs[chosen.name].week_starts_on)
+        saved = planpass.saved_plans(chosen, today)
+        path = saved[-1] if saved else worker.newest_plan(chosen)
+        if path is None:
+            raise HTTPException(404, f"no {chosen.name} plan saved for {today.isoformat()} yet")
+        today_plan = read_plan(path)
+        plans, lineups = {}, {}
+        for date in dates:
+            own = planpass.saved_plans(chosen, date)
+            plans[date.isoformat()] = read_plan(own[-1]) if own else (today_plan if date >= today else None)
+            if date <= today:
+                try:
+                    lineups[date.isoformat()] = matchups.day_lineup(chosen, date, keep=date < today)
+                except (Exception, SystemExit) as error:  # noqa: BLE001 -- the plan's lineup stands in
+                    print(f"{chosen.name} {date}: platform lineup unread: {type(error).__name__}: {error}", file=sys.stderr)
+                    lineups[date.isoformat()] = None
+        nhl_ids = views[chosen.name].owners._nhl_ids(paths.players())
+        held = [{"player_id": pid, "nhl_id": nhl_ids.get(pid), "team": p["team"]}
+                for pid, p in headtohead.people(plans).items()]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            boxes = dict(zip([d.isoformat() for d in dates],
+                             pool.map(lambda d: nhl(league, "day", d, held)["players"], dates)))
+        workbench = (suggestions.plans_shown(today_plan, "this") or [{}])[0].get("workbench")
+        return {"league": chosen.name,
+                **headtohead.view([d.isoformat() for d in dates], today.isoformat(), plans, lineups, boxes, workbench)}
 
     @app.get("/suggestions")
     def get_suggestions(week: str = "this", league: str | None = None):

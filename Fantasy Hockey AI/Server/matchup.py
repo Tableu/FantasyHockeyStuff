@@ -5,8 +5,9 @@ scoreboard, daily_points) and kept a minute, so the screen is current between th
 the projection and P(win) are the newest plan's (matchup_projection, p_win).
 
     Matchups(leagues).view(league, plan)    the screen's data
-    Matchups().day_lineup(league, day)      your lineup on a day gone as the platform kept it (the
-                                            Roster's day picker), in our player ids, and the day's points
+    Matchups().day_lineup(league, day)      your lineup on a day as the platform kept it (the Roster's
+                                            day picker, the head-to-head), in our player ids, and the
+                                            day's points; your opponent's the same
 """
 
 import datetime as dt
@@ -41,13 +42,14 @@ class Matchups:
             self.kept[league.name] = (time.monotonic(), value)
             return value
 
-    def day_lineup(self, league, day: dt.date) -> dict | None:
-        """{slots: {player id: slot label}, points, unknown: platform ids with no player id} for your
-        team on a day gone; None when the platform has no lineup for it (no game that period, no
-        platform)."""
+    def day_lineup(self, league, day: dt.date, keep: bool = True) -> dict | None:
+        """{slots: {player id: slot label}, points, opp_slots, opp_points, unknown: platform ids with
+        no player id} for your team and your opponent's on a day; None when the platform has no
+        lineup for it (no game that period, no platform). `keep`: a day gone, kept once read (today's
+        is read again each time)."""
         key = (league.name, day)
         with self.lock:
-            if key in self.days:
+            if keep and key in self.days:
                 return self.days[key]
             adapter = self._adapter(league)
             if adapter is None:
@@ -58,15 +60,23 @@ class Matchups:
             ids = self.ids.get(adapter.platform)
             if ids is None:
                 ids = self.ids[adapter.platform] = platforms.PlayerIds(adapter.platform)
-            slots, unknown = {}, []
-            for external, label in got.slots.items():
-                player_id = ids.get(external)
-                if player_id is None:
-                    unknown.append(external)
-                else:
-                    slots[player_id] = label
-            self.days[key] = {"slots": slots, "points": got.points, "unknown": unknown}
-            return self.days[key]
+            unknown = []
+
+            def ours(found):
+                out = {}
+                for external, label in found.items():
+                    player_id = ids.get(external)
+                    if player_id is None:
+                        unknown.append(external)
+                    else:
+                        out[player_id] = label
+                return out
+
+            answer = {"slots": ours(got.slots), "points": got.points,
+                      "opp_slots": ours(got.opp_slots), "opp_points": got.opp_points, "unknown": unknown}
+            if keep:
+                self.days[key] = answer
+            return answer
 
     def view(self, league, plan: dict | None) -> dict:
         board, daily = self._scores(league)

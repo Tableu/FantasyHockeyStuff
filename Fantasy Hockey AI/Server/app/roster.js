@@ -34,7 +34,7 @@ function puckTime(utc) {
 // Under the name (the user, 2026-10-20): the opponent, @ on the road, and the score, his team's
 // first, with the period and clock or Final -- before the puck drops, its time; no game data
 // (tomorrow's plan before its games are read), the puck time alone.
-function gameLine(row, game) {
+export function gameLine(row, game) {
   if (!game) return row.puck_utc ? puckTime(row.puck_utc) : '';
   const vs = `${game.home ? '' : '@'}${game.vs}`;
   if (!STARTED.has(game.state)) return `${vs} ${puckTime(game.start_utc.replace('T', ' ').replace('Z', ''))}`;

@@ -323,15 +323,22 @@ class Espn:
         return {}
 
     def day_lineup(self, team_id: int, day: dt.date) -> DayLineup | None:
-        """The team's lineup on a day gone as ESPN kept it (mRoster for that scoring period, kept --
-        a day gone doesn't change) and its points that day (daily_points). None: no such team."""
+        """The team's lineup on a day as ESPN kept it (mRoster for that scoring period: kept for a
+        day gone, read again for today) and its points that day (daily_points), its opponent's
+        too. None: no such team."""
         period = (day - self._scoring_day(1)).days + 1
-        team = next((t for t in self._get("mRoster", period)["teams"] if t["id"] == team_id), None)
-        if team is None:
+        if day >= dt.date.today():
+            self._cache.pop(("mRoster", period), None)
+        teams = {t["id"]: t for t in self._get("mRoster", period)["teams"]}
+        if team_id not in teams:
             return None
-        slots = {e["playerId"]: SLOT_LABELS.get(e["lineupSlotId"], str(e["lineupSlotId"]))
-                 for e in team.get("roster", {}).get("entries", [])}
-        return DayLineup(slots=slots, points=self.daily_points(team_id).get(day, (None, None))[0])
+        game = self.matchup(team_id)
+        opponent = game.opponent_id if game else None
+        slots = lambda tid: {e["playerId"]: SLOT_LABELS.get(e["lineupSlotId"], str(e["lineupSlotId"]))
+                             for e in (teams.get(tid) or {}).get("roster", {}).get("entries", [])}
+        points = self.daily_points(team_id).get(day, (None, None))
+        return DayLineup(slots=slots(team_id), points=points[0],
+                         opp_slots=slots(opponent) if opponent is not None else {}, opp_points=points[1])
 
     def moves_used(self, team_id: int, day=None, when=None) -> int:
         """Acquisitions in the matchup period a move made now counts toward (`move_period`): the

@@ -645,3 +645,34 @@ table.cal td.ghost .pt { color: #6CA8E0; }
 .games-bar .dim, .games-count { font-size: 12px; }
 .games-screen.no-feed { padding-bottom: 12px; }
 .pos { margin-left: 5px; color: var(--text-3); font-size: 11px; font-weight: 600; }
+
+/* Matchup (matchup.js): Overview / Players, the week or a day; the head-to-head table. */
+.mu-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+.mu-bar .seg button { height: 32px; }
+.mu-span { display: flex; align-items: center; gap: 6px; }
+.mu-span .day-list { left: auto; right: 0; }
+table.h2h { border-collapse: collapse; width: 100%; table-layout: fixed; }
+table.h2h th, table.h2h td { border-bottom: 1px solid var(--rule); padding: 5px 1px; text-align: left; font-size: 12.5px; overflow: hidden; vertical-align: middle; }
+table.h2h th:first-child, table.h2h td:first-child { padding-left: 6px; }
+table.h2h th:last-child, table.h2h td:last-child { padding-right: 6px; }
+table.h2h thead th { position: sticky; top: 0; z-index: 2; background: var(--ground-3); color: var(--text-3); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; height: 22px; padding-top: 0; padding-bottom: 0; }
+table.h2h thead th.you { color: var(--you); }
+table.h2h thead th.opp { color: var(--opp); }
+table.h2h .hd { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+table.h2h .pos-col { width: 26px; padding: 0; text-align: center; font-size: 9.5px; font-weight: 600; letter-spacing: -.04em; color: var(--text-3); overflow: visible; }
+table.h2h tbody.grp + tbody.grp tr:first-child td { border-top: 1px solid var(--rule-strong); }
+.h2h-cell { display: flex; align-items: flex-start; gap: 7px; }
+.h2h-cell .who { flex: 1; min-width: 0; }
+.h2h-cell.right .who { text-align: right; }
+table.h2h .nm { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13.5px; line-height: 17px; }
+table.h2h .inf { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--text-3); line-height: 15px; }
+table.h2h .pts { flex: none; font-family: var(--mono); font-size: 14px; font-weight: 600; }
+.h2h-cell:not(.right) .pts { text-align: right; }
+table.h2h .xp, table.h2h .lv { display: block; }
+table.h2h .xp { line-height: 17px; }
+table.h2h .lv { line-height: 15px; }
+table.h2h .el { margin-left: 5px; font-size: 11px; font-weight: 500; color: var(--text-3); }
+table.h2h .el-l, table.h2h .pb-l { margin-left: 0; margin-right: 5px; }
+table.h2h .pb { margin-left: 5px; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--text-3); }
+table.h2h .pb.warn { color: var(--warn); }
+table.h2h tr.total td { font-weight: 700; }

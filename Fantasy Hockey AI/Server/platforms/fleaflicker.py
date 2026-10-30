@@ -362,8 +362,9 @@ class Fleaflicker:
 
     def day_lineup(self, team_id: int, day: dt.date) -> DayLineup | None:
         """The team's lineup on `day` (a day this period has begun) as Fleaflicker kept it, and its
-        points that day -- the matchup's box score for that day, the one daily_points reads (a day
-        before today kept, not fetched again). None: no game this period, or `day` not in it."""
+        points that day, its opponent's too -- the matchup's box score for that day, the one
+        daily_points reads (a day before today kept, not fetched again). None: no game this period,
+        or `day` not in it."""
         game, side = self._my_game(team_id)
         if game is None:
             return None
@@ -381,13 +382,16 @@ class Fleaflicker:
         else:
             raw = self._days[key] = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"],
                                                scoring_period=period["ordinal"])
-        slots = {}
+        other = "Away" if side == "Home" else "Home"
+        slots = {side: {}, other: {}}
         for group in raw.get("lineups", []):
             for slot in group.get("slots", []):
-                player = (slot.get(side.lower()) or {}).get("proPlayer")
-                if player:
-                    slots[player["id"]] = slot["position"]["label"]
-        return DayLineup(slots=slots, points=self._day_points(raw, side)[0])
+                for who in (side, other):
+                    player = (slot.get(who.lower()) or {}).get("proPlayer")
+                    if player:
+                        slots[who][player["id"]] = slot["position"]["label"]
+        points, opp_points = self._day_points(raw, side)
+        return DayLineup(slots=slots[side], points=points, opp_slots=slots[other], opp_points=opp_points)
 
     def transactions(self, since_ms: int | None = None, pages: int = 20) -> list:
         """Newest-first transactions, as {time_ms, type, team_id, player_id}, back to `since_ms`."""

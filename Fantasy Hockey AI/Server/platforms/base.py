@@ -22,10 +22,13 @@ class TeamRoster:
 
 @dataclasses.dataclass
 class DayLineup:
-    """One team's lineup on a day gone, as the platform kept it -- {platform player id: slot label}
-    (the lineup's own labels, BN, IR) -- and the team's points that day."""
+    """One team's lineup on a day (a day gone, or today as it stands), as the platform kept it --
+    {platform player id: slot label} (the lineup's own labels, BN, IR) -- and the team's points
+    that day; its opponent's the same (the Matchup's head-to-head)."""
     slots: dict
     points: float | None
+    opp_slots: dict = dataclasses.field(default_factory=dict)
+    opp_points: float | None = None
 
 
 @dataclasses.dataclass
