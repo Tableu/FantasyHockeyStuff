@@ -31,7 +31,9 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: var(--outside); }
+/* The page itself never scrolls or overscrolls: the app's screens scroll inside it, and Chrome's own
+   pull-to-refresh (a drag down on the header or the tabs reloaded the app) stays off. */
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--outside); }
 body { color: var(--text); font-family: var(--sans); font-size: 13.5px; -webkit-tap-highlight-color: transparent; }
 button { font-family: inherit; color: inherit; }
 a { color: var(--you); }
@@ -41,9 +43,11 @@ a { color: var(--you); }
 .bad { color: var(--bad); }
 .good { color: var(--good); }
 
-/* The phone frame: full screen on a phone, a centred column on a desktop. */
+/* The phone frame: full screen on a phone, a centred column on a desktop. Held to the viewport's
+   edges rather than sized 100dvh: after a reload on Android the dvh could come out taller than the
+   screen, and the bottom tabs fell off it (the user, 2026-10-30). */
 .app {
-  max-width: 480px; margin: 0 auto; height: 100dvh; position: relative;
+  max-width: 480px; margin: 0 auto; position: fixed; inset: 0;
   display: flex; flex-direction: column; background: var(--ground); overflow: hidden;
   padding-top: env(safe-area-inset-top);
 }
