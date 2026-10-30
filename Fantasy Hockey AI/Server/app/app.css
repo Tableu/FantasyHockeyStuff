@@ -156,7 +156,7 @@ table.roster td.dim2 { color: var(--text-2); }
 table.roster tr.sel th, table.roster tr.sel td { background: var(--ground-sel); }
 table.roster .slot { display: inline-block; width: 26px; color: var(--text-3); font-weight: 600; font-size: 12px; }
 table.roster .photo { margin-right: 7px; }
-table.roster .pname { padding: 0; min-height: 32px; background: none; border: 0; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text); }
+table.roster .pname { padding: 0; min-height: 32px; background: none; border: 0; font-size: 13.5px; font-weight: 500; color: var(--text); }
 table.roster .who { display: inline-flex; flex-direction: column; justify-content: center; vertical-align: middle; min-width: 0; max-width: 100px; line-height: 1.2; }
 table.roster .who > span { overflow: hidden; text-overflow: ellipsis; }
 table.roster .who .pname { min-height: 0; }
@@ -164,18 +164,15 @@ table.roster .who .game { font-size: 11px; color: var(--text-3); }
 table.roster .pname.warn { color: var(--warn); }
 table.roster .pname.bad { color: var(--bad); }
 table.roster .flag { font-size: 10.5px; font-weight: 700; }
-table.roster tr.note td { text-align: left; height: auto; padding: 0; background: var(--ground-2); font-family: var(--sans); white-space: normal; }
-table.roster tr.note td span { display: block; position: sticky; left: 0; max-width: min(100vw, 480px); box-sizing: border-box; padding: 6px 12px 8px; color: var(--text-2); font-size: 12px; }
 /* Tonight on a phone: a card per player. Columns: slot, photo, name (P%) and game, xPts / live. */
 .tn-list { border-top: 1px solid var(--rule); }
 .tn-head { position: sticky; top: 0; z-index: 2; margin: 0; padding: 5px 12px; background: var(--ground-3); color: var(--text-3); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; display: flex; justify-content: space-between; gap: 8px; }
 .tn-head .cap { font-weight: 500; text-transform: none; letter-spacing: 0; }
 .tn-row { display: grid; grid-template-columns: 26px 34px minmax(0, 1fr) 46px; column-gap: 7px; row-gap: 5px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
-.tn-row.sel { background: var(--ground-sel); }
 .tn-row .slot { color: var(--text-3); font-weight: 600; font-size: 12px; }
 .tn-row .who { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
 .tn-row .who > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tn-row .pname { padding: 0; background: none; border: 0; font-size: 13.5px; font-weight: 500; cursor: pointer; color: var(--text); }
+.tn-row .pname { padding: 0; background: none; border: 0; font-size: 13.5px; font-weight: 500; color: var(--text); }
 .tn-row .pname.warn { color: var(--warn); }
 .tn-row .pname.bad { color: var(--bad); }
 .tn-row .flag { font-size: 10.5px; font-weight: 700; }
@@ -190,7 +187,6 @@ table.roster tr.note td span { display: block; position: sticky; left: 0; max-wi
 :is(.tn-row, table.roster) .tag .k { font-family: var(--sans); font-weight: 500; color: var(--text-3); }
 /* The PC table's day view: the game, then the box line in its own columns. */
 table.roster .game-col { text-align: left; font-family: var(--sans); width: 170px; min-width: 170px; }
-.tn-note { padding: 6px 12px 8px; background: var(--ground-2); border-bottom: 1px solid var(--rule); color: var(--text-2); font-size: 12px; }
 table.roster button.sort { padding: 0 2px; min-height: 36px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
 table.roster button.sort.on { color: var(--you); }
 .elig { margin-left: 5px; font-size: 11px; font-weight: 500; color: var(--text-3); }
@@ -444,7 +440,6 @@ table.list.box thead th.n { overflow: visible; }
    stop truncating. */
 @media (min-width: 600px) {
   .app { max-width: none; }
-  table.roster tr.note td span { max-width: min(100vw, 760px); }
 }
 .login { width: 100%; max-width: 420px; margin: 0 auto; }
 
@@ -452,7 +447,7 @@ table.list.box thead th.n { overflow: visible; }
 :focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
 @media (hover: hover) {
   table.list tbody tr:not(.per):hover td, table.list tbody tr:not(.per):hover th { background: var(--ground-sel); }
-  table.roster tr:not(.sub):not(.note):hover th, table.roster tr:not(.sub):not(.note):hover td { background: var(--ground-sel); }
+  table.roster tr:not(.sub):hover th, table.roster tr:not(.sub):hover td { background: var(--ground-sel); }
   .btn:not(:disabled):hover { border-color: #4A5B7C; }
   .btn.primary:not(:disabled):hover { filter: brightness(1.08); }
   .game-card:hover { border-color: var(--rule-strong); }

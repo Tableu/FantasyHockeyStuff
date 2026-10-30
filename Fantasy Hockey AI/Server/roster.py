@@ -52,29 +52,10 @@ def season(stats: dict, weights: dict, goalie: bool) -> dict:
     return out
 
 
-def notes(row: dict, slot: dict | None, watch: dict, goalie_note: dict | None) -> list:
-    """What the plan says about him, for the row's tap-open line."""
-    out = []
-    w = watch.get(row["player"])
-    if w:
-        out.append(w["status"] + (f": {w['note']}" if w.get("note") else ""))
-    if goalie_note is not None:
-        out.append(f"P(start) {goalie_note['p_start']:.0%}" + (f" · {goalie_note['note']}" if goalie_note.get("note") else ""))
-    if slot is not None and slot.get("after_moves"):
-        out.append(f"After the plan's moves, {slot['after_moves']} plays this slot")
-    if row.get("plan"):
-        out.append(f"Plan: {row['plan']}")
-    if row.get("on_waivers"):
-        out.append("On waivers")
-    return out
-
-
 def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, team: None) -> dict:
     """`slot_rows`: the league's lineup slots in its own order (C C LW LW ... G G), the lineup's order.
     `photo(player_id, team)`: his headshot's URL, or None."""
     by_name = {r["player"]: r for r in plan.get("roster", [])}
-    watch = {w["player"]: w for w in plan.get("watch", [])}
-    goalie_notes = {g["player"]: g for g in plan.get("goalies", [])}
     columns = plan.get("stat_columns", [])
 
     def row_of(r: dict, slot: dict | None, where: str) -> dict:
@@ -95,8 +76,7 @@ def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, t
                 "flag": (slot or {}).get("flag") or r.get("status"),
                 "xpts": xpts, "p_plays": p_plays, "puck_utc": puck, "locked": locked,
                 "rate": r.get("rate"), "ros": r.get("ros_points"), "games_left": r.get("games_left"),
-                "season": season(r.get("stats"), weights, goalie),
-                "notes": notes(r, slot, watch, goalie_notes.get(r["player"]) if goalie else None)}
+                "season": season(r.get("stats"), weights, goalie)}
 
     lineup, empty = [], 0
     rank = {slot: i for i, slot in enumerate(dict.fromkeys(slot_rows))}

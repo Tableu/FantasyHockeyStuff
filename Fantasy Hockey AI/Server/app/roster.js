@@ -1,8 +1,7 @@
 // The Roster screen (plan P1; redesign plan app-redesign.md, step 1): your lineup, bench and IR
 // from GET /roster for a day of the fantasy week, with live points from GET /tonight on today.
 // The day picker holds the whole week (a day gone: its plan, finals and points; a day ahead: its
-// games and projection); Season is its own button (tap a header to sort). Tap a name for what the
-// plan says about him. The day on a phone is a card per player (the user, 2026-10-20): name, P%
+// games and projection); Season is its own button (tap a header to sort). The day on a phone is a card per player (the user, 2026-10-20): name, P%
 // and game, xPts on the right, his scoring stats and TOI as tags below, his points under xPts. On
 // a PC (`wide`) the same two views as a table, the box line in its own columns.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
@@ -140,15 +139,14 @@ function sorted(rows, sort) {
 const groupColumns = (group, columns) => (group.goalie ? columns.goalie : columns.skater);
 
 // Name, eligible positions and flag: the same on a card and in the table.
-function Who({ row, isOpen, onToggle }) {
-  return html`<button type="button" class=${`pname ${FLAG_CLASS[row.flag] || ''}`} aria-expanded=${isOpen}
-      onClick=${() => onToggle(row.player_id)} title=${row.player}>${row.name}</button><span class="elig" title="Eligible positions">${row.positions}</span>
+function Who({ row }) {
+  return html`<span class=${`pname ${FLAG_CLASS[row.flag] || ''}`} title=${row.player}>${row.name}</span><span class="elig" title="Eligible positions">${row.positions}</span>
     ${row.flag && html` <span class=${`flag ${FLAG_CLASS[row.flag] || 'warn'}`}>${row.flag}</span>`}`;
 }
 
 // One group's rows in the shared table; `span` is the widest group's column count, so a group with
 // fewer columns (the goalies) is padded out to the table's edge.
-function Group({ group, view, columns, span, live, gone, open, onToggle, sort, onSort }) {
+function Group({ group, view, columns, span, live, gone, sort, onSort }) {
   const cols = heads(view, group.goalie, groupColumns(group, columns), gone);
   const pad = Array.from({ length: Math.max(0, span - cols.length) });
   const rows = view === 'day' ? group.rows : sorted(group.rows, sort);
@@ -169,24 +167,22 @@ function Group({ group, view, columns, span, live, gone, open, onToggle, sort, o
       const cells = view === 'day'
         ? dayCells(row, live && live[row.player_id], group.goalie, groupColumns(group, columns))
         : seasonCells(row, groupColumns(group, columns));
-      const isOpen = open === row.player_id && row.notes.length > 0;
       return html`
-        <tr class=${isOpen ? 'sel' : ''}>
+        <tr>
           <th scope="row" class="stick">
             <span class="slot">${row.slot}</span>
             <${Photo} src=${row.photo} name=${row.name} size=${30} />
-            <${Who} row=${row} isOpen=${isOpen} onToggle=${onToggle} />
+            <${Who} row=${row} />
           </th>
           ${cells.map((c) => html`<td class=${c.cls || ''} style=${c.weight ? `font-weight: ${c.weight}` : ''}>${c.text}</td>`)}
           ${pad.map(() => html`<td></td>`)}
-        </tr>
-        ${isOpen && html`<tr class="note"><td colspan=${Math.max(span, cols.length) + 1}><span>${row.player} · ${row.positions}: ${row.notes.join(' · ')}</span></td></tr>`}`;
+        </tr>`;
     })}
   </tbody>`;
 }
 
 // The day on a phone: one card per player, the group's name sticking at the top.
-function DayGroup({ group, columns, live, open, onToggle }) {
+function DayGroup({ group, columns, live }) {
   return html`<section class="tn" aria-label=${group.name}>
     <h3 class="tn-head">${group.name}<span class="cap">Expected points</span></h3>
     ${group.rows.map((row) => {
@@ -194,13 +190,12 @@ function DayGroup({ group, columns, live, open, onToggle }) {
       const line = mine && mine.line;
       const { prob, probWarn } = playChance(row, mine, group.goalie);
       const tags = boxTags(line, group.goalie, groupColumns(group, columns));
-      const isOpen = open === row.player_id && row.notes.length > 0;
       const game = gameLine(row, mine && mine.game) || (row.where === 'ir' ? 'On IR' : 'No game');
-      return html`<div class=${`tn-row ${isOpen ? 'sel' : ''}`}>
+      return html`<div class="tn-row">
         <span class="slot">${row.slot}</span>
         <${Photo} src=${row.photo} name=${row.name} size=${34} />
         <span class="who">
-          <span><${Who} row=${row} isOpen=${isOpen} onToggle=${onToggle} />
+          <span><${Who} row=${row} />
           <span class=${`p ${probWarn ? 'warn' : ''}`} title="Chance he plays">${probText(prob)}</span></span>
           <span class="game">${game}</span>
         </span>
@@ -208,8 +203,7 @@ function DayGroup({ group, columns, live, open, onToggle }) {
         ${line && html`
           <${Tags} tags=${tags} />
           <span class="live" title="Fantasy points that day">${f2(line.fantasy)}</span>`}
-      </div>
-      ${isOpen && html`<div class="tn-note">${row.player} · ${row.positions}: ${row.notes.join(' · ')}</div>`}`;
+      </div>`;
     })}
   </section>`;
 }
@@ -223,7 +217,6 @@ export function Roster({ league, version, wide }) {
   const [view, setView] = useState(() => (store.get('fh.roster.view') === 'season' ? 'season' : 'day'));
   // The day shown: 'today' or a date this week (not kept: a day goes stale).
   const [day, setDay] = useState('today');
-  const [open, setOpen] = useState(null);
   // The Season sort: {key, desc}, or null for the roster's order; kept on this phone.
   const [sort, setSort] = useState(() => {
     try { return JSON.parse(store.get('fh.roster.sort')) || null; } catch (_) { return null; }
@@ -309,7 +302,6 @@ export function Roster({ league, version, wide }) {
        { name: 'Goalies', goalie: true, rows: all.filter((r) => r.goalie) }].filter((g) => g.rows.length)
     : data.groups;
   const span = Math.max(...groups.map((g) => heads(view, g.goalie, groupColumns(g, data.columns), gone).length));
-  const toggle = (id) => setOpen(open === id ? null : id);
   return html`
     <div class="sum">
       ${sum.map(([k, v], i) => html`<div><span class="k">${k}</span><span class=${`v ${i === 1 ? 'you' : ''}`}>${v}</span></div>`)}
@@ -320,10 +312,9 @@ export function Roster({ league, version, wide }) {
     ${view === 'day' && entry.state === 'today' && data.empty_slots > 0 && data.games_today
       && html`<div class="error">${data.empty_slots} empty lineup slot${data.empty_slots > 1 ? 's' : ''} tonight</div>`}
     ${view === 'day' && !wide
-      ? html`<div class="tn-list">${groups.map((g) => html`<${DayGroup} key=${g.name} group=${g} columns=${data.columns} live=${live}
-          open=${open} onToggle=${toggle} />`)}</div>`
+      ? html`<div class="tn-list">${groups.map((g) => html`<${DayGroup} key=${g.name} group=${g} columns=${data.columns} live=${live} />`)}</div>`
       : html`<div class="table-scroll"><table class=${`roster ${view}`}>
       ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${view} columns=${data.columns} span=${span}
-        live=${live} gone=${gone} open=${open} onToggle=${toggle} sort=${sort} onSort=${sortBy} />`)}
+        live=${live} gone=${gone} sort=${sort} onSort=${sortBy} />`)}
     </table></div>`}`;
 }
