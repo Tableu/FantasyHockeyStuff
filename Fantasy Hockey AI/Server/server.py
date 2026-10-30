@@ -676,7 +676,8 @@ def make_app(worker: Worker) -> FastAPI:
                              pool.map(lambda d: nhl(league, "day", d, held)["players"], dates)))
         workbench = (suggestions.plans_shown(today_plan, "this") or [{}])[0].get("workbench")
         return {"league": chosen.name,
-                **headtohead.view([d.isoformat() for d in dates], today.isoformat(), plans, lineups, boxes, workbench)}
+                **headtohead.view([d.isoformat() for d in dates], today.isoformat(), plans, lineups, boxes, workbench,
+                                  today_plan.get("matchup_projection"))}
 
     @app.get("/suggestions")
     def get_suggestions(week: str = "this", league: str | None = None):

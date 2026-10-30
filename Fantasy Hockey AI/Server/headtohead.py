@@ -4,12 +4,14 @@ view -- the week's points by player, or one day drawn like the Roster's cards.
 
     people(plans)                             {player id: {name, player, positions, team, side}}
     view(dates, today, plans, lineups, boxes, workbench)
-                                              {days: [{date, state}], players: [{..., days: {date:
+                                              {days: [{date, state, platform: {me, opp} points}],
+                                               players: [{..., days: {date:
                                                {slot, xpts, p_plays, game, points}}}]}
 
 A day gone and today: the slots the platform kept (Matchups.day_lineup, both teams), the
-projection that day's own plan made. A day ahead: today's lineup and bench, your projection from
-plan A's workbench, your opponent's his points per game when his team plays. Points are the NHL
+projection that day's own plan made. A day ahead: no lineup is set yet, so everyone with a game
+plays (IR apart; the user, 2026-10-30) -- your projection from plan A's workbench, your
+opponent's his points per game -- and the day's total is the plan's matchup projection. Points are the NHL
 box scores' in the league's scoring (games.Games.day).
 """
 
@@ -44,10 +46,12 @@ def _plan_slots(plan: dict) -> tuple:
     return slots, lineup
 
 
-def view(dates: list, today: str, plans: dict, lineups: dict, boxes: dict, workbench: dict | None) -> dict:
+def view(dates: list, today: str, plans: dict, lineups: dict, boxes: dict, workbench: dict | None,
+         projection: dict | None = None) -> dict:
     """`dates`: the week's days (ISO); `plans`: {date: that day's newest plan, today's for a day
     ahead without one, None}; `lineups`: {date: Matchups.day_lineup's answer or None} for days up
-    to today; `boxes`: {date: games.Games.day's players}; `workbench`: plan A's."""
+    to today; `boxes`: {date: games.Games.day's players}; `workbench`: plan A's; `projection`: the
+    plan's matchup_projection (each side's nights)."""
     who = people(plans)
     values = {int(k): p.get("values", {}) for k, p in ((workbench or {}).get("players") or {}).items()}
     today_slots = None
@@ -93,8 +97,17 @@ def view(dates: list, today: str, plans: dict, lineups: dict, boxes: dict, workb
                     xpts = round(r["per_game"] * p_plays, 2) if p_plays else None
                 else:
                     xpts, p_plays = (r["per_game"] if game else None), None
-            p["days"][date] = {"slot": side_slots[pid], "xpts": xpts, "p_plays": p_plays, "game": game,
+            slot = side_slots[pid]
+            if state == "ahead" and slot != "IR":
+                slot = None                  # no lineup set yet: he plays if his team does
+            p["days"][date] = {"slot": slot, "xpts": xpts, "p_plays": p_plays, "game": game,
                                "points": line["fantasy"] if line else None,
-                               "counts": side_slots[pid] not in OUT_OF_LINEUP}
-    return {"days": [{"date": d, "state": "final" if d < today else "today" if d == today else "ahead"} for d in dates],
+                               "counts": slot not in OUT_OF_LINEUP}
+    # Each day's points as the platform scored them (the totals; a box score the NHL corrected
+    # since can differ from them by a little), where it was read.
+    scored = {d: {"me": got["points"], "opp": got["opp_points"]} for d, got in lineups.items() if got is not None}
+    nights = {side: ((projection or {}).get(side) or {}).get("nights") or {} for side in ("me", "opp")}
+    return {"days": [{"date": d, "state": "final" if d < today else "today" if d == today else "ahead",
+                      "platform": scored.get(d),
+                      "projected": {"me": nights["me"].get(d), "opp": nights["opp"].get(d)}} for d in dates],
             "players": [p for p in players.values() if p["days"]]}

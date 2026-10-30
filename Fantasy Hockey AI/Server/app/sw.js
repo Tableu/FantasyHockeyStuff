@@ -3,7 +3,7 @@
 // too, each answer kept; with the server out of reach the last one is served, marked with
 // X-Saved-At (when it was fetched) so the app can say it is stale. Live game calls are never kept:
 // an old score is worse than none.
-const SHELL_CACHE = 'fh-shell-v56';
+const SHELL_CACHE = 'fh-shell-v59';
 const DATA_CACHE = 'fh-data-v1';
 const LOGO_CACHE = 'fh-logos-v1';   // the NHL's team logos (assets.nhle.com): kept, they rarely change
 const LOGOS = 'https://assets.nhle.com/logos/';

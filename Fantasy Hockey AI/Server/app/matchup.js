@@ -159,7 +159,8 @@ function playerCell(p, date, side) {
   if (!p) return null;
   const base = { name: p.name, elig: p.positions, prob: '', probCls: '', info: '', top: '', bot: '', dim: false };
   if (!date) {
-    const counted = Object.values(p.days).filter((e) => e.counts);
+    // Days with a lineup set (a day ahead has none: slot null).
+    const counted = Object.values(p.days).filter((e) => e.counts && e.slot !== null);
     const pts = counted.reduce((t, e) => t + (e.points || 0), 0);
     return { ...base, prob: counted.length ? '' : 'BN', dim: !counted.length, info: p.team || '', top: f2(pts) };
   }
@@ -177,25 +178,45 @@ function playerCell(p, date, side) {
     info: gameLine({}, game), top: bench || e.xpts === null ? '' : f2(e.xpts) };
 }
 
-// The Players view: each side's players by their first position, best week first, paired row by
-// row. The week: each player's points this week, bench (BN) days left out. A day: as the Roster's
-// cards, the totals adding what counted (a day ahead: its projection).
+// The Players view, each side's players paired row by row. The week: by their first position,
+// best week first, each player's points this week, bench (BN) days left out. A day: that day's
+// roster as the Roster's cards -- the players who play that day at the top (a game and a lineup
+// slot; a day ahead has no lineup yet, so a game and not IR), the rest under Bench (the user, 2026-10-30);
+// the totals add what counted (a day ahead: its projection).
 function HeadToHead({ h2h, day }) {
   const entry = day === null ? null : h2h.days.find((d) => (day === 'today' ? d.state === 'today' : d.date === day));
   const date = entry ? entry.date : null;
   const shown = (side) => h2h.players.filter((p) => p.side === side && (!date || p.days[date]));
   const weekPts = (p) => Object.values(p.days).filter((e) => e.counts).reduce((t, e) => t + (e.points || 0), 0);
-  const total = (side) => shown(side).reduce((t, p) => {
+  // The platform's points where it has them (a day gone, today, the week so far), else the players'.
+  const platform = (side) => {
+    const key = side === 'me' ? 'me' : 'opp';
+    const of = (x) => (x && x[key] !== null && x[key] !== undefined ? x[key] : null);
+    if (date) return entry.state === 'ahead' ? of(entry.projected) : of(entry.platform);
+    const gone = h2h.days.filter((d) => d.state !== 'ahead');
+    return gone.every((d) => d.platform && d.platform[key] !== null && d.platform[key] !== undefined)
+      ? gone.reduce((t, d) => t + d.platform[key], 0) : null;
+  };
+  const total = (side) => platform(side) ?? shown(side).reduce((t, p) => {
     if (!date) return t + weekPts(p);
     const e = p.days[date];
     if (!e.counts) return t;
     return t + ((entry.state === 'ahead' ? e.xpts : e.points) || 0);
   }, 0);
-  const groups = POSITIONS.map((pos) => {
-    const of = (side) => shown(side).filter((p) => p.positions.split('/')[0] === pos).sort((a, b) => weekPts(b) - weekPts(a));
-    const ys = of('me'), os = of('opp');
-    return { pos, rows: Array.from({ length: Math.max(ys.length, os.length) }, (_, i) => [playerCell(ys[i], date, 'you'), playerCell(os[i], date, 'opp')]) };
-  }).filter((g) => g.rows.length);
+  const pair = (ys, os) => Array.from({ length: Math.max(ys.length, os.length) }, (_, i) => [playerCell(ys[i], date, 'you'), playerCell(os[i], date, 'opp')]);
+  const rank = (p) => POSITIONS.indexOf(p.positions.split('/')[0]);
+  // Plays that day: a game, and a slot that counts (a day ahead: anything but IR).
+  const plays = (p) => { const e = p.days[date]; return !!e.game && e.counts; };
+  const value = (p) => { const e = p.days[date]; return (entry.state === 'ahead' ? e.xpts : e.points ?? e.xpts) || 0; };
+  const byDay = (list) => list.slice().sort((a, b) => rank(a) - rank(b) || value(b) - value(a));
+  const groups = !date
+    ? POSITIONS.map((pos) => {
+      const of = (side) => shown(side).filter((p) => p.positions.split('/')[0] === pos).sort((a, b) => weekPts(b) - weekPts(a));
+      return { pos, rows: pair(of('me'), of('opp')) };
+    }).filter((g) => g.rows.length)
+    : [{ pos: '', rows: pair(byDay(shown('me').filter(plays)), byDay(shown('opp').filter(plays))) },
+      { pos: '', bench: true, rows: pair(byDay(shown('me').filter((p) => !plays(p))), byDay(shown('opp').filter((p) => !plays(p)))) }]
+      .filter((g) => g.rows.length);
   const head = !date ? 'Week' : entry.state === 'today' ? 'Tonight' : shortDay(date);
   const cell = (c, right) => {
     if (!c) return html`<td></td>`;
@@ -210,14 +231,15 @@ function HeadToHead({ h2h, day }) {
     ? 'Week points each player has scored. Bench days (BN) do not count toward the total. Players line up by position, best week first.'
     : entry.state === 'today' ? 'As on the Roster: expected points tonight, and in colour under them, the points so far. Totals add the points so far; bench (BN) points do not count.'
       : entry.state === 'final' ? `${dayName(entry, h2h.days)}: expected points, and in colour under them, the points each player scored, in the slots the platform kept. Bench (BN) points do not count.`
-        : `${dayName(entry, h2h.days)}: expected points for each player with a game, on today's lineup and bench. Bench players (BN) do not count.`;
+        : `${dayName(entry, h2h.days)}: expected points for each player with a game; no lineup is set yet. Totals are the plan's projection for the night, its best lineup.`;
+  const note = date && entry.state === 'ahead' ? '' : " Totals are the platform's own points.";
   return html`<table class="h2h">
       <thead><tr>
         <th scope="col" class="you"><div class="hd"><span>You</span><span>${head}</span></div></th>
         <th scope="col" class="pos-col"><span class="sr">Position</span></th>
         <th scope="col" class="opp"><div class="hd"><span>${head}</span><span>Opp</span></div></th>
       </tr></thead>
-      ${groups.map((g) => html`<tbody class="grp">${g.rows.map(([y, o]) => html`<tr>
+      ${groups.map((g) => html`<tbody class="grp">${g.bench && html`<tr class="bench-h"><td colspan="3">Bench</td></tr>`}${g.rows.map(([y, o]) => html`<tr>
         ${cell(y, false)}<td class="pos-col">${g.pos}</td>${cell(o, true)}</tr>`)}</tbody>`)}
       <tbody><tr class="total">
         <td><div class="hd"><span>Total</span><span class="pts you">${f2(total('me'))}</span></div></td>
@@ -225,5 +247,5 @@ function HeadToHead({ h2h, day }) {
         <td><div class="hd"><span class="pts opp">${f2(total('opp'))}</span><span>Total</span></div></td>
       </tr></tbody>
     </table>
-    <p class="foot">${foot}</p>`;
+    <p class="foot">${foot}${note}</p>`;
 }

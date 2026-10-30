@@ -676,3 +676,4 @@ table.h2h .el-l, table.h2h .pb-l { margin-left: 0; margin-right: 5px; }
 table.h2h .pb { margin-left: 5px; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--text-3); }
 table.h2h .pb.warn { color: var(--warn); }
 table.h2h tr.total td { font-weight: 700; }
+table.h2h tr.bench-h td { background: var(--ground-2); color: var(--text-3); height: 24px; padding-top: 0; padding-bottom: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
