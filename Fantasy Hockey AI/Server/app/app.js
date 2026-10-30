@@ -1,6 +1,6 @@
 // The phone app's shell (plan P0): header with the league, the day, how fresh each step is and
 // the gear to More; the running refresh's progress; the bottom tabs. Roster is roster.js (P1),
-// Players is players.js (redesign step 2), AI is ai.js (P2), Planner is planner.js (P3), Games and a game's screens are games.js (P4),
+// Players is players.js (redesign step 2), Plan is plan.js (redesign step 3: the Planner and AI in one), Games and a game's screens are games.js (P4),
 // Matchup is matchup.js (P5). Everything shown comes from the plan server (api.js);
 // nothing is computed here. A window WIDE_PX or wider (layout.js) gets the PC layout: the tabs as a
 // sidebar, and Games as a list, the chosen game and the goal feed side by side.
@@ -8,15 +8,13 @@ import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundar
 import { api, onStale, onAuth } from './api.js';
 import { Roster } from './roster.js';
 import { Players } from './players.js';
-import { Suggestions } from './ai.js';
-import { Planner } from './planner.js';
+import { Plan } from './plan.js';
 import { Games, Game } from './games.js';
 import { Matchup } from './matchup.js';
 import { useWide, useEscape, REFRESH_EVENT } from './layout.js';
 
 const TABS = [
-  ['roster', 'Roster'], ['players', 'Players'], ['planner', 'Planner'], ['ai', 'AI'],
-  ['games', 'Games'], ['matchup', 'Matchup'],
+  ['roster', 'Roster'], ['players', 'Players'], ['plan', 'Plan'], ['games', 'Games'], ['matchup', 'Matchup'],
 ];
 // More is the header's gear (the redesign), not a tab.
 const ROUTES = [...TABS.map(([id]) => id), 'more'];
@@ -135,6 +133,8 @@ function useRoute() {
     const path = location.hash.replace(/^#\/?/, '');
     const game = path.match(/^game\/(\d+)(?:\/(summary|box|plays|lines))?$/);
     if (game) return { tab: 'games', game: Number(game[1]), view: game[2] || 'summary' };
+    // The Planner and AI tabs are Plan now: their old links land there.
+    if (path === 'planner' || path === 'ai') return { tab: 'plan' };
     return { tab: ROUTES.includes(path) ? path : 'roster' };
   };
   const [route, setRoute] = useState(read);
@@ -453,7 +453,7 @@ function App() {
     // The PC layout: the sidebar, then the header and the screen. Games keeps its list, the chosen
     // game and the goal feed side by side, each scrolling on its own, as the Planner does.
     const games = tab === 'games' || !!route.game;
-    const fill = games || tab === 'planner' || tab === 'players';
+    const fill = games || tab === 'plan' || tab === 'players';
     return html`<div class="app wide">
       <${Tabs} tab=${tab} side />
       <div class="col">
@@ -466,9 +466,8 @@ function App() {
           ${!league ? html`<div class="empty">Loading…</div>`
             : games ? html`<${Games} league=${league} version=${version} wide selected=${route.game || null} view=${route.view || 'summary'} />`
               : tab === 'more' ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} />`
-                : tab === 'ai' ? html`<${Suggestions} league=${league} version=${version} wide />`
-                  : tab === 'players' ? html`<${Players} league=${league} version=${version} wide />`
-                  : tab === 'planner' ? html`<${Planner} league=${league} version=${version} wide />`
+                : tab === 'players' ? html`<${Players} league=${league} version=${version} wide />`
+                  : tab === 'plan' ? html`<${Plan} league=${league} version=${version} wide />`
                     : tab === 'matchup' ? html`<${Matchup} league=${league} version=${version} />`
                       : html`<${Roster} league=${league} version=${version} wide />`}
           </${Guard}>
@@ -505,10 +504,8 @@ function App() {
           ? html`<${Roster} league=${league} version=${version} />`
           : tab === 'players' && league
             ? html`<${Players} league=${league} version=${version} />`
-          : tab === 'ai' && league
-            ? html`<${Suggestions} league=${league} version=${version} />`
-            : tab === 'planner' && league
-              ? html`<${Planner} league=${league} version=${version} />`
+            : tab === 'plan' && league
+              ? html`<${Plan} league=${league} version=${version} />`
               : tab === 'matchup' && league
                 ? html`<${Matchup} league=${league} version=${version} />`
                 : html`<div class="empty">Loading…</div>`}

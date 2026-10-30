@@ -67,7 +67,8 @@ export const api = {
   suggestions: (league, week) => call('GET', '/suggestions', { league, query: { week } }),
   pick: (league, body) => call('POST', '/choices/pick', { league, body }),
   together: (league, body) => call('POST', '/choices/together', { league, body }),
-  week: (league, week) => call('GET', '/week', { league, query: { week } }),
+  // show: a week plan's label, drawn over your week (the Plan tab's chips).
+  week: (league, week, show) => call('GET', '/week', { league, query: { week, ...(show ? { show } : {}) } }),
   picker: (league, week, day, occupant, slot) => call('GET', '/week/picker',
     { league, query: { week, day, slot, ...(occupant ? { occupant } : {}) } }),
   drops: (league, week, day, add, occupant) => call('GET', '/week/drops',

@@ -3,13 +3,16 @@ the newest plan's plan A workbench -- weekbook.Week puts the picks in and solves
 are yours alone: the server never plans on them (the user, 2026-10-08).
 
     Book(plan, chosen, week, slot_order, accepts)    the week shown, its picks put in
-      .view(slot_rows)                               the calendar: per night its points, open slots,
+      .view(slot_rows, show)                         the calendar: per night its points, open slots,
                                                      your picks that day, who starts in each slot,
-                                                     and the bench (held, not starting)
+                                                     and the bench (held, not starting); `show` a
+                                                     week plan's label: that plan's week drawn
+                                                     instead, its picks not yours marked `ghost`
       .picker(day, occupant)                         the slot picker's free agents
       .drops(day, add, occupant)                     who that pick may drop, with each one's week gain
-    edit(chosen, book, body)                         a pick, a rental replaced, a pick taken out, or
-                                                     the week cleared -- a changed copy of `chosen`
+    edit(chosen, book, body)                         a pick, a rental replaced, a pick taken out, the
+                                                     week cleared, one of a plan's picks taken or the
+                                                     whole plan used -- a changed copy of `chosen`
 """
 
 import copy
@@ -44,8 +47,26 @@ class Book:
                 "drop": m["drop"], "drop_name": None if m["drop"] is None else b.name(m["drop"]),
                 "problem": m["problem"]}
 
-    def view(self, slot_rows: list) -> dict:
-        b, moves = self.book, self.moves
+    def plan_named(self, label):
+        return next((p for p in self.plans if p.get("label") == label and p.get("moves")), None)
+
+    def plan_moves(self, plan: dict) -> list:
+        """A week plan's moves put in as if they were your picks; each carries its slot's index
+        in the plan (`index`)."""
+        index = {(m["day"], m.get("add_id")): i for i, m in enumerate(plan["moves"])}
+        placed = self.book.place([(m["day"], m["add_id"], m.get("drop_id")) for m in plan["moves"]
+                                  if m.get("add_id") is not None])
+        return [{**m, "index": index.get((m["picked"], m["add"]))} for m in placed]
+
+    def view(self, slot_rows: list, show: str | None = None) -> dict:
+        """`show`: a week plan's label (the Plan tab's chips, the user's design 2026-10-30) -- its week
+        drawn on the calendar, its picks and pickups that are not yours marked `ghost`, to take
+        one at a time or all; None or unknown: your picks."""
+        b = self.book
+        shown = self.plan_named(show) if show else None
+        moves = self.plan_moves(shown) if shown else self.moves
+        mine = {(m["picked"], m["add"]) for m in self.moves}
+        my_rentals = {m["add"] for m in b.made(self.moves)}
         rentals = {m["add"] for m in b.made(moves)}
         nights = []
         for n in b.nights_view(moves):
@@ -57,7 +78,8 @@ class Book:
                 s = waiting.get(slot, []).pop(0) if waiting.get(slot) else None
                 cells.append({"slot": slot, "player_id": None if s is None else s["player_id"],
                               "player": None if s is None else s["player"], "pts": None if s is None else s["pts"],
-                              "rental": s is not None and s["player_id"] in rentals})
+                              "rental": s is not None and s["player_id"] in rentals,
+                              "ghost": s is not None and s["player_id"] in rentals - my_rentals})
             # Held but not started: who plays that night (most points first), then who does not.
             started = {s["player_id"] for s in n["started"]}
             bench = []
@@ -66,15 +88,24 @@ class Book:
                     continue
                 pts = b.players.get(q, {}).get("values", {}).get(n["day"])
                 bench.append({"player_id": q, "player": b.name(q), "pts": pts, "plays": pts is not None,
-                              "status": b.players.get(q, {}).get("status"), "rental": q in rentals})
+                              "status": b.players.get(q, {}).get("status"), "rental": q in rentals,
+                              "ghost": q in rentals - my_rentals})
             bench.sort(key=lambda c: (not c["plays"], -(c["pts"] or 0.0), c["player"]))
             nights.append({"day": n["day"], "points": round(n["points"], 2), "open": len(n["open"]),
-                           "picks": [self._pick(m) for m in n["moves"]], "cells": cells, "bench": bench})
-        used = b.used(moves)
-        return {"which": self.which, "has_next": bool(self.plan.get("next_week_plans")),
+                           "picks": [{**self._pick(m), "ghost": (m["picked"], m["add"]) not in mine,
+                                      "index": m.get("index")} for m in n["moves"]],
+                           "cells": cells, "bench": bench})
+        used = b.used(self.moves)
+        # Each plan's week against yours, for its chip.
+        plans = [{"label": p["label"],
+                  "points": round(b.week_points([m for m in self.plan_moves(p) if m["problem"] is None]), 2)}
+                 for p in self.plans if p.get("moves")]
+        return {"shown": shown["label"] if shown else None, "plans": plans,
+                "mine_points": round(b.week_points(b.made(self.moves)), 2),
+                "which": self.which, "has_next": bool(self.plan.get("next_week_plans")),
                 "week": self.plan.get("week"), "next_week": self.plan.get("next_week"),
                 "today": b.today, "moves_left": b.bench["moves_left"], "used": used,
-                "picks": len(moves), "left_out": sum(1 for m in moves if m["problem"]),
+                "picks": len(self.moves), "left_out": sum(1 for m in self.moves if m["problem"]),
                 "slot_rows": slot_rows, "nights": nights}
 
     def picker(self, day: str, occupant: int | None, slot: str | None = None) -> dict:
@@ -128,6 +159,18 @@ def edit(chosen: dict, book: Book, body) -> dict:
         choices.unpin(new, body.day, body.add)
     elif body.action == "clear":
         choices.clear_days(new, book.book.move_days)
+    elif body.action in ("take", "use"):
+        # One of a week plan's picks into yours (body.index), or the whole plan in place of
+        # this week's picks -- each with the plan's drop (choices.plan_drop).
+        plan = book.plan_named(body.label)
+        if plan is None:
+            raise ValueError(f"no week plan {body.label!r} this week")
+        if body.action == "use":
+            choices.clear_days(new, book.book.move_days)
+        for index in ([body.index] if body.action == "take" else range(len(plan["moves"]))):
+            m = plan["moves"][index]
+            if m.get("add_id") is not None and m["add_id"] not in choices.picked(new, m["day"]):
+                choices.pin(new, m["day"], m["add_id"], choices.plan_drop(plan, index, new))
     else:
         raise ValueError(f"unknown action {body.action!r}")
     return new

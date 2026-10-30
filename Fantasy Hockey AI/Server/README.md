@@ -129,24 +129,26 @@ of them or falls back. The draft tools that show it on draft night are in Deskto
 
 ## The phone app
 
-`app/` is the phone app (a PWA, plan `phone-app-pwa.md`), served by server.py at `/app/`: static
+`app/` is the phone app (a PWA, plan `phone-app-pwa.md`; the screens redesigned from the Fantasy
+Hockey App canvas, plan `app-redesign.md`, 2026-10-30), served by server.py at `/app/`: static
 files, no build step. Preact + htm are vendored in `app/vendor/` (htm 3.1.1's standalone build) and the IBM
 Plex fonts in `app/fonts/`, so nothing loads from a CDN. The app only shows what the API returns.
 
 Built so far: P0, the header (league, day, how long ago each step ran, amber past 2 h; on the PC
 one Refresh button, a Quick of the league shown), a running refresh's progress lines, the bottom
-tabs, and the More tab (Refresh: League, News, Quick, Full for the league shown; league switch,
-refresh log from `GET /jobs`, server status). Pull down on Roster, Planner, AI or Matchup runs a
-Quick of the league shown; a screen with no plan yet has a Make a plan button; P1, the Roster screen (`app/roster.js`): your lineup
-as it stands, bench and IR from `GET /roster` (roster.py: tonight's projection, the season in the
-league's scoring), with tonight's games and live points from `GET /tonight` (games.py, every 20 s).
-P2, the AI suggestions screen (`app/ai.js`): today's moves, the upgrades and the week plans from
-`GET /suggestions` (suggestions.py); an option tapped picks him into your week with the plan's drop
-(`POST /choices/pick`, choices.py's pick_from_plan -- the window's click, moved there).
-P3, the Weekly planner (`app/planner.js`): your week from your picks on plan A's workbench (`GET
-/week`, week.py on weekbook.py), the slot picker (`GET /week/picker`, `GET /week/drops`) and
-every change through `POST /week/edit` -- the window's picker logic, moved into weekbook.py and
-choices.py so both use it. P4, Games (`app/games.js`): today's games (`GET /games`) with the goal feed
+tabs, and More behind the header's gear (Refresh: League, News, Quick, Full for the league shown; league switch,
+refresh log from `GET /jobs`, server status). Pull down on Roster, Players, Plan or Matchup runs a
+Quick of the league shown; a screen with no plan yet has a Make a plan button; P1, the Roster screen (`app/roster.js`): your lineup,
+bench and IR for any day of the fantasy week from `GET /roster?day=` (roster.py: the projection, the
+season in the league's scoring; a day gone in the slots the platform kept that day, matchup.py's
+day_lineup), with today's games and live points from `GET /tonight` (games.py, every 20 s).
+Players (`app/players.js`, `GET /players`, players.py): every free agent in the newest plan,
+sorted and filtered by position, status, the nights he plays this week and team.
+Plan (`app/plan.js`; was P2's AI suggestions and P3's Weekly planner): today's moves and the
+upgrades in a banner (`GET /suggestions`, suggestions.py), then your week from your picks on plan
+A's workbench (`GET /week`, week.py on weekbook.py), the slot picker (`GET /week/picker`, `GET
+/week/drops`) and every change through `POST /week/edit`. The chips draw a week plan over the
+week (`GET /week?show=A`), its picks not yours dashed, to take one (`take`) or all (`use`). P4, Games (`app/games.js`): today's games (`GET /games`) with the goal feed
 (`GET /goals`) in a sheet; a game full screen with its Summary, Box and Plays (`GET /games/{id}`, each
 play with the fantasy points it earned) and Lines (`GET /games/{id}/lines`), polled every 5 s while
 live. P5, Matchup (`app/matchup.js`, `GET /matchup`, matchup.py): the week's score, P(win), tonight live
@@ -160,9 +162,8 @@ kept. Pull down at the top of a screen to run Quick. The app's files are served 
 no-cache`, so an edit shows on the next load.
 
 On a PC (a window at least 1024 px wide, `app/layout.js`) the same files lay out wider, as the
-Fantasy Hockey PC design canvas: the tabs become a sidebar; Roster shows tonight's and the season's
-columns together; the Planner's picker is a panel beside the calendar; AI shows today's moves and
-the upgrades beside the week plans; Games puts the list, the chosen game and the goal feed side by
+Fantasy Hockey PC design canvas: the tabs become a sidebar; Roster's day and Season views are tables;
+the Players filter and the Plan picker are panels beside them; Games puts the list, the chosen game and the goal feed side by
 side; Matchup and More use two columns. Content fills the window; 600–1023 px is the phone layout
 across the window. Esc closes the picker, the goal feed and the menus.
 

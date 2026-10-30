@@ -52,13 +52,15 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     POST /choices/pick {week, label, index, player_id}   a week plan's option picked into your week
                                with the plan's drop, or taken back (choices.pick_from_plan); returns
                                the suggestions as they now stand
-    GET  /week?week=           the app's Weekly planner: your week from your picks on plan A's
-                               workbench (week.py) -- each night's points, open slots, picks, slots
+    GET  /week?week=&show=     the app's Plan tab: your week from your picks on plan A's
+                               workbench (week.py) -- each night's points, open slots, picks, slots;
+                               show=<label>: that week plan's week instead, its picks not yours marked
     GET  /week/picker?day=&slot=&occupant=   the slot picker's free agents at the slot's positions
                                (plan picks first); occupant: the rental or rostered player whose
                                slot it is -- then priced on the swap
     GET  /week/drops?day=&add=&occupant=   who that pick may drop, each with the week's gain
-    POST /week/edit {week, action, day, add, drop, rental}   pick, replace, unpick or clear;
+    POST /week/edit {week, action, day, add, drop, rental, label, index, show}   pick, replace,
+                               unpick, clear, take (one of a plan's picks) or use (the whole plan);
                                saved (choices.py), returns the calendar as it now stands
     GET  /matchup              the app's Matchup: the week's score, each day's points for you and your
                                opponent, the league's week, from the platform (kept a minute), with
@@ -348,11 +350,14 @@ class Choices(BaseModel):
 
 class WeekEdit(BaseModel):
     week: str = "this"
-    action: str                     # 'pick', 'replace', 'unpick' or 'clear' (week.edit)
+    action: str                     # 'pick', 'replace', 'unpick', 'clear', 'take' or 'use' (week.edit)
     day: str | None = None
     add: int | None = None
     drop: int | None = None         # a pick's drop; None: into an open spot
     rental: int | None = None       # 'replace': the rental (or rostered player) whose slot it is
+    label: str | None = None        # 'take' / 'use': the week plan
+    index: int | None = None        # 'take': its slot
+    show: str | None = None         # the plan drawn on the calendar sent back (GET /week's show)
 
 
 class Together(BaseModel):
@@ -573,9 +578,9 @@ def make_app(worker: Worker) -> FastAPI:
             raise HTTPException(409, str(reason))
 
     @app.get("/week")
-    def get_week(week: str = "this", league: str | None = None):
+    def get_week(week: str = "this", show: str | None = None, league: str | None = None):
         chosen, path, _, shown = book(league, week)
-        return {"league": chosen.name, "file": path.name, **shown.view(slot_rows[chosen.name])}
+        return {"league": chosen.name, "file": path.name, **shown.view(slot_rows[chosen.name], show)}
 
     @app.get("/week/picker")
     def get_picker(day: str, week: str = "this", occupant: int | None = None, slot: str | None = None,
@@ -598,7 +603,8 @@ def make_app(worker: Worker) -> FastAPI:
             raise HTTPException(422, str(error))
         saved = choices.save(chosen.name, new, worker.day())
         _, _, _, shown = book(league, body.week)
-        return {"league": chosen.name, "file": path.name, "choices": saved, **shown.view(slot_rows[chosen.name])}
+        return {"league": chosen.name, "file": path.name, "choices": saved,
+                **shown.view(slot_rows[chosen.name], body.show)}
 
 
     @app.get("/matchup")

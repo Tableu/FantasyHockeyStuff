@@ -215,12 +215,7 @@ table.roster button.sort.on { color: var(--you); }
 .day-list .st.you { color: var(--you); }
 .day-list .pts { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
 
-/* AI suggestions (ai.js), as the design's AI suggestions artboard */
-.subtabs { position: sticky; top: 0; z-index: 2; display: flex; height: 40px; border-bottom: 1px solid var(--rule); background: var(--ground-2); }
-.subtabs button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; border: 0; background: transparent; color: var(--text-3); font-size: 13px; font-weight: 500; cursor: pointer; }
-.subtabs button[aria-pressed="true"] { background: var(--ground); color: var(--text); font-weight: 700; box-shadow: inset 0 -2px 0 var(--you); }
-.badge { font-family: var(--mono); font-size: 10.5px; font-weight: 600; padding: 1px 5px; border-radius: 8px; background: #26334D; color: var(--text); }
-.badge.zero { background: #18223A; color: #6F7E98; }
+/* Lists (the Plan tab's picker, the games' tables) */
 table.list { border-collapse: collapse; width: 100%; }
 table.list.fixed { table-layout: fixed; }
 table.list th, table.list td { border-bottom: 1px solid var(--rule); padding: 4px 5px; height: 30px; text-align: left; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; }
@@ -241,22 +236,9 @@ table.list td.dim { color: var(--text-3); }
 .link[aria-pressed="true"] { color: var(--you); font-weight: 600; }
 .link:disabled { opacity: .6; }
 .foot { margin: 8px 12px 12px; font-size: 11.5px; color: var(--text-3); line-height: 1.4; }
-.ai-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--rule); }
-.ai-mode .what { display: flex; flex-direction: column; min-width: 0; font-size: 12.5px; font-weight: 600; }
-.ai-mode .meta { font-weight: 400; font-size: 11px; color: var(--text-3); }
-.ai-mode .seg button { height: 28px; padding: 0 10px; font-size: 12px; }
-.hint-line { padding: 0 12px 6px; font-size: 11px; color: var(--text-3); }
 .sec .seg button { height: 28px; padding: 0 9px; font-size: 12px; }
-button.plan { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 6px; align-items: center; width: 100%; min-height: 48px; padding: 7px 12px; border: 0; border-top: 1px solid var(--rule); background: transparent; color: var(--text); cursor: pointer; text-align: left; }
-button.plan.open { background: var(--ground-sel); }
-button.plan .label { font-size: 16px; font-weight: 700; }
-button.plan .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-button.plan .sched { font-size: 12.5px; font-weight: 600; }
-button.plan .nums { display: flex; flex-direction: column; align-items: flex-end; font-family: var(--mono); font-size: 12px; }
-table.slots { background: var(--ground-2); }
 
-/* Weekly planner (planner.js), as the design's Weekly planner artboard */
-.week-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px 8px; font-size: 12px; color: var(--text-2); }
+/* The Plan tab's calendar (plan.js), as the design's Plan artboard */
 .btn.small { height: 32px; padding: 0 10px; font-size: 12px; flex: none; }
 table.cal { border-collapse: separate; border-spacing: 0; }
 table.cal th, table.cal td { border-bottom: 1px solid var(--rule); border-right: 1px solid #18223A; padding: 0; height: 32px; white-space: nowrap; text-align: left; font-size: 12px; }
@@ -474,7 +456,7 @@ table.list.box thead th.n { overflow: visible; }
   .btn:not(:disabled):hover { border-color: #4A5B7C; }
   .btn.primary:not(:disabled):hover { filter: brightness(1.08); }
   .game-card:hover { border-color: var(--rule-strong); }
-  .choice:hover, .log-row:hover, button.plan:hover { background: var(--ground-3); }
+  .choice:hover, .log-row:hover { background: var(--ground-3); }
   .day-list button:not(:disabled):not(.on):hover { background: var(--ground-sel); }
   .toggle:not(.on):hover { color: var(--text); }
 }
@@ -513,11 +495,6 @@ table.cal tr.bench-h td, table.cal tr.bench th, table.cal tr.bench td { backgrou
 table.cal .bench-sum { cursor: pointer; color: var(--text-2); }
 table.cal td.idle .cellbtn { color: var(--text-3); }
 
-/* AI suggestions: today's moves and the upgrades beside the week plans. */
-.ai-wide { display: grid; grid-template-columns: minmax(380px, 5fr) minmax(0, 7fr); align-items: start; }
-.ai-left { border-right: 1px solid var(--rule); min-height: 100%; }
-.ai-wide .plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 0 12px; }
-.plan-block { min-width: 0; }
 
 /* Games: the list, the chosen game and the goal feed side by side. */
 .games-wide { display: flex; height: 100%; }
@@ -545,7 +522,6 @@ table.cal td.idle .cellbtn { color: var(--text-3); }
    stick inside its own box, so that box scrolls both ways, at most the screen's height: the screen
    scrolls until the table fills it, then the table's rows scroll under its header. */
 table.list thead th { position: sticky; top: 0; z-index: 2; box-shadow: inset 0 -1px 0 var(--rule); }
-.subtabs ~ table.list thead th, .subtabs ~ * table.list thead th { top: 40px; }
 .table-scroll { overflow: auto; max-height: 100%; overscroll-behavior-x: contain; }
 table.roster tr.sub th { position: sticky; top: 0; z-index: 2; }
 table.roster tr.sub th.stick { z-index: 3; }
@@ -621,3 +597,45 @@ table.roster.fa td.fa-empty div { position: sticky; left: 0; max-width: min(100v
   .fchip:hover, .fbtn:hover { border-color: #4A5B7C; }
   .opt:not([aria-pressed="true"]):hover, .check:hover { background: var(--ground-3); }
 }
+
+/* The Plan tab (plan.js): today's moves banner, the week line, the plan chips, a plan's ghosts. */
+.today-banner { flex: none; border-bottom: 1px solid var(--rule); background: #102038; }
+.tb-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 6px 12px; border: 0; background: none; text-align: left; cursor: pointer; }
+.tb-head svg { flex: none; color: var(--text-2); }
+.tb-head svg.flip { transform: rotate(180deg); }
+.tb-count { flex: none; display: flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 11px; background: var(--you); color: var(--on-you); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+.tb-count.zero { background: #26334D; color: var(--text-2); }
+.tb-what { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.tb-title { font-size: 13.5px; font-weight: 700; }
+.tb-title .meta { font-size: 11.5px; }
+.tb-sum { font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-body { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.tb-move { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; font-size: 12.5px; }
+.tb-move .tag { justify-self: start; }
+.tb-sec { margin-top: 4px; padding-top: 8px; border-top: 1px solid #22385A; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.tb-up { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.tb-up .who { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-up .edge { flex: none; font-size: 12px; }
+.tb-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; padding-top: 8px; border-top: 1px solid #22385A; }
+.tb-mode .seg button { height: 28px; padding: 0 10px; font-size: 12px; }
+.plan-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px 4px; }
+.plan-top .seg button { height: 28px; padding: 0 9px; font-size: 12px; }
+.plan-top .wk { font-size: 12.5px; font-weight: 700; }
+.plan-top .note { min-width: 0; font-size: 11.5px; color: var(--text-2); text-align: right; }
+.plan-chips { display: flex; align-items: center; gap: 6px; padding: 4px 12px 8px; }
+.chips-row { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.tb-more { align-self: flex-start; padding: 0; }
+.pchip { flex: none; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; height: 40px; padding: 0 10px; border-radius: 6px; border: 1px dashed #6CA8E0; background: transparent; cursor: pointer; line-height: 1.15; }
+.pchip.mine { border-style: solid; border-color: var(--rule-strong); }
+.pchip[aria-pressed="true"] { border-style: solid; border-color: var(--text); background: var(--text); color: var(--ground); }
+.pchip .l { font-size: 12.5px; font-weight: 700; }
+.pchip .s { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+.pchip[aria-pressed="true"] .s { color: #3A4A68; }
+.plan-chips .btn.use { flex: none; height: 40px; padding: 0 12px; font-size: 12.5px; border-radius: 6px; }
+table.cal td.ghost { background: #0F1C30; outline: 1px dashed #6CA8E0; outline-offset: -3px; }
+table.cal td.ghost .cellbtn { color: #9FD0FF; font-weight: 600; }
+table.cal td.ghost .pt { color: #6CA8E0; }
+.pick.ghost { margin: 1px 3px; padding-left: 4px; border-radius: 3px; outline: 1px dashed #6CA8E0; outline-offset: -1px; }
+.pick button.take { color: #9FD0FF; font-size: 16px; font-weight: 700; }
+.ghost-key { display: inline-block; width: 9px; height: 9px; border: 1px dashed #6CA8E0; vertical-align: -1px; }
+@media (hover: hover) { .pchip:not([aria-pressed="true"]):hover { background: var(--ground-3); } }

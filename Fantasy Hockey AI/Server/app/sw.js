@@ -3,14 +3,14 @@
 // too, each answer kept; with the server out of reach the last one is served, marked with
 // X-Saved-At (when it was fetched) so the app can say it is stale. Live game calls are never kept:
 // an old score is worse than none.
-const SHELL_CACHE = 'fh-shell-v53';
+const SHELL_CACHE = 'fh-shell-v54';
 const DATA_CACHE = 'fh-data-v1';
 const LOGO_CACHE = 'fh-logos-v1';   // the NHL's team logos (assets.nhle.com): kept, they rarely change
 const LOGOS = 'https://assets.nhle.com/logos/';
 const MUG_CACHE = 'fh-mugs-v1';    // players' headshots (assets.nhle.com/mugs): kept, one a season and team
 const MUGS = 'https://assets.nhle.com/mugs/';
 const SHELL = [
-  './', 'index.html', 'app.css', 'app.js', 'api.js', 'layout.js', 'roster.js', 'players.js', 'ai.js', 'planner.js', 'games.js', 'matchup.js',
+  './', 'index.html', 'app.css', 'app.js', 'api.js', 'layout.js', 'roster.js', 'players.js', 'plan.js', 'games.js', 'matchup.js',
   'manifest.webmanifest', 'vendor/htm-preact-3.1.1.mjs', 'icons/icon-192.png', 'icons/icon-512.png',
   'fonts/ibm-plex-mono-latin-400-normal.woff2', 'fonts/ibm-plex-mono-latin-500-normal.woff2',
   'fonts/ibm-plex-mono-latin-600-normal.woff2',
