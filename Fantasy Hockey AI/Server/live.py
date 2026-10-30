@@ -679,14 +679,16 @@ class LiveRunner:
         v = view()
         # After the first puck on ESPN today's adds play from tomorrow, and their drops wait for
         # tonight's games: tonight's lineup is solved on the roster as it stands.
-        lineup, z = self._lineup(manager, view(state_now) if self.adds_locked else v, snapshot, rows, now)
+        lineup, _ = self._lineup(manager, view(state_now) if self.adds_locked else v, snapshot, rows, now)
         # After the plan's own lineup, so the plan is what it would be without this extra solve.
         manager_now = managers_module.Orchestrated(snapshot.me, self.config, self.scoreset, self.strategy)
-        lineup_now, _ = self._lineup(manager_now, view(state_now), snapshot, rows, now)
+        lineup_now, z_now = self._lineup(manager_now, view(state_now), snapshot, rows, now)
         # The pickups to choose from: the add/drop rule's own pricing, on the roster as it stands.
         options = adddrop_module.price(view(state_now), manager_now.params, manager_now.slot_order,
                                        manager_now.accepts, manager_now._fieldable, shortlist=OPTIONS_PRICED)
-        return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
+        # P(win) and the matchup projection are the roster's as it stands, not after the plan's
+        # moves (the user, 2026-10-30): manager_now's z.
+        return self._describe(snapshot, state, before, manager, v, lineup, z_now, rows, status, problems, now,
                               state_now, lineup_now, options, next_week, next_plans,
                               projection=_matchup_projection(manager_now))
 
