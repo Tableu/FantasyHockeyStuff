@@ -26,7 +26,9 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /jobs                 the recent jobs, newest first, without their lines (the app's refresh log)
     GET  /status               the leagues served (each with its team), the day, the running job, when
                                each step last ran (the league's own read included), the league's newest plan
-    GET  /games                today's games: score, clock, your players and your opponent's on each
+    GET  /games?date=          today's games (or a day this week's): score, clock, your players and
+                               your opponent's on each
+    GET  /games/week           each day of this fantasy week with its NHL games (the Games day picker)
     GET  /goals                every goal today, newest first, with the fantasy points it earned
     GET  /games/{id}?after=n   one game: line score, team stats, box score with fantasy points, plays
                                after sortOrder n
@@ -396,8 +398,30 @@ def make_app(worker: Worker) -> FastAPI:
             raise HTTPException(502, f"NHL feed: {type(error).__name__}: {error}")
 
     @app.get("/games")
-    def get_games(league: str | None = None):
-        return nhl(league, "games")
+    def get_games(league: str | None = None, date: str | None = None):
+        """date: a day of this fantasy week (the Games day picker); none, today."""
+        if date is None:
+            return nhl(league, "games")
+        try:
+            day = dt.date.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(400, f"date is a date, not {date}")
+        return nhl(league, "games", day)
+
+    @app.get("/games/week")
+    def get_games_week(league: str | None = None):
+        """The Games day picker: each day of this fantasy week, its state and its NHL games."""
+        chosen = worker.league(league)
+        today = worker.today()
+        days = []
+        for day in roster.week_dates(today, configs[chosen.name].week_starts_on):
+            try:
+                count = views[chosen.name].games_on(day)
+            except requests.RequestException:
+                count = None
+            days.append({"date": day.isoformat(), "games": count,
+                         "state": "final" if day < today else "today" if day == today else "ahead"})
+        return {"league": chosen.name, "week": days}
 
     @app.get("/goals")
     def get_goals(league: str | None = None):

@@ -10,8 +10,8 @@ database.
                    however many leagues (and windows) watch it
     Owners         which fantasy team holds each NHL player, from the league's newest plan (your roster,
                    your opponent's) and players.parquet's NHL ids (ModelFeatures/build_players.py)
-    games()        today's games (score/now): score, period, clock, your players and your
-                   opponent's on each
+    games(date)    a day's games (score/now, or score/{date} for another day of the week): score,
+                   period, clock, your players and your opponent's on each
     goals()        every goal today, newest first by when it was scored (GoalClock), with the
                    fantasy points it earned each owner
     GoalClock      when each goal was scored: the NHL's feeds carry only the game clock, so the
@@ -384,8 +384,11 @@ class Games:
         game = self._score_game(game_id)
         return game is not None and game.get("gameState") in FINAL_STATES
 
-    def _score_game(self, game_id):
-        return next((g for g in self.score_now().get("games", []) if g["id"] == game_id), None)
+    def _score_game(self, game_id, date=None):
+        """The game in score/now -- or, `date` given, in that day's score/{date} (a game from another
+        day: its goals' strengths, for power-play and shorthanded points)."""
+        data = self.score_now() if date is None else self.feed(f"{API}/score/{date}").get()
+        return next((g for g in data.get("games", []) if g["id"] == game_id), None)
 
     def _owners(self):
         self.owners.refresh(self.players_path)
@@ -447,8 +450,10 @@ class Games:
 
     # ---------- games list and goal feed ----------
 
-    def games(self) -> dict:
-        data, owners = self.score_now(), self._owners()
+    def games(self, date: dt.date | None = None) -> dict:
+        """Today's games, or `date`'s (the Games day picker)."""
+        data = self.score_now() if date is None else self.feed(f"{API}/score/{date.isoformat()}").get()
+        owners = self._owners()
         rows = []
         for g in data.get("games", []):
             away, home = g["awayTeam"], g["homeTeam"]
@@ -587,8 +592,9 @@ class Games:
 
     def game(self, game_id: int, after: int = -1) -> dict:
         owners = self._owners()
-        summary = self._score_game(game_id) or {}
         box = self.game_feed(game_id, "boxscore")
+        summary = (self._score_game(game_id)
+                   or (self._score_game(game_id, box["gameDate"]) if box.get("gameDate") else None) or {})
         rail = self.game_feed(game_id, "right-rail")
         pbp = self.game_feed(game_id, "play-by-play")
         special = self._special_points(summary.get("goals", []))
@@ -607,7 +613,7 @@ class Games:
         plays = [{**self._play(p, names, abbrev, owners), "fp": self._play_points(p, owners, strengths)}
                  for p in pbp.get("plays", [])]
         return {
-            "id": game_id, "state": box.get("gameState"),
+            "id": game_id, "date": box.get("gameDate"), "state": box.get("gameState"),
             "period": (box.get("periodDescriptor") or {}).get("number"),
             "period_type": (box.get("periodDescriptor") or {}).get("periodType"),
             "clock": (box.get("clock") or {}).get("timeRemaining"),

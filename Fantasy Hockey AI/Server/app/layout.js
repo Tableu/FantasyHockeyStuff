@@ -57,3 +57,52 @@ export function Photo({ src, name, size = 26 }) {
   }
   return html`<span class="photo" style=${style}><img src=${src} alt="" loading="lazy" decoding="async" onError=${() => setFailed(true)} /></span>`;
 }
+
+// "2026-10-31" as a local date (a date, not a moment: no time zone shift).
+export function dateOf(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// A day picker's name for a day: Today, Tomorrow, else the day of the week.
+export function dayName(entry, week) {
+  if (entry.state === 'today') return 'Today';
+  const today = week.find((d) => d.state === 'today');
+  if (today && dateOf(entry.date) - dateOf(today.date) === 86400000) return 'Tomorrow';
+  return dateOf(entry.date).toLocaleDateString('en-US', { weekday: 'long' });
+}
+
+export const shortDay = (iso) => dateOf(iso).toLocaleDateString('en-US', { weekday: 'short' });
+
+// The fantasy week's day picker (Roster, Games): `week` [{date, state: final|today|ahead}], `day`
+// 'today' or a date. The button shows the day; when not `active` (Roster's Season), its label
+// calls `onActivate` and only the arrow opens the list. Each day shows Final / Live / To play and
+// `right(d)` -> [text, class]; `unavailable(d)`: why it can't be picked, or null.
+export function DayPicker({ week, day, onDay, right, active = true, onActivate, unavailable = () => null }) {
+  const [open, setOpen] = useState(false);
+  useEscape(open, () => setOpen(false));
+  const current = week.find((d) => (day === 'today' ? d.state === 'today' : d.date === day)) || week.find((d) => d.state === 'today');
+  return html`<div class="day-pick">
+    <div class=${`day-btn ${active ? 'on' : ''}`}>
+      <button type="button" aria-pressed=${active}
+        onClick=${() => (active ? setOpen(!open) : onActivate())}>${current ? dayName(current, week) : 'Today'}</button>
+      <button type="button" class="arrow" aria-haspopup="listbox" aria-expanded=${open} aria-label="Choose a day"
+        onClick=${() => setOpen(!open)}><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></button>
+    </div>
+    ${open && html`<div class="day-scrim" aria-hidden="true" onClick=${() => setOpen(false)}></div>
+      <div class="day-list" role="listbox" aria-label="Day">
+        ${week.map((d) => {
+          const on = active && current && d.date === current.date;
+          const why = unavailable(d);
+          const [text, cls] = right(d);
+          return html`<button type="button" role="option" aria-selected=${on} class=${on ? 'on' : ''}
+            disabled=${!!why} title=${why || undefined}
+            onClick=${() => { setOpen(false); onDay(d.state === 'today' ? 'today' : d.date); }}>
+            <span class="what"><span class="nm">${dayName(d, week)}</span>
+              <span class=${`st ${d.state === 'today' ? 'you' : ''}`}>${d.state === 'final' ? 'Final' : d.state === 'today' ? 'Live' : 'To play'}</span></span>
+            <span class=${`pts ${cls || ''}`}>${text}</span>
+          </button>`;
+        })}
+      </div>`}
+  </div>`;
+}

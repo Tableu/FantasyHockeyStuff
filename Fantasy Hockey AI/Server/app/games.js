@@ -1,11 +1,12 @@
-// Games (plan P4): today's games from GET /games with the goal feed (GET /goals) in a sheet at the
-// bottom; a game opens full screen (#/game/<id>/<view>) with its Summary, Box, Plays (GET
+// Games (plan P4; redesign step 4): a day's games from GET /games (today, or a day of the fantasy
+// week from the day picker, GET /games/week), today's with the goal feed (GET /goals) in a sheet at
+// the bottom; a game opens full screen (#/game/<id>/<view>) with its Summary, Box, Plays (GET
 // /games/<id>) and Lines (GET /games/<id>/lines). Live, they poll every 5 s -- the server's feed
 // cache (about 20 s) is what bounds the calls to the NHL. On a PC (`wide`) the list, the chosen
 // game and the goal feed sit side by side: the game opens in the middle, the feed is a rail.
 import { html, useState, useEffect, useRef } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { useEscape, Photo } from './layout.js';
+import { useEscape, Photo, DayPicker, dateOf } from './layout.js';
 
 const LIVE = new Set(['LIVE', 'CRIT']);
 const DONE = new Set(['OFF', 'FINAL']);
@@ -53,10 +54,14 @@ export function stateLabel(g) {
   return clockTime(g.start_utc);
 }
 
-function todayLabel() {
-  const t = new Date();
+// "Sat Oct 10": a game's day (its date, else today).
+function dayLabel(iso) {
+  const t = iso ? dateOf(iso) : new Date();
   return `${t.toLocaleDateString('en-US', { weekday: 'short' })} ${t.toLocaleDateString('en-US', { month: 'short' })} ${t.getDate()}`;
 }
+
+// The day the list shows, kept while the app is open: back from a game, the list is on its day.
+let shownDay = 'today';
 
 // Polls `load` every 5 s while `live()` says a game is on, else every minute; at once when the
 // app comes back on screen.
@@ -220,51 +225,65 @@ function card(g, href, current) {
 export function Games({ league, version, wide, selected, view }) {
   const [games, setGames] = useState(null);
   const [goals, setGoals] = useState(null);
+  const [week, setWeek] = useState(null);
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(false);
+  const [day, setDay] = useState(shownDay);
+  const today = day === 'today';
+  const pick = (d) => { shownDay = d; setDay(d); setGames(null); setOpen(false); };
+
+  useEffect(() => {
+    api.gamesWeek(league).then((got) => setWeek(got.week)).catch(() => setWeek(null));
+  }, [league, version]);
 
   usePoll(async () => {
     try {
-      const [g, gl] = await Promise.all([api.games(league), api.goals(league)]);
+      // The goal feed is today's alone.
+      const [g, gl] = await Promise.all([api.games(league, today ? undefined : day), today ? api.goals(league) : null]);
       setGames(g); setGoals(gl); setError(null);
       return g;
     } catch (e) {
       setError(e.message);
       throw e;
     }
-  }, [league, version], (g) => !!g && g.games.some((x) => LIVE.has(x.state)));
+  }, [league, version, day], (g) => !!g && g.games.some((x) => LIVE.has(x.state)));
 
   const live = games && games.games.some((x) => LIVE.has(x.state));
+  const count = games ? `${games.games.length} game${games.games.length === 1 ? '' : 's'}` : '';
+  const picker = week && html`<${DayPicker} week=${week} day=${day} onDay=${pick}
+    right=${(d) => [d.games === null ? '' : `${d.games} game${d.games === 1 ? '' : 's'}`, 'dim']} />`;
+  const none = today ? 'No NHL games today.' : 'No NHL games that day.';
   if (wide) {
     // A game card keeps the view the open game shows, so moving between games stays on Box (say).
     return html`<div class="games-wide">
       <section class="games-list" aria-label="Today's games">
         <header class="screen-head">
-          <span class="h">Games <span class="dim">${todayLabel()}</span></span>
-          ${live && html`<span class="live-tag"><span class="dot"></span>Live · 5s</span>`}
+          ${picker || html`<span class="h">Games <span class="dim">${dayLabel()}</span></span>`}
+          ${live ? html`<span class="live-tag"><span class="dot"></span>Live · 5s</span>` : html`<span class="dim games-count">${count}</span>`}
         </header>
         ${error && html`<div class="error" role="alert">${error}</div>`}
-        ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">No NHL games today.</div>`
+        ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">${none}</div>`
           : html`<div class="game-grid">${games.games.map((g) => card(g, `#/game/${g.id}/${view || 'summary'}`, g.id === selected))}</div>`}
       </section>
       <section class="game-pane" aria-label="Game">
         ${selected ? html`<${Game} key=${selected} league=${league} gameId=${selected} view=${view} embedded />`
           : html`<div class="empty">Choose a game for its summary, box score, plays and lines.</div>`}
       </section>
-      <${GoalFeed} goals=${goals} rail />
+      ${today && html`<${GoalFeed} goals=${goals} rail />`}
     </div>`;
   }
-  // The phone: the app's header (the team selector) is above it, not a Games bar of its own.
+  // The phone: the app's header (the team selector) is above it; the day picker and the day's count.
   return html`
-    <main class="screen games-screen">
+    <div class="games-bar">${picker}<span class="dim">${count}</span></div>
+    <main class=${`screen games-screen ${today ? '' : 'no-feed'}`}>
       ${error && html`<div class="error" role="alert">${error}</div>`}
-      ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">No NHL games today.</div>` : html`
+      ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">${none}</div>` : html`
       <div class="game-grid">
         ${games.games.map((g) => card(g, `#/game/${g.id}/summary`, false))}
       </div>
       <p class="foot">Tap a game for its summary.</p>`}
     </main>
-    <${GoalFeed} goals=${goals} open=${open} onToggle=${() => setOpen(!open)} />`;
+    ${today && html`<${GoalFeed} goals=${goals} open=${open} onToggle=${() => setOpen(!open)} />`}`;
 }
 
 // ---------- one game ----------
@@ -320,6 +339,7 @@ const SKATER_COLS = [['fantasy', 'FP'], ['goals', 'G'], ['assists', 'A'], ['shot
   ['blocks', 'BLK'], ['pim', 'PIM'], ['faceoff_wins', 'FOW'], ['faceoff_pct', 'FO%'], ['toi', 'TOI'],
   ['pp_toi', 'PP TOI'], ['sh_toi', 'SH TOI']];
 const TOI_KEYS = new Set(['toi', 'pp_toi', 'sh_toi']);
+const POSITION = { L: 'LW', R: 'RW' };          // the box score's letters, as the league writes them
 const toiSeconds = (t) => (t ? t.split(':').reduce((m, s) => m * 60 + Number(s), 0) : 0);
 function skaterCell(p, key) {
   if (key === 'fantasy') return f2(p.fantasy);
@@ -348,14 +368,14 @@ function Box({ game, league }) {
         aria-sort=${sort.key === key ? (sort.desc ? 'descending' : 'ascending') : undefined}>
         <button type="button" class=${`sort ${sort.key === key ? 'on' : ''}`} onClick=${() => tap(key)}>${label}${sort.key === key ? (sort.desc ? '▾' : '▴') : ''}</button></th>`)}</tr></thead>
       <tbody>${skaters.map((p) => html`<tr class=${p.owner ? `tint-${p.owner}` : ''}>
-        <th scope="row">${p.name}</th>
+        <th scope="row">${p.name}<span class="pos">${POSITION[p.position] || p.position || ''}</span></th>
         ${SKATER_COLS.map(([key]) => html`<td class=${`n ${key === 'fantasy' ? 'strong' : ''}`}>${skaterCell(p, key)}</td>`)}
       </tr>`)}</tbody>
     </table></div>
     <table class="list fixed box">
       <thead><tr><th scope="col">Goalie</th><th scope="col" class="n">SA</th><th scope="col" class="n">SV</th><th scope="col" class="n">GA</th><th scope="col" class="n">SV%</th><th scope="col" class="n">FP</th></tr></thead>
       <tbody>${goalies.length ? goalies.map((p) => html`<tr class=${p.owner ? `tint-${p.owner}` : ''}>
-        <th scope="row">${p.name}${p.decision ? html` <span class="meta">${p.decision}</span>` : ''}</th>
+        <th scope="row">${p.name}<span class="pos">G</span>${p.decision ? html` <span class="meta">${p.decision}</span>` : ''}</th>
         <td class="n">${p.shots_against}</td><td class="n">${p.saves}</td><td class="n">${p.goals_against}</td>
         <td class="n">${p.shots_against ? (p.saves / p.shots_against).toFixed(3).replace(/^0/, '') : ''}</td>
         <td class="n strong">${f2(p.fantasy)}</td></tr>`)
@@ -490,7 +510,7 @@ export function Game({ league, gameId, view, embedded }) {
   return html`
     ${!embedded && html`<header class="game-head">
       <a href="#/games" class="back" aria-label="Back to games"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></a>
-      <span class="dim">${todayLabel()}${game ? ` · ${game.away.abbrev} @ ${game.home.abbrev}` : ''}</span>
+      <span class="dim">${dayLabel(game && game.date)}${game ? ` · ${game.away.abbrev} @ ${game.home.abbrev}` : ''}</span>
       <span></span>
     </header>`}
     ${error && html`<div class="error" role="alert">${error}</div>`}

@@ -7,7 +7,7 @@
 // a PC (`wide`) the same two views as a table, the box line in its own columns.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { NoPlan, Photo, useEscape } from './layout.js';
+import { NoPlan, Photo, DayPicker, shortDay } from './layout.js';
 import { stateLabel } from './games.js';
 
 const TONIGHT_EVERY_MS = 20000;     // the server's NHL feed cache is about 20 s
@@ -21,21 +21,6 @@ const store = {
 
 const f2 = (x) => (x === null || x === undefined ? '' : Number(x).toFixed(2));
 
-// "2026-10-31" as a local date (a date, not a moment: no time zone shift).
-function dateOf(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-
-// The picker's name for a day: Today, Tomorrow, else the day of the week.
-function dayName(entry, week) {
-  if (entry.state === 'today') return 'Today';
-  const today = week.find((d) => d.state === 'today');
-  if (today && dateOf(entry.date) - dateOf(today.date) === 86400000) return 'Tomorrow';
-  return dateOf(entry.date).toLocaleDateString('en-US', { weekday: 'long' });
-}
-
-const shortDay = (iso) => dateOf(iso).toLocaleDateString('en-US', { weekday: 'short' });
 
 // The plan's puck times are UTC without a zone ("2026-10-10 23:00:00").
 function puckTime(utc) {
@@ -229,38 +214,6 @@ function DayGroup({ group, columns, live, open, onToggle }) {
   </section>`;
 }
 
-// The day picker: the button shows the day (on Season, its label goes back to the day and only
-// the arrow opens the list); the list is the fantasy week, each day's state and points.
-function DayPicker({ week, day, onDay, dayView, onDayView, liveTotal }) {
-  const [open, setOpen] = useState(false);
-  useEscape(open, () => setOpen(false));
-  const current = week.find((d) => (day === 'today' ? d.state === 'today' : d.date === day)) || week.find((d) => d.state === 'today');
-  const right = (d) => (d.state === 'final' ? (d.scored === null ? '' : `${f2(d.scored)} pts`)
-    : d.state === 'today' ? `live ${liveTotal}` : d.proj === null || d.proj === undefined ? '' : `proj ${f2(d.proj)}`);
-  return html`<div class="day-pick">
-    <div class=${`day-btn ${dayView ? 'on' : ''}`}>
-      <button type="button" aria-pressed=${dayView}
-        onClick=${() => (dayView ? setOpen(!open) : onDayView())}>${current ? dayName(current, week) : 'Today'}</button>
-      <button type="button" class="arrow" aria-haspopup="listbox" aria-expanded=${open} aria-label="Choose a day"
-        onClick=${() => setOpen(!open)}><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></button>
-    </div>
-    ${open && html`<div class="day-scrim" aria-hidden="true" onClick=${() => setOpen(false)}></div>
-      <div class="day-list" role="listbox" aria-label="Day">
-        ${week.map((d) => {
-          const on = dayView && current && d.date === current.date;
-          return html`<button type="button" role="option" aria-selected=${on} class=${on ? 'on' : ''}
-            disabled=${d.state === 'final' && !d.planned}
-            title=${d.state === 'final' && !d.planned ? 'No plan was saved that day' : undefined}
-            onClick=${() => { setOpen(false); onDay(d.state === 'today' ? 'today' : d.date); }}>
-            <span class="what"><span class="nm">${dayName(d, week)}</span>
-              <span class=${`st ${d.state === 'today' ? 'you' : ''}`}>${d.state === 'final' ? 'Final' : d.state === 'today' ? 'Live' : 'To play'}</span></span>
-            <span class=${`pts ${d.state === 'today' ? 'you' : d.state === 'final' ? '' : 'dim'}`}>${right(d)}</span>
-          </button>`;
-        })}
-      </div>`}
-  </div>`;
-}
-
 export function Roster({ league, version, wide }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -314,7 +267,10 @@ export function Roster({ league, version, wide }) {
   const todayLive = tonight && data && data.week && tonight.date === (data.week.find((d) => d.state === 'today') || {}).date;
   const liveTotal = todayLive ? f2(tonight.lineup_live) : '—';
   const bar = (week) => html`<div class="bar start">
-    <${DayPicker} week=${week} day=${day} onDay=${pickDay} dayView=${view === 'day'} onDayView=${() => choose('day')} liveTotal=${liveTotal} />
+    <${DayPicker} week=${week} day=${day} onDay=${pickDay} active=${view === 'day'} onActivate=${() => choose('day')}
+      right=${(d) => (d.state === 'final' ? [d.scored === null ? '' : `${f2(d.scored)} pts`, '']
+        : d.state === 'today' ? [`live ${liveTotal}`, 'you'] : [d.proj === null || d.proj === undefined ? '' : `proj ${f2(d.proj)}`, 'dim'])}
+      unavailable=${(d) => (d.state === 'final' && !d.planned ? 'No plan was saved that day' : null)} />
     <button type="button" class=${`toggle ${view === 'season' ? 'on' : ''}`} aria-pressed=${view === 'season'}
       onClick=${() => choose('season')}>Season</button>
   </div>`;
