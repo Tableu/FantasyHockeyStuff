@@ -39,6 +39,8 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                before today shows that day's plan with its games' box lines, a day
                                ahead its games and the projection. `week`: each day's state, projection
                                and (a day gone) its lineup's points, for the day picker
+    GET  /players              the app's Players screen from the newest plan: every free agent, his
+                               season, ROS, waivers and the nights he plays the rest of this week (players.py)
     GET  /choices              what you chose in the app (choices.py): {league,
                                choices: {days: {date: {moves}}, together}}
     PUT  /choices {choices}    replaces them; returns {league, choices}. Nothing is re-planned
@@ -105,6 +107,7 @@ import suggestions  # noqa: E402
 import week as week_module  # noqa: E402
 import paths  # noqa: E402
 import planpass  # noqa: E402
+import players as players_module  # noqa: E402
 import scheduled  # noqa: E402
 import simlayer  # noqa: E402
 
@@ -530,6 +533,25 @@ def make_app(worker: Worker) -> FastAPI:
         return {"league": chosen.name, "file": path.name,
                 "days": {name: {"date": d.isoformat(), "planned": bool(saved[name])} for name, d in days.items()},
                 "week": week_of(chosen, today, today_plan), **view}
+
+    @app.get("/players")
+    def get_players(league: str | None = None):
+        chosen, path, plan = newest(league)
+        nhl_ids = views[chosen.name].owners._nhl_ids(paths.players())
+        plan_day = dt.date.fromisoformat(plan["game_date"]) if plan.get("game_date") else worker.today()
+
+        def photo(player_id, team):
+            return live_games.headshot(nhl_ids.get(int(player_id)), team, plan_day)
+
+        def games_on(date):
+            try:
+                return views[chosen.name].games_on(dt.date.fromisoformat(date))
+            except requests.RequestException:
+                return None
+
+        workbench = (suggestions.plans_shown(plan, "this") or [{}])[0].get("workbench")
+        return {"league": chosen.name, "file": path.name,
+                **players_module.players_view(plan, scoresets[chosen.name], workbench, photo, games_on)}
 
     @app.get("/choices")
     def get_choices(league: str | None = None):

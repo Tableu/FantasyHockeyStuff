@@ -21,6 +21,7 @@ database.
     tonight()      every player you and your opponent hold: his game today and, once it starts,
                    his box-score line with fantasy points (the app's Roster screen)
     day(date, held) the same for another day's games (score/{date}), for the Roster's day picker
+    games_on(date) how many games that day (the Players filter)
     game(id)       one game: line score, shots by period, team stats, box score with fantasy
                    points, the plays after a sortOrder
     lines(id)      each team's forward lines, defence pairs and special-teams units as used, from
@@ -545,6 +546,10 @@ class Games:
         games = [p["game"] for p in players.values() if p["game"]]
         return {"date": date.isoformat(), "players": players,
                 "final": all(g["state"] in FINAL_STATES for g in games)}
+
+    def games_on(self, date: dt.date) -> int:
+        """How many NHL games are on `date` (score/{date}): the Players filter's nights."""
+        return len(self.feed(f"{API}/score/{date.isoformat()}").get().get("games", []))
 
     def _players_on(self, data, held, owners) -> dict:
         """{player_id: {game, line}} for `held` ({player_id, nhl_id, team}) in a score feed's games:

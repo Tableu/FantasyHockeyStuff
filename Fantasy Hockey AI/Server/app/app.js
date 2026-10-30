@@ -1,12 +1,13 @@
-// The phone app's shell (plan P0): header with the league, the day, Quick / Full and how fresh each
-// step is; the running refresh's progress; the bottom tabs; the More tab. Roster is roster.js (P1),
-// AI is ai.js (P2), Planner is planner.js (P3), Games and a game's screens are games.js (P4),
+// The phone app's shell (plan P0): header with the league, the day, how fresh each step is and
+// the gear to More; the running refresh's progress; the bottom tabs. Roster is roster.js (P1),
+// Players is players.js (redesign step 2), AI is ai.js (P2), Planner is planner.js (P3), Games and a game's screens are games.js (P4),
 // Matchup is matchup.js (P5). Everything shown comes from the plan server (api.js);
 // nothing is computed here. A window WIDE_PX or wider (layout.js) gets the PC layout: the tabs as a
 // sidebar, and Games as a list, the chosen game and the goal feed side by side.
 import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundary } from './vendor/htm-preact-3.1.1.mjs';
 import { api, onStale, onAuth } from './api.js';
 import { Roster } from './roster.js';
+import { Players } from './players.js';
 import { Suggestions } from './ai.js';
 import { Planner } from './planner.js';
 import { Games, Game } from './games.js';
@@ -14,9 +15,12 @@ import { Matchup } from './matchup.js';
 import { useWide, useEscape, REFRESH_EVENT } from './layout.js';
 
 const TABS = [
-  ['roster', 'Roster'], ['planner', 'Planner'], ['ai', 'AI'],
-  ['games', 'Games'], ['matchup', 'Matchup'], ['more', 'More'],
+  ['roster', 'Roster'], ['players', 'Players'], ['planner', 'Planner'], ['ai', 'AI'],
+  ['games', 'Games'], ['matchup', 'Matchup'],
 ];
+// More is the header's gear (the redesign), not a tab.
+const ROUTES = [...TABS.map(([id]) => id), 'more'];
+const GEAR = html`<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
 const MODE_LABELS = { full: 'Full', quick: 'Quick', news: 'News', league: 'League', plan: 'Re-plan',
@@ -131,7 +135,7 @@ function useRoute() {
     const path = location.hash.replace(/^#\/?/, '');
     const game = path.match(/^game\/(\d+)(?:\/(summary|box|plays|lines))?$/);
     if (game) return { tab: 'games', game: Number(game[1]), view: game[2] || 'summary' };
-    return { tab: TABS.some(([id]) => id === path) ? path : 'roster' };
+    return { tab: ROUTES.includes(path) ? path : 'roster' };
   };
   const [route, setRoute] = useState(read);
   useEffect(() => {
@@ -153,7 +157,7 @@ function Freshness({ status, now }) {
   })}</div>`;
 }
 
-function Header({ status, league, onLeague, job, onRefresh, now, wide }) {
+function Header({ status, league, onLeague, job, onRefresh, now, wide, tab }) {
   const [open, setOpen] = useState(false);
   const teams = (status && status.teams) || {};
   const leagues = (status && status.leagues) || [];
@@ -169,10 +173,12 @@ function Header({ status, league, onLeague, job, onRefresh, now, wide }) {
           ${leagues.length > 1 && html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>`}
           <span class="day">${status ? dayLabel(status.day) : ''}</span>
         </button>
-        ${wide && html`<div class="refresh">
-          <button type="button" class="btn small" disabled=${running} onClick=${() => onRefresh('quick')}
-            title="Quick: injuries, goalies and the roster, for this league (the rest are in More)">Refresh</button>
-        </div>`}
+        <div class="refresh">
+          ${wide && html`<button type="button" class="btn small" disabled=${running} onClick=${() => onRefresh('quick')}
+            title="Quick: injuries, goalies and the roster, for this league (the rest are in More)">Refresh</button>`}
+          <a href="#/more" class="gear" aria-current=${tab === 'more' ? 'page' : undefined}
+            aria-label="More: refresh, leagues and settings" title="More">${GEAR}</a>
+        </div>
       </div>
       <${Freshness} status=${status} now=${now} />
       ${open && html`
@@ -447,11 +453,11 @@ function App() {
     // The PC layout: the sidebar, then the header and the screen. Games keeps its list, the chosen
     // game and the goal feed side by side, each scrolling on its own, as the Planner does.
     const games = tab === 'games' || !!route.game;
-    const fill = games || tab === 'planner';
+    const fill = games || tab === 'planner' || tab === 'players';
     return html`<div class="app wide">
       <${Tabs} tab=${tab} side />
       <div class="col">
-        <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} />
+        <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} tab=${tab} />
         <${JobStrip} job=${job} onClose=${closeJob} />
         <${StaleBanner} savedAt=${savedAt} />
         ${error && !savedAt && html`<div class="error" role="alert">${error}</div>`}
@@ -461,6 +467,7 @@ function App() {
             : games ? html`<${Games} league=${league} version=${version} wide selected=${route.game || null} view=${route.view || 'summary'} />`
               : tab === 'more' ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} />`
                 : tab === 'ai' ? html`<${Suggestions} league=${league} version=${version} wide />`
+                  : tab === 'players' ? html`<${Players} league=${league} version=${version} wide />`
                   : tab === 'planner' ? html`<${Planner} league=${league} version=${version} wide />`
                     : tab === 'matchup' ? html`<${Matchup} league=${league} version=${version} />`
                       : html`<${Roster} league=${league} version=${version} wide />`}
@@ -476,7 +483,7 @@ function App() {
   // Games: the app's header with the team selector (the user, 2026-10-20), no pull to refresh.
   if (tab === 'games' && league) {
     return html`<div class="app">
-      <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} />
+      <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} tab=${tab} />
       <${JobStrip} job=${job} onClose=${closeJob} />
       <${StaleBanner} savedAt=${savedAt} />
       <${Guard} key="games"><${Games} league=${league} version=${version} /></${Guard}>
@@ -484,7 +491,7 @@ function App() {
     </div>`;
   }
   return html`<div class="app">
-    <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} />
+    <${Header} status=${status} league=${league} onLeague=${chooseLeague} job=${job} onRefresh=${refresh} now=${now} wide=${wide} tab=${tab} />
     <${JobStrip} job=${job} onClose=${closeJob} />
     <${StaleBanner} savedAt=${savedAt} />
     ${error && !savedAt && html`<div class="error" role="alert">${error}</div>`}
@@ -496,6 +503,8 @@ function App() {
         ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} />`
         : tab === 'roster' && league
           ? html`<${Roster} league=${league} version=${version} />`
+          : tab === 'players' && league
+            ? html`<${Players} league=${league} version=${version} />`
           : tab === 'ai' && league
             ? html`<${Suggestions} league=${league} version=${version} />`
             : tab === 'planner' && league

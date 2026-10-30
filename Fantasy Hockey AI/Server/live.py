@@ -63,7 +63,6 @@ TONIGHT_DIR = paths.PROJECTIONS_REPORTS / "live"
 STATUS_DIR = paths.FEATURES_DIR.parent / "live"
 INJURED = ("OUT", "SUSP")
 DECISION_SIMS = 400
-FREE_AGENTS_SHOWN = 60
 OPTIONS_PRICED = 25        # free agents the options price on the roster (the rule itself prices 10)
 OPTIONS_SHOWN = 15         # pickups listed, each with its best drop
 # Week plans shown beside the one made, each built around a different pickup (weekplan.run):
@@ -1326,8 +1325,8 @@ class LiveRunner:
                          "note": _note(r.note)} for r in goalie_notes.itertuples()],
             "problems": problems, "sim_season": self.sim_season, "rate_source": source,
             "plan_log": manager.plan.log[-1] if manager.plan.log else {},
-            # For the plan window's tables (not in the Markdown): the whole roster, the best free
-            # agents, the opponent, the week's points so far.
+            # For the app's tables (not in the Markdown): the whole roster, every free agent (the
+            # Players tab, 2026-10-30; it was the best 60), the opponent, the week's points so far.
             "my_week_points": snapshot.my_week_points, "opponent_week_points": snapshot.opponent_week_points,
             # Both as the league stands now; `plan` is the recommended action (add, drop, ...).
             "lineup_now": slots_now,
@@ -1341,7 +1340,7 @@ class LiveRunner:
                        for p in me_now.roster + me_now.ir],
             "free_agents": [self._player_row(v, p, name, priced, state_status, gtd, by_player,
                                              waivers=state_now.on_waivers(p, v.day), plan=action.get(p))
-                            for p in sorted(state_now.free_agents(), key=priced, reverse=True)[:FREE_AGENTS_SHOWN]],
+                            for p in sorted(state_now.free_agents(), key=priced, reverse=True)],
             "opponent_roster": ([self._player_row(v, p, name, priced, state_status, gtd, by_player)
                                  for p in state.teams[snapshot.opponent].roster]
                                 if snapshot.opponent is not None else []),
