@@ -687,7 +687,8 @@ class LiveRunner:
         options = adddrop_module.price(view(state_now), manager_now.params, manager_now.slot_order,
                                        manager_now.accepts, manager_now._fieldable, shortlist=OPTIONS_PRICED)
         return self._describe(snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
-                              state_now, lineup_now, options, next_week, next_plans)
+                              state_now, lineup_now, options, next_week, next_plans,
+                              projection=_matchup_projection(manager_now))
 
     def _workbench(self, manager, v, plans):
         """The Weekly planner tab's workbench on view `v` (weekplan.workbench), the `plans`' players in it."""
@@ -1007,7 +1008,7 @@ class LiveRunner:
     # ---------- the plan ----------
 
     def _describe(self, snapshot, state, before, manager, v, lineup, z, rows, status, problems, now,
-                  state_now, lineup_now, options, next_week=None, next_plans=()) -> dict:
+                  state_now, lineup_now, options, next_week=None, next_plans=(), projection=None) -> dict:
         me = state.teams[snapshot.me]
         names = pd.read_parquet(paths.players()).set_index("player_id")["name"]
         teams = pd.read_parquet(paths.teams()).set_index("team_id")["team"]
@@ -1305,9 +1306,10 @@ class LiveRunner:
             "week": v.week, "moves_left": v.moves_left, "free_moves": state.free_moves,
             "moves_used_before": before["moves_used"],
             "matchup_z": round(z, 2), "p_win": round(statistics.NormalDist().cdf(z), 3),
-            # Each side's projected points still to come this week, night by night (the z's own
-            # projection, Decisions/managers.py _z), for the app's Matchup.
-            "matchup_projection": _matchup_projection(manager),
+            # Each side's projected points still to come this week, night by night, for the app's
+            # Matchup and Roster: the z's own projection (Decisions/managers.py _z) on the roster as
+            # it stands, not after the plan's moves (the user, 2026-10-30).
+            "matchup_projection": projection,
             "opponent": snapshot.teams[snapshot.opponent]["name"] if snapshot.opponent is not None else None,
             "ir_to": to_ir, "ir_off": off_ir, "moves": moves, "claims": claims, "other_drops": dropped,
             "options": choices, "week_plan": week_plan, "week_plans": week_plans,

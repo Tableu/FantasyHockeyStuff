@@ -11,7 +11,7 @@ view -- the week's points by player, or one day drawn like the Roster's cards.
 A day gone and today: the slots the platform kept (Matchups.day_lineup, both teams), the
 projection that day's own plan made. A day ahead: no lineup is set yet, so everyone with a game
 plays (IR apart; the user, 2026-10-30) -- your projection from plan A's workbench, your
-opponent's his points per game -- and the day's total is the plan's matchup projection. Points are the NHL
+opponent's his points per game -- and the day's total is the plan's matchup projection (the roster as it stands, live.py). Points are the NHL
 box scores' in the league's scoring (games.Games.day).
 """
 

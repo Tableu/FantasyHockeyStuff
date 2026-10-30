@@ -231,7 +231,7 @@ function HeadToHead({ h2h, day }) {
     ? 'Week points each player has scored. Bench days (BN) do not count toward the total. Players line up by position, best week first.'
     : entry.state === 'today' ? 'As on the Roster: expected points tonight, and in colour under them, the points so far. Totals add the points so far; bench (BN) points do not count.'
       : entry.state === 'final' ? `${dayName(entry, h2h.days)}: expected points, and in colour under them, the points each player scored, in the slots the platform kept. Bench (BN) points do not count.`
-        : `${dayName(entry, h2h.days)}: expected points for each player with a game; no lineup is set yet. Totals are the plan's projection for the night, its best lineup.`;
+        : `${dayName(entry, h2h.days)}: expected points for each player with a game; no lineup is set yet. Totals are the projection of your roster as it stands, its best lineup that night, before any of the plan's moves.`;
   const note = date && entry.state === 'ahead' ? '' : " Totals are the platform's own points.";
   return html`<table class="h2h">
       <thead><tr>
