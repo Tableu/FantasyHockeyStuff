@@ -46,6 +46,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -67,6 +68,7 @@ SNAPSHOT_KINDS = ("injuries", "lines", "goalies")
 # late scratch posted as an injury reaches the next window's plan.
 QUICK_SNAPSHOT_KINDS = ("injuries", "goalies")
 MODES = ("full", "quick", "news", "league", "plan")   # Planner.run's refreshes
+READ_TRIES, READ_RETRY_S = 4, 0.5   # puck_times: a file just swapped in, read again (Docker share)
 PLAN_TIMEOUT_S = 600            # a planning child still running after this is stopped
 CHILD_ECHO, CHILD_RESULT = "@@echo ", "@@result "     # the planning child's progress and result lines
 
@@ -140,11 +142,20 @@ def tonight(day: dt.date, echo=print) -> bool:
 
 
 def puck_times(day: dt.date) -> list:
-    """Tonight's distinct puck times (UTC), from the schedule the tonight build read."""
+    """Tonight's distinct puck times (UTC), from the schedule the tonight build read. Read again
+    on an OSError: in the container (Docker Desktop's share of the Windows folder) a file a
+    refresh has just swapped in (paths.write_parquet) can answer "Input/output error" for a moment
+    (2026-10-22 and -27: the auto window's check that minute was lost)."""
     context = live.STATUS_DIR / f"tonight_{day.isoformat()}_context.parquet"
-    if not context.exists():
-        return []
-    return sorted(set(pd.to_datetime(pd.read_parquet(context)["start_time_utc"]).dropna()))
+    for attempt in range(READ_TRIES):
+        if not context.exists():
+            return []
+        try:
+            return sorted(set(pd.to_datetime(pd.read_parquet(context)["start_time_utc"]).dropna()))
+        except OSError:
+            if attempt == READ_TRIES - 1:
+                raise
+            time.sleep(READ_RETRY_S)
 
 
 def next_window(day: dt.date, now: dt.datetime):
