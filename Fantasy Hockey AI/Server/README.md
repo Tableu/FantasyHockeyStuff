@@ -148,11 +148,12 @@ Plan (`app/plan.js`; was P2's AI suggestions and P3's Weekly planner): today's m
 upgrades in a banner (`GET /suggestions`, suggestions.py), then your week from your picks on plan
 A's workbench (`GET /week`, week.py on weekbook.py), the slot picker (`GET /week/picker`, `GET
 /week/drops`) and every change through `POST /week/edit`. The chips draw a week plan over the
-week (`GET /week?show=A`), its picks not yours dashed, to take one (`take`) or all (`use`). P4, Games (`app/games.js`): today's games (`GET /games`) with the goal feed
-(`GET /goals`) in a sheet; a game full screen with its Summary, Box and Plays (`GET /games/{id}`, each
+week (`GET /week?show=A`), its picks not yours dashed, to take one (`take`) or all (`use`). P4, Games (`app/games.js`): a day's games (`GET /games?date=`, the week's day picker from
+`GET /games/week`), today's with the goal feed (`GET /goals`) in a sheet; a game full screen with its Summary, Box and Plays (`GET /games/{id}`, each
 play with the fantasy points it earned) and Lines (`GET /games/{id}/lines`), polled every 5 s while
 live. P5, Matchup (`app/matchup.js`, `GET /matchup`, matchup.py): the week's score, P(win), tonight live
-against projected, the week day by day and the league's week -- the scores read from the platform
+against projected, the week day by day and the league's week, and the head-to-head (`GET
+/matchup/players`, headtohead.py: both sides' players, the week or a day, in the platform's slots) -- the scores read from the platform
 (platforms: `scoreboard`, `daily_points`, kept a minute), the projection the plan's own
 (`matchup_projection`, each side's nights from the z's projection in Decisions/managers.py). P6, offline
 and install: the service worker (`app/sw.js`) keeps the last answer for each screen's data (status,
