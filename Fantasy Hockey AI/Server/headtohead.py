@@ -2,17 +2,19 @@
 opponent held this week, each day's slot, projection, game and points, for the app's Players
 view -- the week's points by player, or one day drawn like the Roster's cards.
 
-    people(plans)                             {player id: {name, player, positions, team, side}}
+    people(plans)                             {player id: {name, player, positions, team, side, goalie}}
     view(dates, today, plans, lineups, boxes, workbench)
                                               {days: [{date, state, platform: {me, opp} points}],
+                                               columns: {skater, goalie},
                                                players: [{..., days: {date:
-                                               {slot, xpts, p_plays, game, points}}}]}
+                                               {slot, xpts, p_plays, game, points, line}}}]}
 
 A day gone and today: the slots the platform kept (Matchups.day_lineup, both teams), the
 projection that day's own plan made. A day ahead: no lineup is set yet, so everyone with a game
 plays (IR apart; the user, 2026-10-30) -- your projection from plan A's workbench, your
 opponent's his points per game -- and the day's total is the plan's matchup projection (the roster as it stands, live.py). Points are the NHL
-box scores' in the league's scoring (games.Games.day).
+box scores' in the league's scoring (games.Games.day); each day's box line comes along for the
+cards' stat tags, the Roster's columns (roster.columns_of).
 """
 
 import roster
@@ -29,7 +31,7 @@ def people(plans: dict) -> dict:
                 short, team = roster.split_name(r["player"])
                 out[int(r["player_id"])] = {"player_id": int(r["player_id"]), "player": r["player"], "name": short,
                                             "positions": r["positions"], "team": team, "side": side,
-                                            "status": r.get("status")}
+                                            "goalie": r["positions"] == "G", "status": r.get("status")}
     return out
 
 
@@ -101,13 +103,15 @@ def view(dates: list, today: str, plans: dict, lineups: dict, boxes: dict, workb
             if state == "ahead" and slot != "IR":
                 slot = None                  # no lineup set yet: he plays if his team does
             p["days"][date] = {"slot": slot, "xpts": xpts, "p_plays": p_plays, "game": game,
-                               "points": line["fantasy"] if line else None,
+                               "points": line["fantasy"] if line else None, "line": line,
                                "counts": slot not in OUT_OF_LINEUP}
     # Each day's points as the platform scored them (the totals; a box score the NHL corrected
     # since can differ from them by a little), where it was read.
     scored = {d: {"me": got["points"], "opp": got["opp_points"]} for d, got in lineups.items() if got is not None}
     nights = {side: ((projection or {}).get(side) or {}).get("nights") or {} for side in ("me", "opp")}
-    return {"days": [{"date": d, "state": "final" if d < today else "today" if d == today else "ahead",
+    newest = next((plans[d] for d in sorted(plans, reverse=True) if plans[d]), {})
+    return {"columns": roster.columns_of(newest),
+            "days": [{"date": d, "state": "final" if d < today else "today" if d == today else "ahead",
                       "platform": scored.get(d),
                       "projected": {"me": nights["me"].get(d), "opp": nights["opp"].get(d)}} for d in dates],
             "players": [p for p in players.values() if p["days"]]}

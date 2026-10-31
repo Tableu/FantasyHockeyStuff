@@ -8,7 +8,7 @@
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 import { DayPicker, dayName, shortDay } from './layout.js';
-import { gameLine } from './roster.js';
+import { gameLine, boxTags, Tags } from './roster.js';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
@@ -154,10 +154,11 @@ export function Matchup({ league, version, wide }) {
 }
 
 // One side's player in a head-to-head row: name, eligible positions and P% (or BN), his game or
-// team, and on the right his points -- the week's, or that day's expected over what he scored.
-function playerCell(p, date, side) {
+// team -- on a day, the Roster's stat tags from his box line beside it --, and on the right his
+// points: the week's, or that day's expected over what he scored.
+function playerCell(p, date, side, columns) {
   if (!p) return null;
-  const base = { name: p.name, elig: p.positions, prob: '', probCls: '', info: '', top: '', bot: '', dim: false };
+  const base = { name: p.name, elig: p.positions, prob: '', probCls: '', info: '', top: '', bot: '', dim: false, tags: [] };
   if (!date) {
     // Days with a lineup set (a day ahead has none: slot null).
     const counted = Object.values(p.days).filter((e) => e.counts && e.slot !== null);
@@ -171,6 +172,7 @@ function playerCell(p, date, side) {
   if (!game) return { ...out, info: 'No game', dim: true };
   if (STARTED.has(game.state)) {
     return { ...out, prob: bench ? e.slot : '✓', info: gameLine({}, game), top: e.xpts === null ? '' : f2(e.xpts),
+      tags: boxTags(e.line, p.goalie, p.goalie ? columns.goalie : columns.skater),
       bot: e.points === null || e.points === undefined ? '' : f2(e.points), botCls: bench ? 'dim' : side };
   }
   const pp = e.p_plays === null || e.p_plays === undefined ? null : Math.round(e.p_plays * 100);
@@ -181,9 +183,11 @@ function playerCell(p, date, side) {
 // The Players view, each side's players paired row by row. The week: by their first position,
 // best week first, each player's points this week, bench (BN) days left out. A day: that day's
 // roster as the Roster's cards -- the players who play that day at the top (a game and a lineup
-// slot; a day ahead has no lineup yet, so a game and not IR), the rest under Bench (the user, 2026-10-30);
+// slot; a day ahead has no lineup yet, so a game and not IR), the rest under Bench (the user, 2026-10-30),
+// closed until tapped (the user, 2026-10-31);
 // the totals add what counted (a day ahead: its projection).
 function HeadToHead({ h2h, day }) {
+  const [benchOpen, setBenchOpen] = useState(false);   // the day's Bench: closed until tapped
   const entry = day === null ? null : h2h.days.find((d) => (day === 'today' ? d.state === 'today' : d.date === day));
   const date = entry ? entry.date : null;
   const shown = (side) => h2h.players.filter((p) => p.side === side && (!date || p.days[date]));
@@ -203,7 +207,7 @@ function HeadToHead({ h2h, day }) {
     if (!e.counts) return t;
     return t + ((entry.state === 'ahead' ? e.xpts : e.points) || 0);
   }, 0);
-  const pair = (ys, os) => Array.from({ length: Math.max(ys.length, os.length) }, (_, i) => [playerCell(ys[i], date, 'you'), playerCell(os[i], date, 'opp')]);
+  const pair = (ys, os) => Array.from({ length: Math.max(ys.length, os.length) }, (_, i) => [playerCell(ys[i], date, 'you', h2h.columns), playerCell(os[i], date, 'opp', h2h.columns)]);
   const rank = (p) => POSITIONS.indexOf(p.positions.split('/')[0]);
   // Plays that day: a game, and a slot that counts (a day ahead: anything but IR).
   const plays = (p) => { const e = p.days[date]; return !!e.game && e.counts; };
@@ -224,7 +228,7 @@ function HeadToHead({ h2h, day }) {
     const who = html`<span class="who"><span class=${`nm ${c.dim ? 'dim' : ''}`}>${right
       ? html`${c.prob && html`<span class=${`pb pb-l ${c.probCls}`}>${c.prob}</span>`}<span class="el el-l">${c.elig}</span>${c.name}`
       : html`${c.name}<span class="el">${c.elig}</span>${c.prob && html`<span class=${`pb ${c.probCls}`}>${c.prob}</span>`}`}</span>
-      <span class="inf">${c.info}</span></span>`;
+      <span class="inf-row"><span class="inf">${c.info}</span>${c.tags.length > 0 && html`<${Tags} tags=${c.tags} />`}</span></span>`;
     return html`<td><div class=${`h2h-cell ${right ? 'right' : ''}`}>${right ? html`${pts}${who}` : html`${who}${pts}`}</div></td>`;
   };
   const foot = !date
@@ -239,7 +243,10 @@ function HeadToHead({ h2h, day }) {
         <th scope="col" class="pos-col"><span class="sr">Position</span></th>
         <th scope="col" class="opp"><div class="hd"><span>${head}</span><span>Opp</span></div></th>
       </tr></thead>
-      ${groups.map((g) => html`<tbody class="grp">${g.bench && html`<tr class="bench-h"><td colspan="3">Bench</td></tr>`}${g.rows.map(([y, o]) => html`<tr>
+      ${groups.map((g) => html`<tbody class="grp">${g.bench && html`<tr class="bench-h"><td colspan="3">
+        <button type="button" aria-expanded=${benchOpen} onClick=${() => setBenchOpen(!benchOpen)}>
+          <span>Bench</span><span aria-hidden="true">${benchOpen ? '▴' : '▾'}</span></button></td></tr>`}
+        ${(!g.bench || benchOpen) && g.rows.map(([y, o]) => html`<tr>
         ${cell(y, false)}<td class="pos-col">${g.pos}</td>${cell(o, true)}</tr>`)}</tbody>`)}
       <tbody><tr class="total">
         <td><div class="hd"><span>Total</span><span class="pts you">${f2(total('me'))}</span></div></td>

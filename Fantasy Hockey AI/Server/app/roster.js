@@ -56,8 +56,8 @@ function playChance(row, live, goalie) {
 const probText = (prob) => (/^\d+$/.test(prob) ? `${prob}%` : prob === '—' ? '' : prob);
 
 // His box line as tags: the league's scoring stats, the Season columns (the user, 2026-10-24), a
-// goalie's SV% after them, then TOI; a stat he has none of tonight is left out.
-function boxTags(line, goalie, columns) {
+// goalie's SV% after them, then TOI; a stat he has none of tonight is left out. Matchup's day cards too.
+export function boxTags(line, goalie, columns) {
   if (!line) return [];
   const tags = columns.filter(([key]) => line[key]).map(([key, label]) => [label, line[key]]);
   if (goalie && line.shots_against) tags.push(['SV%', svPct(line)]);
@@ -67,7 +67,7 @@ function boxTags(line, goalie, columns) {
 
 const svPct = (line) => (line.saves / line.shots_against).toFixed(3).replace(/^0/, '');
 
-const Tags = ({ tags }) => html`<span class="tags">${tags.map(([k, v]) => html`<span class="tag"><span class="k">${k}</span> ${v}</span>`)}</span>`;
+export const Tags = ({ tags }) => html`<span class="tags">${tags.map(([k, v]) => html`<span class="tag"><span class="k">${k}</span> ${v}</span>`)}</span>`;
 
 // The PC table's box columns: the league's scoring stats but GP, a goalie's SV%, TOI.
 function boxColumns(columns, goalie) {

@@ -52,11 +52,17 @@ def season(stats: dict, weights: dict, goalie: bool) -> dict:
     return out
 
 
+def columns_of(plan: dict) -> dict:
+    """The league's scoring stats as the app's columns, skaters' apart from goalies' (GP first)."""
+    columns = plan.get("stat_columns", [])
+    return {"skater": [c for c in columns if c[0] not in GOALIE_KEYS],
+            "goalie": [["gp", "GP"]] + [c for c in columns if c[0] in GOALIE_KEYS]}
+
+
 def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, team: None) -> dict:
     """`slot_rows`: the league's lineup slots in its own order (C C LW LW ... G G), the lineup's order.
     `photo(player_id, team)`: his headshot's URL, or None."""
     by_name = {r["player"]: r for r in plan.get("roster", [])}
-    columns = plan.get("stat_columns", [])
 
     def row_of(r: dict, slot: dict | None, where: str) -> dict:
         goalie = r["positions"] == "G"
@@ -95,8 +101,7 @@ def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, t
         "team": plan.get("team"), "file_generated_at": plan.get("generated_at"),
         "proj_tonight": proj_of(plan),
         "next_puck": ahead[0] if ahead else None, "empty_slots": empty,
-        "columns": {"skater": [c for c in columns if c[0] not in GOALIE_KEYS],
-                    "goalie": [["gp", "GP"]] + [c for c in columns if c[0] in GOALIE_KEYS]},
+        "columns": columns_of(plan),
         "groups": groups_of(lineup, bench, ir),
     }
 

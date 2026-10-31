@@ -186,9 +186,9 @@ table.roster .flag { font-size: 10.5px; font-weight: 700; }
 .tn-row .x, .tn-row .live { text-align: right; font-family: var(--mono); font-size: 14px; font-weight: 600; }
 .tn-row .live { color: var(--you); }
 .tn-row .tags { grid-column: 2 / 4; }
-:is(.tn-row, table.roster) .tags { display: flex; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; }
-:is(.tn-row, table.roster) .tag { flex: none; padding: 1px 4px; border-radius: 3px; background: var(--ground-3); font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text); }
-:is(.tn-row, table.roster) .tag .k { font-family: var(--sans); font-weight: 500; color: var(--text-3); }
+:is(.tn-row, table.roster, table.h2h) .tags { display: flex; flex-wrap: nowrap; gap: 3px; min-width: 0; overflow: hidden; }
+:is(.tn-row, table.roster, table.h2h) .tag { flex: none; padding: 1px 4px; border-radius: 3px; background: var(--ground-3); font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text); }
+:is(.tn-row, table.roster, table.h2h) .tag .k { font-family: var(--sans); font-weight: 500; color: var(--text-3); }
 /* The PC table's day view: the game, then the box line in its own columns. */
 table.roster .game-col { text-align: left; font-family: var(--sans); width: 170px; min-width: 170px; }
 table.roster button.sort { padding: 0 2px; min-height: 36px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
@@ -674,5 +674,18 @@ table.h2h .el { margin-left: 5px; font-size: 11px; font-weight: 500; color: var(
 table.h2h .el-l, table.h2h .pb-l { margin-left: 0; margin-right: 5px; }
 table.h2h .pb { margin-left: 5px; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--text-3); }
 table.h2h .pb.warn { color: var(--warn); }
+/* A player's cell holds to the top: the row grows with the other side's stat tags. */
+table.h2h tbody.grp td:not(.pos-col) { vertical-align: top; }
+/* The game line and the stat tags share a line, the tags wrapping onto more as they need. */
+table.h2h .inf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 3px; }
+table.h2h .inf-row .inf { flex: 0 1 auto; min-width: 0; margin-right: 2px; }
+/* The opponent's side mirrored: the game line at the right edge, the tags running left of it. */
+.h2h-cell.right .inf-row { flex-direction: row-reverse; }
+.h2h-cell.right .inf-row .inf { margin-right: 0; margin-left: 2px; }
+/* On a phone the game line has its own line, the tags under it. */
+.app:not(.wide) table.h2h .inf-row .inf { flex-basis: 100%; margin: 0; }
+table.h2h .inf-row .tags { display: contents; }
 table.h2h tr.total td { font-weight: 700; }
 table.h2h tr.bench-h td { background: var(--ground-2); color: var(--text-3); height: 24px; padding-top: 0; padding-bottom: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+table.h2h tr.bench-h td { padding: 0; }
+table.h2h tr.bench-h button { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 32px; padding: 0 6px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
