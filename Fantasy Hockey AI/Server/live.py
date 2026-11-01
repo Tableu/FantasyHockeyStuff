@@ -471,6 +471,7 @@ class LiveRunner:
         self.board, _, self.config, self.eligibility = draft_board.build(
             self.season, draft_board.previous(self.season), league.rules, league.scoring,
             pd.Timestamp(day), self.strategy, eligibility_platform=league.eligibility_platform)
+        self.eligibility = {**self.call_ups(day), **self.eligibility}
         self.slot_order = self.config.slot_order()
         scored = set(self.scoreset.skaters) | set(self.scoreset.goalies)
         self.stat_keys = [k for k in draft_board.STAT_HEADINGS
@@ -523,6 +524,36 @@ class LiveRunner:
         periph = sum(w.get(k, 0.0) * stat(k) for k in valuation_module.PERIPHERAL_STATS)
         total = scoring + periph
         self.board_periph = {int(p): float(x) for p, x in (periph / total.where(total > 0)).dropna().items()}
+
+    def call_ups(self, day: dt.date) -> dict:
+        """{player: eligible slots} for NHL players the draft board does not carry -- no preseason
+        projection and no games last season -- who have dressed this season or are in tonight's
+        rows. The board is the player pool, so without this such a player is never a free agent and
+        a team that rosters him plays a spot short in the plan (Matt Tomkins, EDM, starting
+        2026-11-01 after four games as the backup). Their slots are the league platform's, else
+        their NHL position (inputs.load_eligibility); their rates come from the rest-of-season
+        model and tonight's projections like anyone's, a goalie's from his start share."""
+        dressed = set()
+        stats = paths.FEATURES_DIR / f"season_stats_{self.season}.parquet"
+        if stats.exists():
+            lines = pd.read_parquet(stats, columns=["player_id", "gp"])
+            dressed |= set(lines.loc[lines["gp"] > 0, "player_id"].astype(int))
+        if paths.goalie_starts(self.season).exists():
+            dressed |= set(pd.read_parquet(paths.goalie_starts(self.season), columns=["player_id"])["player_id"].astype(int))
+        for kind in ("skaters", "goalies"):
+            tonight = STATUS_DIR / f"tonight_{day.isoformat()}_{kind}.parquet"
+            if tonight.exists():
+                dressed |= set(pd.read_parquet(tonight, columns=["player_id"])["player_id"].astype(int))
+        players = pd.read_parquet(paths.players()).set_index("player_id")
+        new = sorted(p for p in dressed if p not in self.eligibility and p in players.index)
+        if not new:
+            return {}
+        universe = pd.DataFrame({"player_id": new,
+                                 "position": players.loc[new, "position"].replace(draft_board.POSITION_CODES).to_numpy()})
+        added = inputs.load_eligibility(self.config, universe)
+        log.info("%d player(s) off the board added to the pool (dressed this season): %s", len(added),
+                 ", ".join(str(players.at[p, "name"]) for p in sorted(added)[:20]))
+        return added
 
     def _latest_sim_season(self) -> str:
         """The newest season with a fitted sampler (dispersion + correlations + goalie fit) no later

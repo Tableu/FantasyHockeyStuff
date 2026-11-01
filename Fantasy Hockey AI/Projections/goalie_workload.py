@@ -212,8 +212,12 @@ def measure(season: str, k: float | None) -> None:
 def shares(season: str, days, k: float = K) -> pd.DataFrame:
     """The blend's projected start share for every goalie on each of `days`, as of that day's
     lock: the preseason consensus, and starts and team games before the day. A goalie is anyone
-    the consensus projects or who has dressed before the day; a call-up who has not has no row,
-    and readers fall back to his P(start) as before."""
+    the consensus projects, who has dressed before the day, or who is in that day's tonight rows
+    (`tonight_goalies`) -- a goalie nobody projected, starting before he has dressed this season,
+    takes consensus 0 like any unprojected goalie, on his team that night. Until 2026-11-01 he had
+    no row and readers fell back to his P(start) for the whole rest of the season: Laurent
+    Brossoit (ANA, confirmed that night at 0.997) priced as a goalie starting every remaining game,
+    1.66 a team game, above every real starter."""
     starts = pd.read_parquet(paths.FEATURES_DIR / f"goalie_starts_{season}.parquet")
     starts["game_date"] = pd.to_datetime(starts["game_date"])
     starts["is_starter"] = starts["is_starter"].astype(bool)
@@ -225,10 +229,13 @@ def shares(season: str, days, k: float = K) -> pd.DataFrame:
         dressed = before.sort_values("game_date").groupby("player_id")["team_id"].last()
         started = before[before["is_starter"]].groupby("player_id").size()
         games = team_games[team_games["game_date"] < day].groupby("team_id").size()
-        for p in sorted(set(consensus.index.astype(int)) | set(dressed.index.astype(int))):
+        tonight = tonight_goalies(day)
+        for p in sorted(set(consensus.index.astype(int)) | set(dressed.index.astype(int)) | set(tonight)):
             team = dressed.get(p)
             if team is None and p in consensus.index:
                 team = consensus.at[p, "consensus_team"]
+            if (team is None or pd.isna(team)) and p in tonight:
+                team = tonight[p]
             team = None if team is None or pd.isna(team) else int(team)
             played = int(games.get(team, 0)) if team is not None else 0
             prior = float(consensus["consensus_share"].get(p, 0.0))
@@ -238,6 +245,17 @@ def shares(season: str, days, k: float = K) -> pd.DataFrame:
                          "start_share": min(max(share, 0.0), 1.0), "consensus_share": prior,
                          "starts_before": n, "team_games_before": played, "k": k})
     return pd.DataFrame(rows)
+
+
+def tonight_goalies(day) -> dict:
+    """{goalie: team} from the day's tonight rows (ModelFeatures build_tonight.py, which planpass
+    runs before this) -- the goalies expected to dress that night; empty when there are none (a
+    past season's days, a day with no games)."""
+    path = paths.FEATURES_DIR.parent / "live" / f"tonight_{pd.Timestamp(day).date().isoformat()}_goalies.parquet"
+    if not path.exists():
+        return {}
+    rows = pd.read_parquet(path, columns=["player_id", "team_id"]).dropna()
+    return dict(zip(rows["player_id"].astype(int), rows["team_id"].astype(int)))
 
 
 def build(season: str, date: str | None) -> None:

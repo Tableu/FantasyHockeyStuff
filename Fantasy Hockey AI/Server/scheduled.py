@@ -65,7 +65,10 @@ def steps(name: str, day: dt.date, copy_from: str | None = None) -> list:
                 (PROJECTIONS, ["ros_predict.py", "--season", season, "--min-games-played", "0",
                                "--weights", "points-league"])] + copy_back
     if name == "player_teams":
-        return [(PIPELINE, ["import_player_teams.py"]), (MODEL_FEATURES, ["build_players.py"])]
+        # import_platform_ids: ids the preseason imports missed (call-ups), so a league that rosters
+        # one names him (2026-11-01: Matt Tomkins hidden in beagles, Elias N. Pettersson in espn-la).
+        return [(PIPELINE, ["import_player_teams.py"]), (PIPELINE, ["import_platform_ids.py"]),
+                (MODEL_FEATURES, ["build_players.py"])]
     if name == "injuries":
         return [(PIPELINE, ["snapshot_live.py", "--kind", "injuries"]), (MODEL_FEATURES, ["build_players.py"])]
     if name == "settings_check":
