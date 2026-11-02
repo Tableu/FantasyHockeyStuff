@@ -212,8 +212,8 @@ def measure(season: str, k: float | None) -> None:
 def shares(season: str, days, k: float = K) -> pd.DataFrame:
     """The blend's projected start share for every goalie on each of `days`, as of that day's
     lock: the preseason consensus, and starts and team games before the day. A goalie is anyone
-    the consensus projects, who has dressed before the day, or who is in that day's tonight rows
-    (`tonight_goalies`) -- a goalie nobody projected, starting before he has dressed this season,
+    the consensus projects, who has dressed before the day, or who is in the season's tonight rows
+    through the day (`tonight_goalies`) -- a goalie nobody projected, starting before he has dressed this season,
     takes consensus 0 like any unprojected goalie, on his team that night. Until 2026-11-01 he had
     no row and readers fell back to his P(start) for the whole rest of the season: Laurent
     Brossoit (ANA, confirmed that night at 0.997) priced as a goalie starting every remaining game,
@@ -248,14 +248,22 @@ def shares(season: str, days, k: float = K) -> pd.DataFrame:
 
 
 def tonight_goalies(day) -> dict:
-    """{goalie: team} from the day's tonight rows (ModelFeatures build_tonight.py, which planpass
-    runs before this) -- the goalies expected to dress that night; empty when there are none (a
-    past season's days, a day with no games)."""
-    path = paths.FEATURES_DIR.parent / "live" / f"tonight_{pd.Timestamp(day).date().isoformat()}_goalies.parquet"
-    if not path.exists():
-        return {}
-    rows = pd.read_parquet(path, columns=["player_id", "team_id"]).dropna()
-    return dict(zip(rows["player_id"].astype(int), rows["team_id"].astype(int)))
+    """{goalie: team} from the season's tonight rows on or before `day` (ModelFeatures
+    build_tonight.py, which planpass runs before this) -- every goalie expected to dress on a game
+    day so far, on his team in the newest of them; empty when there are none (a past season's days).
+    Every day's, not just `day`'s: a goalie listed last night whose start the nightly has not yet
+    loaded, on a day his team is idle, would otherwise have no row again (Brossoit, 2026-11-02, the
+    plan's day after his 11-01 start)."""
+    day = pd.Timestamp(day).date()
+    season_start = f"{day.year if day.month >= 7 else day.year - 1}-07-01"
+    teams = {}
+    for path in sorted((paths.FEATURES_DIR.parent / "live").glob("tonight_*_goalies.parquet")):
+        date = path.name[len("tonight_"):-len("_goalies.parquet")]
+        if not season_start <= date <= day.isoformat():
+            continue
+        rows = pd.read_parquet(path, columns=["player_id", "team_id"]).dropna()
+        teams.update(zip(rows["player_id"].astype(int), rows["team_id"].astype(int)))
+    return teams
 
 
 def build(season: str, date: str | None) -> None:
