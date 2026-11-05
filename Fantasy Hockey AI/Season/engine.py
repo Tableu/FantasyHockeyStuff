@@ -329,7 +329,7 @@ class Season:
             for day in first_week:
                 frame = self.proj_by_day.get(day)
                 if frame is not None and len(frame):
-                    values = self.scoreset.score_columns(frame, prefix="lambda_")
+                    values = self.scoreset.lambda_points(frame)
                     plays = frame["p_plays"].to_numpy("float64")
                     hurt = self.unavailable_by_day.get(day, set())
                     for player_id, value in zip(frame["player_id"].astype(int), values * plays):
@@ -818,7 +818,7 @@ class Season:
             for team_id, rows in goalie_frame.groupby("team_id"):
                 self.last_goalie_slate[team_id] = rows[["game_id", "team_id", "player_id"]]
         if frame is not None and len(frame):
-            values = self.scoreset.score_columns(frame, prefix="lambda_")
+            values = self.scoreset.lambda_points(frame)
             plays = frame["p_plays"].to_numpy("float64")
             hurt = self.unavailable_by_day.get(day, set())
             for player_id, value in zip(frame["player_id"].astype(int), values * plays):

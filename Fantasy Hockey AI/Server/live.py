@@ -323,7 +323,7 @@ def latest_rates(day: dt.date, scoreset, expected_line: float) -> dict:
         rows = pd.read_parquet(path)
         skaters = rows[rows["kind"] == "skater"]
         if len(skaters):
-            points = scoreset.score_columns(skaters, prefix="lambda_") * skaters["p_plays"].to_numpy("float64")
+            points = scoreset.lambda_points(skaters) * skaters["p_plays"].to_numpy("float64")
             rates.update(dict(zip(skaters["player_id"].astype(int), points)))
         goalies = rows[rows["kind"] == "goalie"]
         rates.update({int(p): float(s) * expected_line

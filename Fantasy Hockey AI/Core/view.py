@@ -384,7 +384,7 @@ class SlateView:
         """
         points = {}
         if len(self.projections):
-            values = scoreset.score_columns(self.projections, prefix="lambda_")
+            values = scoreset.lambda_points(self.projections)
             plays = self.projections["p_plays"].to_numpy("float64")
             for player_id, value in zip(self.projections["player_id"], values * plays):
                 points[int(player_id)] = float(value)

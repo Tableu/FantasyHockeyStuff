@@ -107,6 +107,18 @@ class ScoreSet:
                 total += frame[column].fillna(0.0).to_numpy("float64") * weight
         return total
 
+    def lambda_points(self, frame):
+        """A skater lambda table's expected points per row, if he plays: the counts' points plus the
+        PP and SH point bonus. `score_columns(frame, prefix="lambda_")` alone misses the bonus, 4-7%
+        of a skater's points (more for the top players): the table holds each point's chance of being
+        a PP or SH point (the sampler draws from those), not lambda_ppp and lambda_shp columns."""
+        weights = self.weights("skaters")
+        column = lambda name: frame[name].fillna(0.0).to_numpy("float64")
+        return (self.score_columns(frame, prefix="lambda_")
+                + (column("lambda_goals") + column("lambda_assists"))
+                * (column("pp_point_share") * weights.get("ppp", 0.0)
+                   + column("sh_point_share") * weights.get("shp", 0.0)))
+
 
 def load(path) -> ScoreSet:
     path = Path(path)

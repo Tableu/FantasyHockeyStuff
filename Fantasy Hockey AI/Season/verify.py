@@ -1539,6 +1539,29 @@ def check_server_core() -> str:
     return f"a server process loads {len(core)} Core/ modules ({', '.join(core)}) and none of Season/"
 
 
+def check_rate_bonus() -> str:
+    """A skater's carried per-game rate holds his PP/SH point bonus: expected points x each point's
+    bonus on top of the counts, under this league's scoring."""
+    import numpy as np
+
+    season, calendar = _small_season((2,))
+    frame = season.proj_by_day[calendar.days[0]]
+    scoreset = season.scoreset
+    weights = scoreset.weights("skaters")
+    plays = frame["p_plays"].to_numpy("float64")
+    counts = scoreset.score_columns(frame, prefix="lambda_") * plays
+    points = (frame["lambda_goals"] + frame["lambda_assists"]).to_numpy("float64") * plays
+    bonus = points * (frame["pp_point_share"].to_numpy("float64") * weights["ppp"]
+                      + frame["sh_point_share"].to_numpy("float64") * weights["shp"])
+    if not bonus.sum() > 0:
+        raise AssertionError("no bonus on the first night's rows")
+    want = counts + bonus
+    for player, value in zip(frame["player_id"].astype(int), want):
+        if abs(season.latest_rate[player] - value) > 1e-9:
+            raise AssertionError(f"player {player}: rate {season.latest_rate[player]} is not {value}")
+    return f"first night {counts.sum():.0f} + {bonus.sum():.0f} bonus points, in every carried rate"
+
+
 CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard),
           ("leakage", check_leakage),
           ("draws", check_draws), ("invariants", check_invariants),
@@ -1560,7 +1583,8 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("first week", check_first_week), ("candidate", check_candidate),
           ("tune guard", check_tune_guard), ("opponents", check_opponents),
           ("boom bust", check_boom_bust), ("live strategy", check_live_strategy),
-          ("modules", check_modules), ("server core", check_server_core)]
+          ("modules", check_modules), ("server core", check_server_core),
+          ("rate bonus", check_rate_bonus)]
 
 
 def main():
