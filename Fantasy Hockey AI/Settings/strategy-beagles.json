@@ -9,7 +9,8 @@
     "drop_shortlist": 4,
     "tail": "cost",
     "goalie_absence": true,
-    "packages": false
+    "packages": false,
+    "goalie_line": "season"
   },
   "streaming": {
     "spots": 99,

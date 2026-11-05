@@ -57,15 +57,22 @@ class AddDropParams:
     tail: str                         # value after the window: "none", "cost" or "net" (below)
     goalie_absence: bool              # an injured goalie's window value counts games from his return
     packages: bool                    # a swap leaving a position short also priced with its refill
+    # The flat goalie line. "history": every earlier season's mean start. "season": last season's
+    # mean blended with this season's starts so far (inputs.SeasonGoalieLine). Later nights and
+    # rest-of-season goalie values use it; tonight's simulated draws do not change.
+    goalie_line: str
 
     def __post_init__(self):
         if self.tail not in TAILS:
             raise ValueError(f"adddrop tail {self.tail!r}; use one of {TAILS}")
+        if self.goalie_line not in ("history", "season"):
+            raise ValueError(f"adddrop goalie_line {self.goalie_line!r}; use history or season")
 
     def describe(self) -> str:
         return (f"H={self.horizon_weeks} m={self.margin:g} rate={self.rate_source} "
                 f"claim={self.claim_premium:g}" + ("" if self.tail == "none" else f" tail={self.tail}")
-                + (" gabs" if self.goalie_absence else "") + (" pkg" if self.packages else ""))
+                + (" gabs" if self.goalie_absence else "") + (" pkg" if self.packages else "")
+                + ("" if self.goalie_line == "history" else f" gline={self.goalie_line}"))
 
 
 # What the rest of the season after the H-week window counts for. A swap is permanent, but the

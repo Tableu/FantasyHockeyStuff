@@ -488,8 +488,8 @@ class LiveRunner:
         team_games = schedule.groupby("team_id")["game_id"].nunique()
         self.game_days = set(pd.to_datetime(games["game_date"]).dt.date)
 
-        history = inputs.load_goalie_history(self.season)
-        self.goalie_line_mean, self.goalie_line_sd = inputs.goalie_line(history, self.scoreset)
+        self.goalie_history = inputs.load_goalie_history(self.season)
+        self.history_line, self.goalie_line_sd = inputs.goalie_line(self.goalie_history, self.scoreset)
 
         # The board's season totals as a rate per team game: the rest-of-season seed (skaters, as
         # the engine's `ros` is) and the per-game seed for everyone nothing has projected yet.
@@ -573,6 +573,7 @@ class LiveRunner:
     def plan(self, snapshot: LeagueSnapshot, now: dt.datetime) -> dict:
         """Run the shipped manager for my team on a copy of the league and return the plan."""
         day = pd.Timestamp(self.day)
+        self.goalie_line_mean = self.goalie_line()
         # No games today: no lineup to set, but the roster, IR moves and pickups still stand.
         rows = tonight_rows(self.day) if self.day in self.game_days else no_games_rows()
         skaters = rows[rows["kind"] == "skater"].copy()
@@ -903,6 +904,15 @@ class LiveRunner:
             out.append(f"stale data: rest-of-season projections are as of {newest}, before the last "
                        f"game day {last} -- the nightly job has not run (pipeline/run_nightly_ingest.cmd)")
         return out
+
+    def goalie_line(self) -> float:
+        """The flat line this pass prices later nights and rest-of-season goalies on. Read each
+        pass: last night's starts arrive while a runner is up, and settings_check swaps the strategy."""
+        if self.strategy.adddrop.goalie_line == "history":
+            return self.history_line
+        path = paths.goalie_starts(self.season)
+        starts = inputs.load_goalie_starts(self.season) if path.exists() else self.goalie_history.iloc[:0]
+        return inputs.SeasonGoalieLine(self.goalie_history, starts, self.scoreset).at(self.day)
 
     def goalie_ros(self) -> dict:
         """{goalie: rest-of-season points per team game} from today's (or the latest earlier)

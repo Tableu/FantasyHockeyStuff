@@ -1465,7 +1465,8 @@ LIVE_CHOICES = (("adddrop", "tail"), ("streaming", "mode"), ("streaming", "gate"
                 ("roster", "repair_wait_days"), ("adddrop", "goalie_absence"),
                 ("adddrop", "rate_source"), ("streaming", "restarts"),
                 ("streaming", "replacement_depth"), ("adddrop", "packages"),
-                ("streaming", "keep_upgrades"), ("streaming", "replacement_addable"))
+                ("streaming", "keep_upgrades"), ("streaming", "replacement_addable"),
+                ("adddrop", "goalie_line"))
 
 
 def check_live_strategy() -> str:
@@ -1539,6 +1540,34 @@ def check_server_core() -> str:
     return f"a server process loads {len(core)} Core/ modules ({', '.join(core)}) and none of Season/"
 
 
+def check_season_goalie_line() -> str:
+    """adddrop.goalie_line = "season": the line on a day reads no start from that day or later, and
+    is the blend the docstring says."""
+    import pandas as pd
+    from inputs import SeasonGoalieLine, goalie_line, load_goalie_history, load_goalie_starts
+
+    scoreset = simlayer.load_scoreset("beagles")
+    history, starts = load_goalie_history("2025-26"), load_goalie_starts("2025-26")
+    line = SeasonGoalieLine(history, starts, scoreset)
+    last = history[history["season_id"] == history["season_id"].max()]
+    first = starts["game_date"].min()
+    if line.at(first) != goalie_line(last, scoreset)[0]:
+        raise AssertionError("before any start, the line is not last season's mean")
+    day = first + pd.Timedelta(days=60)
+    played = starts[starts["is_starter"].astype(bool) & (starts["game_date"] < day)]
+    want = ((line.prior_starts * line.prior + scoreset.score_columns(played, side="goalies").sum())
+            / (line.prior_starts + len(played)))
+    if abs(line.at(day) - want) > 1e-9:
+        raise AssertionError(f"line {line.at(day)} is not the blend {want}")
+    future = starts[starts["game_date"] >= day]
+    changed = starts.copy()
+    changed.loc[future.index, "saves"] = changed.loc[future.index, "saves"] + 100
+    if SeasonGoalieLine(history, changed, scoreset).at(day) != line.at(day):
+        raise AssertionError("that day's or a later start changed the line")
+    return (f"last season {line.prior:.2f}, {len(played)} starts in {line.at(day):.2f} after 60 days; "
+            f"later starts change nothing")
+
+
 def check_rate_bonus() -> str:
     """A skater's carried per-game rate holds his PP/SH point bonus: expected points x each point's
     bonus on top of the counts, under this league's scoring."""
@@ -1584,6 +1613,7 @@ CHECKS = [("provenance", check_provenance), ("season guard", check_season_guard)
           ("tune guard", check_tune_guard), ("opponents", check_opponents),
           ("boom bust", check_boom_bust), ("live strategy", check_live_strategy),
           ("modules", check_modules), ("server core", check_server_core),
+          ("season goalie line", check_season_goalie_line),
           ("rate bonus", check_rate_bonus)]
 
 

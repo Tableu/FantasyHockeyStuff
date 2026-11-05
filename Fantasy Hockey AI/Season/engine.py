@@ -29,7 +29,7 @@ import pandas as pd
 import corelayer  # noqa: F401 -- puts Core/ on sys.path; see corelayer.py
 import paths
 import view as view_module
-from inputs import goalie_line                  # the league-average goalie start (see there)
+from inputs import SeasonGoalieLine, goalie_line  # the league-average goalie start (see there)
 
 import simlayer                                 # Simulation's code; see its docstring
 from decisionlayer import estimators as estimators_module
@@ -162,6 +162,9 @@ class Season:
         self.goalie_line_mean, self.goalie_line_sd = goalie_line(data["goalie_history"], scoreset)
         log.info("goalie line under %s: %.2f points a start, sd %.2f",
                  scoreset.name, self.goalie_line_mean, self.goalie_line_sd)
+        # A seat on adddrop.goalie_line = "season" prices the flat line as of each day (_seat_goalie_line).
+        self.season_goalie_line = SeasonGoalieLine(data["goalie_history"], data["goalie_starts"], scoreset)
+        self.goalie_ids = set(data["goalie_candidates"]["player_id"].astype(int))
         self._index_inputs()
         self.weekly = defaultdict(lambda: defaultdict(float))
         # team -> [occupied, productive, offered]. Three counts rather than one ratio, because a
@@ -580,7 +583,25 @@ class Season:
             ros_games=self.latest_ros_gp, board_scale=self.board_scale)
         # A per-seat pricing choice, so the candidate seat can differ (valuation.player_value).
         view.goalie_absence = self.field[team_index].strategy.adddrop.goalie_absence
+        if self.field[team_index].strategy.adddrop.goalie_line == "season":
+            self._seat_goalie_line(view, day)
         return view
+
+    def _seat_goalie_line(self, view, day) -> None:
+        """This seat's flat goalie line as of `day`, on what is built from the flat line: the
+        expected line, and goalies' per-game and rest-of-season rates. Its own copies, so every other
+        seat keeps the shared ones. Tonight's draws are the simulator's and do not change."""
+        line = self.season_goalie_line.at(day)
+        scale = line / self.goalie_line_mean
+
+        def scaled(rates):
+            return {**rates, **{p: rates[p] * scale for p in self.goalie_ids if p in rates}}
+
+        if len(view.goalie_projections):
+            view.goalie_projections = view.goalie_projections.assign(expected_line=line)
+        view.rate_estimate = scaled(view.rate_estimate)
+        view.healthy_estimate = scaled(view.healthy_estimate)
+        view.ros_estimate = scaled(view.ros_estimate)
 
     # ---------- the loop ----------
 

@@ -384,6 +384,38 @@ def goalie_line(goalie_starts, scoreset):
     return float(points.mean()), float(points.std())
 
 
+# Starts of last season's mean in the blend below. Chosen on 2024-25 (2026-11-04), each start scored
+# against the line known that morning: best K 50 under beagles, 400 under espn-la, 200 within 0.003
+# of the best in both (a variance ratio gives about the same: per-start sd 4.1, between seasons 0.3).
+SEASON_LINE_PRIOR_STARTS = 200.0
+
+
+class SeasonGoalieLine:
+    """The mean start as of a day: last season's, blended with this season's starts before that day.
+
+    `goalie_line` pools every earlier season, and goalie scoring has fallen each season (beagles
+    4.91, 4.56, 4.39, 4.12 so far), so it read +0.35, +0.35 and +0.50 points a start too high.
+    """
+
+    def __init__(self, history, starts, scoreset, prior_starts=SEASON_LINE_PRIOR_STARTS):
+        last = history[history["season_id"] == history["season_id"].max()]
+        self.prior = goalie_line(last, scoreset)[0]
+        self.prior_starts = float(prior_starts)
+        started = starts[starts["is_starter"].astype(bool)]
+        days = pd.DataFrame({"day": pd.to_datetime(started["game_date"]).to_numpy(),
+                             "points": scoreset.score_columns(started, side="goalies")})
+        days = days.groupby("day")["points"].agg(["sum", "count"]).sort_index()
+        self.days = days.index.to_numpy()
+        self.points = np.concatenate([[0.0], days["sum"].cumsum().to_numpy("float64")])
+        self.starts = np.concatenate([[0.0], days["count"].cumsum().to_numpy("float64")])
+
+    def at(self, day) -> float:
+        """Only starts on days strictly before `day`: tonight's results are not known this morning."""
+        before = int(np.searchsorted(self.days, pd.Timestamp(day).to_datetime64(), side="left"))
+        return float((self.prior_starts * self.prior + self.points[before])
+                     / (self.prior_starts + self.starts[before]))
+
+
 def load_season(season: str, variant: str = "A", ros_tag: str | None = None) -> dict:
     """Everything a run needs, loaded once and shared across every manager and replication."""
     return {
