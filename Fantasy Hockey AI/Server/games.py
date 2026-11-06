@@ -59,6 +59,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 DEFAULT_MAX_AGE_S = 20          # a JSON response without Cache-Control
 REPORT_INTERVAL_S = 60          # the HTML TOI reports change about once a minute; never asked faster
 FEED_IDLE_S = 3 * 3600          # a feed nobody asked about for this long is dropped
+FINAL_RECHECK_S = 1800          # a final game's copy is read again this often: the NHL corrects stats later
 FINAL_STATES = {"OFF", "FINAL"}
 LIVE_STATES = {"LIVE", "CRIT"}
 # A goal's wall-clock time when the server could not see it arrive, estimated from puck drop --
@@ -126,12 +127,14 @@ def mmss(text) -> int:
 class Feed:
     """One NHL response, shared by every caller. JSON: fetched again once the NHL's cache copy has
     expired. HTML (the TOI reports): at most once a REPORT_INTERVAL_S, asking with
-    If-Modified-Since so an unchanged page costs little."""
+    If-Modified-Since so an unchanged page costs little. A final game's: once a FINAL_RECHECK_S,
+    for stat corrections."""
 
     def __init__(self, url, html=False):
         self.url, self.html = url, html
         self.body, self.final = None, False
         self.expires = 0.0
+        self.checked = 0.0              # when the NHL was last asked (monotonic)
         self.modified = None            # the HTML page's Last-Modified
         self.fetched_at = None
         self.as_of = None               # UTC moment the NHL made the copy held (now less its Age)
@@ -140,10 +143,11 @@ class Feed:
         self.lock = threading.Lock()
 
     def get(self):
-        self.used = time.monotonic()
+        self.used = now = time.monotonic()
         with self.lock:
-            if self.body is not None and (self.final or time.monotonic() < self.expires):
+            if self.body is not None and (now < self.expires or (self.final and now - self.checked < FINAL_RECHECK_S)):
                 return self.body
+            self.checked = now
             try:
                 self._fetch()
             except requests.RequestException:
@@ -371,7 +375,7 @@ class Games:
     def game_feed(self, game_id, part) -> dict:
         feed = self.feed(f"{API}/gamecenter/{game_id}/{part}")
         body = feed.get()
-        # Kept for good only once this copy is itself final (the scoreboard's word only for a part
+        # Polled less only once this copy is itself final (the scoreboard's word only for a part
         # with no game state, the right rail): the scoreboard can say the game is over while the
         # box score is still the last minute's, without the goalies' decisions (2026-10-24: a
         # shutout win frozen at 59:13 with no W or SO).

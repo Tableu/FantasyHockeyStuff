@@ -44,6 +44,7 @@ EASTERN = zoneinfo.ZoneInfo("America/New_York")
 # with 403 Forbidden for a while (2026-09-27: ~280 transaction pages in a row did it; 2026-10-12:
 # six league reads back to back, ~125 calls in ~40 s, then a seventh at 5 at a time).
 REUSE_SECONDS = 60
+PAST_DAY_SECONDS = 3600            # a day gone is read again this often: only a stat correction changes it
 ROSTER_WORKERS = 3
 # A league read's other answers (schedule, transactions, the matchup, the team page, today's box
 # score) are fetched this many at a time alongside the rosters (prefetch): ~2.5 s one after another.
@@ -145,7 +146,7 @@ class Fleaflicker:
         self.season = season
         self._reused = {}                  # key -> (fetched at, Future): see REUSE_SECONDS
         self._reuse_lock = threading.Lock()
-        self._days = {}                    # (game id, day ordinal) -> a past day's box score (daily_points)
+        self._days = {}                    # (game id, day ordinal) -> (when read, a past day's box score)
 
     def _reuse(self, key, fetch):
         """`fetch()`, or its value from under REUSE_SECONDS ago -- or, while another thread is
@@ -334,37 +335,40 @@ class Fleaflicker:
                           lambda: self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"]))
         return (_day(box["scoringPeriod"]), *self._day_points(box, side))
 
+    def _past_day(self, game_id, ordinal: int) -> dict:
+        """The matchup's box score for a day before today, kept PAST_DAY_SECONDS."""
+        key = (game_id, ordinal)
+        hit = self._days.get(key)
+        if hit is not None and time.monotonic() - hit[0] < PAST_DAY_SECONDS:
+            return hit[1]
+        raw = self._get("FetchLeagueBoxscore", fantasy_game_id=game_id, scoring_period=ordinal)
+        self._days[key] = (time.monotonic(), raw)
+        return raw
+
     def daily_points(self, team_id: int) -> dict:
         """{day: (the team's points, its opponent's)} for each day of the current period that has
         begun, today's live -- from the matchup's box score, one call a day (FetchLeagueBoxscore
-        with scoring_period: its pointsHome / pointsAway scoringPeriod). A day before today is final,
-        so it is kept and not fetched again."""
+        with scoring_period: its pointsHome / pointsAway scoringPeriod). A day before today is kept
+        a while (_past_day)."""
         game, side = self._my_game(team_id)
         if game is None:
             return {}
         now = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"])
         today = now["scoringPeriod"]["ordinal"]
-        days = self._days
         out = {}
         for p in now.get("eligiblePeriods", []):
             ordinal = p["ordinal"]
             if ordinal > today:
                 continue
-            key = (game["id"], ordinal)
-            if ordinal == today:
-                raw = now
-            elif key in days:
-                raw = days[key]
-            else:
-                raw = days[key] = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"], scoring_period=ordinal)
+            raw = now if ordinal == today else self._past_day(game["id"], ordinal)
             out[_day(p)] = self._day_points(raw, side)
         return out
 
     def day_lineup(self, team_id: int, day: dt.date) -> DayLineup | None:
         """The team's lineup on `day` (a day this period has begun) as Fleaflicker kept it, and its
         points that day, its opponent's too -- the matchup's box score for that day, the one
-        daily_points reads (a day before today kept, not fetched again). None: no game this period,
-        or `day` not in it."""
+        daily_points reads (a day before today kept a while). None: no game this period, or `day`
+        not in it."""
         game, side = self._my_game(team_id)
         if game is None:
             return None
@@ -374,14 +378,7 @@ class Fleaflicker:
         period = next((p for p in now.get("eligiblePeriods", []) if _day(p) == day and p["ordinal"] <= today), None)
         if period is None:
             return None
-        key = (game["id"], period["ordinal"])
-        if period["ordinal"] == today:
-            raw = now
-        elif key in self._days:
-            raw = self._days[key]
-        else:
-            raw = self._days[key] = self._get("FetchLeagueBoxscore", fantasy_game_id=game["id"],
-                                               scoring_period=period["ordinal"])
+        raw = now if period["ordinal"] == today else self._past_day(game["id"], period["ordinal"])
         other = "Away" if side == "Home" else "Home"
         slots = {side: {}, other: {}}
         for group in raw.get("lineups", []):

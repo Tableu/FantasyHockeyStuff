@@ -1,17 +1,48 @@
 """Decides which games to ingest today: full-season backfill on the very first run for a
-season, otherwise a rolling lookback window (to absorb postponed games and API data lag).
-Only games that are officially final (gameState == "OFF") and already-ingested games are
-skipped, so this is always safe to re-run.
+season, otherwise a rolling lookback window (to absorb postponed games, API data lag and stat
+corrections). Only games that are officially final (gameState == "OFF") are taken; one already
+ingested is taken again only if the NHL has since changed its players' stat lines, so this is
+always safe to re-run.
 """
 
+import json
+import logging
 from datetime import date, datetime, timedelta
 
-from nhl_pipeline.api import schedule
+from nhl_pipeline.api import boxscore, schedule
 from nhl_pipeline.orchestration.logging_utils import needs_ingestion
 from nhl_pipeline.orchestration.pipeline import TERMINAL_STAGE
 
 FINAL_STATE = "OFF"
 DEFAULT_LOOKBACK_DAYS = 7
+
+log = logging.getLogger("discovery")
+
+
+def stats_corrected(cursor, nhl_game_id: int) -> bool:
+    """Whether the NHL's box score now gives other player stat lines than the one last ingested:
+    a stat correction, hours or days after the final (2026-11-02: Sherwood's assist moved to Misa).
+    A failed read is no change; the next run asks again."""
+    cursor.execute(
+        """
+        SELECT r.RawJSON FROM Ingestion.RawApiResponses r
+        JOIN Game.Games g ON g.GameID = r.GameID
+        WHERE g.NHLGameID = ? AND r.EndpointType = 'BOXSCORE'
+        """,
+        nhl_game_id,
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return True
+    try:
+        now = boxscore.get_boxscore(nhl_game_id)
+    except Exception:
+        log.exception("Could not check game %s for stat corrections", nhl_game_id)
+        return False
+    changed = now.get("playerByGameStats") != json.loads(row[0]).get("playerByGameStats")
+    if changed:
+        log.info("Game %s: stat lines changed since ingestion", nhl_game_id)
+    return changed
 
 
 def _date_range(start: date, end: date):
@@ -60,5 +91,5 @@ def discover_games(cursor, season_cfg: dict, season_id: int, lookback_days: int 
     return [
         (game, date_str)
         for game, date_str in candidates
-        if needs_ingestion(cursor, game["id"], [TERMINAL_STAGE])
+        if needs_ingestion(cursor, game["id"], [TERMINAL_STAGE]) or stats_corrected(cursor, game["id"])
     ]

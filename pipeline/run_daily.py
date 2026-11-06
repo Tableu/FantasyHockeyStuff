@@ -3,10 +3,10 @@
 
 Each run first refreshes Reference.Schedule from the start of the lookback window through
 the end of the season (so postponements rescheduled weeks out are picked up), then ingests
-any newly-final games.
+any newly-final games and any game in the window whose stat lines the NHL has since corrected.
 
 Usage:
-    python run_daily.py                      # incremental: lookback window, skips already-ingested games
+    python run_daily.py                      # incremental: lookback window, new or corrected games only
     python run_daily.py --backfill           # force full-season reload (safe: every write is an upsert)
     python run_daily.py --lookback-days 14   # override the default 7-day lookback
     python run_daily.py --game-id 2025020740 # ingest exactly one game, by NHL game id (no schedule refresh)

@@ -102,11 +102,13 @@ def sync_player_game_stats(
 
 
 def apply_pp_sh_goals_assists(cursor, game_id: int) -> None:
+    # LEFT JOIN: a stat correction can take away a player's only goal involvement, and his counts
+    # then go back to NULL, as for any player with none.
     cursor.execute(
         """
         UPDATE pgs SET PowerPlayAssists = agg.PPAssists, ShortHandedGoals = agg.SHGoals, ShortHandedAssists = agg.SHAssists
         FROM Stats.PlayerGameStats pgs
-        JOIN (
+        LEFT JOIN (
             SELECT PlayerID, GameID,
                    SUM(CASE WHEN IsAssist = 1 AND IsPowerPlay = 1 THEN 1 ELSE 0 END) AS PPAssists,
                    SUM(CASE WHEN IsAssist = 0 AND IsShortHanded = 1 THEN 1 ELSE 0 END) AS SHGoals,

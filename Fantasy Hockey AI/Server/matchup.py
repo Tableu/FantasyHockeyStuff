@@ -17,13 +17,14 @@ import time
 import platforms
 
 KEEP_S = 60                      # a league's scores are read again only after this (Fleaflicker's call limit)
+DAY_KEEP_S = 3600                # a day gone likewise: only a stat correction changes it
 
 
 class Matchups:
     def __init__(self):
         self.adapters, self.kept, self.lock = {}, {}, threading.Lock()
         self.ids = {}                    # platform -> platforms.PlayerIds
-        self.days = {}                   # (league, day) -> day_lineup's answer: a day gone doesn't change
+        self.days = {}                   # (league, day) -> (when read, day_lineup's answer)
 
     def _adapter(self, league):
         adapter = self.adapters.get(league.name)
@@ -45,12 +46,13 @@ class Matchups:
     def day_lineup(self, league, day: dt.date, keep: bool = True) -> dict | None:
         """{slots: {player id: slot label}, points, opp_slots, opp_points, unknown: platform ids with
         no player id} for your team and your opponent's on a day; None when the platform has no
-        lineup for it (no game that period, no platform). `keep`: a day gone, kept once read (today's
-        is read again each time)."""
+        lineup for it (no game that period, no platform). `keep`: a day gone, kept DAY_KEEP_S once
+        read (today's is read again each time)."""
         key = (league.name, day)
         with self.lock:
-            if keep and key in self.days:
-                return self.days[key]
+            hit = self.days.get(key)
+            if keep and hit is not None and time.monotonic() - hit[0] < DAY_KEEP_S:
+                return hit[1]
             adapter = self._adapter(league)
             if adapter is None:
                 return None
@@ -75,7 +77,7 @@ class Matchups:
             answer = {"slots": ours(got.slots), "points": got.points,
                       "opp_slots": ours(got.opp_slots), "opp_points": got.opp_points, "unknown": unknown}
             if keep:
-                self.days[key] = answer
+                self.days[key] = (time.monotonic(), answer)
             return answer
 
     def view(self, league, plan: dict | None) -> dict:
