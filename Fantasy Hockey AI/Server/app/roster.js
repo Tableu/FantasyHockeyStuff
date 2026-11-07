@@ -1,7 +1,7 @@
 // The Roster screen (plan P1; redesign plan app-redesign.md, step 1): your lineup, bench and IR
 // from GET /roster for a day of the fantasy week, with live points from GET /tonight on today.
 // The day picker holds the whole week (a day gone: its plan, finals and points; a day ahead: its
-// games and projection); Season is its own button (tap a header to sort). The day on a phone is a card per player (the user, 2026-10-20): name, P%
+// games and projection); Season is its own button (tap a header to sort; Per game shows the stats as rates). The day on a phone is a card per player (the user, 2026-10-20): name, P%
 // and game, xPts on the right, his scoring stats and TOI as tags below, his points under xPts. On
 // a PC (`wide`) the same two views as a table, the box line in its own columns.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
@@ -89,14 +89,27 @@ function dayCells(row, live, goalie, columns) {
   ];
 }
 
-function seasonCells(row, columns) {
+// A Season column's value, the league's scoring stats a game when `perGame`; FP, FP/g, ROS, GP and
+// SV% stay as they are.
+const NOT_A_COUNT = new Set(['fp', 'fp_per_game', 'ros', 'gp', 'sv_pct']);
+function seasonValue(row, key, perGame) {
+  if (key === 'ros') return row.ros;
+  const s = row.season || {};
+  const v = s[key];
+  return perGame && s.gp && v !== undefined && v !== null && !NOT_A_COUNT.has(key) ? v / s.gp : v;
+}
+
+function seasonCells(row, columns, perGame) {
   const s = row.season || {};
   const cells = [
     { text: s.gp ? f2(s.fp) : '', cls: 'f' },
     { text: s.fp_per_game === null ? '' : f2(s.fp_per_game), cls: 'f', weight: 600 },
     { text: row.ros === null || row.ros === undefined ? '' : Math.round(row.ros), cls: 'f' },
   ];
-  for (const [key] of columns) cells.push({ text: s[key] === undefined || s[key] === null ? '' : String(s[key]) });
+  for (const [key] of columns) {
+    const v = seasonValue(row, key, perGame);
+    cells.push({ text: v === undefined || v === null ? '' : perGame && !NOT_A_COUNT.has(key) ? f2(v) : String(v) });
+  }
   if (row.goalie) cells.push({ text: s.sv_pct ? s.sv_pct.toFixed(3).replace(/^0/, '') : '' });
   return cells;
 }
@@ -121,15 +134,12 @@ function heads(view, goalie, columns, gone) {
     .map((c) => ({ ...c, title: TITLES[c.label] }));
 }
 
-// A Season column's value for sorting: the season's stat, or ROS from the row.
-const sortValue = (row, key) => (key === 'ros' ? row.ros : (row.season || {})[key]);
-
-// Rows by a Season column, missing values last either way; ties keep the roster's order.
-function sorted(rows, sort) {
+// Rows by a Season column as shown, missing values last either way; ties keep the roster's order.
+function sorted(rows, sort, perGame) {
   if (!sort) return rows;
   const dir = sort.desc ? -1 : 1;
   return rows.map((row, i) => [row, i]).sort(([a, i], [b, j]) => {
-    const x = sortValue(a, sort.key), y = sortValue(b, sort.key);
+    const x = seasonValue(a, sort.key, perGame), y = seasonValue(b, sort.key, perGame);
     const xm = x === null || x === undefined, ym = y === null || y === undefined;
     if (xm || ym) return xm && ym ? i - j : xm ? 1 : -1;
     return x === y ? i - j : (x < y ? -1 : 1) * dir;
@@ -146,10 +156,10 @@ function Who({ row }) {
 
 // One group's rows in the shared table; `span` is the widest group's column count, so a group with
 // fewer columns (the goalies) is padded out to the table's edge.
-function Group({ group, view, columns, span, live, gone, sort, onSort }) {
+function Group({ group, view, columns, span, live, gone, sort, onSort, perGame }) {
   const cols = heads(view, group.goalie, groupColumns(group, columns), gone);
   const pad = Array.from({ length: Math.max(0, span - cols.length) });
-  const rows = view === 'day' ? group.rows : sorted(group.rows, sort);
+  const rows = view === 'day' ? group.rows : sorted(group.rows, sort, perGame);
   const head = (c) => {
     if (!c.key) return c.label;
     const on = sort && sort.key === c.key;
@@ -166,7 +176,7 @@ function Group({ group, view, columns, span, live, gone, sort, onSort }) {
     ${rows.map((row) => {
       const cells = view === 'day'
         ? dayCells(row, live && live[row.player_id], group.goalie, groupColumns(group, columns))
-        : seasonCells(row, groupColumns(group, columns));
+        : seasonCells(row, groupColumns(group, columns), perGame);
       return html`
         <tr>
           <th scope="row" class="stick">
@@ -221,6 +231,8 @@ export function Roster({ league, version, wide }) {
   const [sort, setSort] = useState(() => {
     try { return JSON.parse(store.get('fh.roster.sort')) || null; } catch (_) { return null; }
   });
+  // Season's stats as totals or a game each; kept on this device.
+  const [perGame, setPerGame] = useState(() => store.get('fh.roster.perGame') === '1');
   // Season is today's roster, whatever day was shown.
   const asked = view === 'season' ? 'today' : day;
 
@@ -250,6 +262,7 @@ export function Roster({ league, version, wide }) {
 
   const choose = (v) => { setView(v); store.set('fh.roster.view', v === 'season' ? 'season' : 'tonight'); };
   const pickDay = (d) => { setDay(d); choose('day'); };
+  const flipPerGame = () => { setPerGame(!perGame); store.set('fh.roster.perGame', perGame ? '0' : '1'); };
   // A column's first tap sorts it high to low, the second low to high, the third back to the roster.
   const sortBy = (key) => {
     const next = !sort || sort.key !== key ? { key, desc: true } : sort.desc ? { key, desc: false } : null;
@@ -266,6 +279,8 @@ export function Roster({ league, version, wide }) {
       unavailable=${(d) => (d.state === 'final' && !d.planned ? 'No plan was saved that day' : null)} />
     <button type="button" class=${`toggle ${view === 'season' ? 'on' : ''}`} aria-pressed=${view === 'season'}
       onClick=${() => choose('season')}>Season</button>
+    ${view === 'season' && html`<button type="button" class=${`toggle end ${perGame ? 'on' : ''}`} aria-pressed=${perGame}
+      title="Show the stats per game" onClick=${flipPerGame}>Per game</button>`}
   </div>`;
   if (error) {
     if (error.status === 404 && asked !== 'today') {
@@ -315,6 +330,6 @@ export function Roster({ league, version, wide }) {
       ? html`<div class="tn-list">${groups.map((g) => html`<${DayGroup} key=${g.name} group=${g} columns=${data.columns} live=${live} />`)}</div>`
       : html`<div class="table-scroll"><table class=${`roster ${view}`}>
       ${groups.map((g) => html`<${Group} key=${g.name} group=${g} view=${view} columns=${data.columns} span=${span}
-        live=${live} gone=${gone} sort=${sort} onSort=${sortBy} />`)}
+        live=${live} gone=${gone} sort=${sort} onSort=${sortBy} perGame=${perGame} />`)}
     </table></div>`}`;
 }

@@ -1,6 +1,7 @@
 // The Players screen (redesign plan app-redesign.md, step 2): every free agent from GET /players
 // (the newest plan) in one table -- FP, FP/g, ROS and GP for everyone, the skater columns, then the
 // goalie columns after a line -- best first by ROS; tap a header to sort by it (again to flip).
+// Per game shows the stats as rates.
 // Filter: positions, status (free agent or waivers), the nights left this week he plays, teams;
 // each one picked shows as a chip under the bar, tapped to take it off. On a phone the filter is a
 // bottom sheet; on a PC (`wide`) a panel beside the table.
@@ -45,20 +46,26 @@ function columnsOf(columns) {
 const SKATER_ONLY = (columns) => new Set(columns.skater.map(([key]) => key));
 const GOALIE_ONLY = (columns) => new Set([...columns.goalie.map(([key]) => key), 'sv_pct']);
 
-function value(row, key, columns) {
+// A column's value, the league's scoring stats a game when `perGame`; FP, FP/g, ROS, GP and SV%
+// stay as they are.
+const NOT_A_COUNT = new Set(['fp', 'fp_per_game', 'ros', 'gp', 'sv_pct']);
+
+function value(row, key, columns, perGame) {
   if (key === 'ros') return row.ros;
   if (row.goalie ? SKATER_ONLY(columns).has(key) : GOALIE_ONLY(columns).has(key)) return null;
-  const v = (row.season || {})[key];
-  return v === undefined ? null : v;
+  const s = row.season || {};
+  const v = s[key];
+  if (v === undefined) return null;
+  return perGame && s.gp && v !== null && !NOT_A_COUNT.has(key) ? v / s.gp : v;
 }
 
-function cellText(row, key, columns) {
-  const v = value(row, key, columns);
+function cellText(row, key, columns, perGame) {
+  const v = value(row, key, columns, perGame);
   if (v === null) return '';
   if (key === 'fp' || key === 'fp_per_game') return f2(v);
   if (key === 'ros') return String(Math.round(v));
   if (key === 'sv_pct') return svPct(row.season);
-  return String(v);
+  return perGame && key !== 'gp' ? f2(v) : String(v);
 }
 
 // Whether a row passes the filters; `skip` leaves one filter out (a sheet option's own count).
@@ -124,6 +131,8 @@ export function Players({ league, version, wide }) {
   const [sort, setSort] = useState(() => {
     try { return JSON.parse(store.get('fh.players.sort')) || { key: 'ros', desc: true }; } catch (_) { return { key: 'ros', desc: true }; }
   });
+  // The stats as totals or a game each; kept on this device.
+  const [perGame, setPerGame] = useState(() => store.get('fh.players.perGame') === '1');
   useEscape(open, () => setOpen(false));
 
   useEffect(() => {
@@ -146,8 +155,9 @@ export function Players({ league, version, wide }) {
     setSort(next);
     store.set('fh.players.sort', JSON.stringify(next));
   };
+  const flipPerGame = () => { setPerGame(!perGame); store.set('fh.players.perGame', perGame ? '0' : '1'); };
   const shown = data.rows.filter((r) => keeps(r, filter)).sort((a, b) => {
-    const x = value(a, sort.key, data.columns), y = value(b, sort.key, data.columns);
+    const x = value(a, sort.key, data.columns, perGame), y = value(b, sort.key, data.columns, perGame);
     if (x === null && y === null) return (b.ros || 0) - (a.ros || 0);
     if (x === null) return 1;
     if (y === null) return -1;
@@ -172,6 +182,8 @@ export function Players({ league, version, wide }) {
           ${chips.map(([label, remove]) => html`<button type="button" class="fchip" onClick=${remove} aria-label=${`Remove filter ${label}`}>${label}<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>`)}
           ${!chips.length && html`<span class="none">All teams · all positions</span>`}
         </div>
+        <button type="button" class=${`toggle ${perGame ? 'on' : ''}`} aria-pressed=${perGame}
+          title="Show the stats per game" onClick=${flipPerGame}>Per game</button>
       </div>
       <span class="fa-note">${shown.length} free agent${shown.length === 1 ? '' : 's'} · best first by <b class="you">${sortCol[1]}${sort.desc ? '' : ' (lowest first)'}</b><span class="warn"> · W</span> = on waivers</span>
     </div>
@@ -193,7 +205,7 @@ export function Players({ league, version, wide }) {
             ${r.waivers && html` <span class="flag warn" title="On waivers: a claim, not an add">W</span>`}
             ${r.flag && html` <span class=${`flag ${FLAG_CLASS[r.flag] || 'warn'}`}>${r.flag}</span>`}
           </th>
-          ${cols.map(([key, , cls]) => html`<td class=${cls} style=${key === 'fp_per_game' ? 'font-weight: 600' : ''}>${cellText(r, key, data.columns)}</td>`)}
+          ${cols.map(([key, , cls]) => html`<td class=${cls} style=${key === 'fp_per_game' ? 'font-weight: 600' : ''}>${cellText(r, key, data.columns, perGame)}</td>`)}
         </tr>`)}
         ${!shown.length && html`<tr><td colspan=${cols.length + 1} class="txt fa-empty"><div>No free agents match these filters.
           <button type="button" class="link-btn you" onClick=${() => setFilter(NO_FILTER)}>Clear filters</button></div></td></tr>`}
