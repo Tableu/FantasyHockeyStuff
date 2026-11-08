@@ -31,7 +31,7 @@ the first league served; plan_gui.py sends its own `--league`.
 | GET /games/{id}/lines | Each team's lines, pairs and power-play / penalty-kill units as used |
 | GET /choices | What you chose in the app (choices.py): {league, choices: {days: {date: {moves}}, together}} |
 | GET /tonight | Every player you and your opponent hold: his game today and, once it starts, his box-score line with fantasy points; your lineup's live total |
-| GET /roster | The app's Roster screen from the newest plan: lineup as it stands (league slot order), bench, IR; tonight's projection, season FP, FP/g, ROS and stats, the plan's notes |
+| GET /roster | The app's Roster screen from the newest plan: lineup as it stands (league slot order), bench, IR; season FP, FP/g, ROS and stats, the plan's notes |
 | GET /jobs | The recent refreshes, newest first, without their lines |
 | GET /matchup | The week's matchup: the platform's scores (every team's week points, yours and your opponent's by day, slots to play on Fleaflicker; read at most once a minute) with the newest plan's projection and P(win) when the plan is this week's |
 | GET /suggestions?week=this or next | The app's AI suggestions from the newest plan: today's moves, the upgrades, the week plans with your picks marked |
@@ -139,9 +139,9 @@ one Refresh button, a Quick of the league shown), a running refresh's progress l
 tabs, and More behind the header's gear (Refresh: League, News, Quick, Full for the league shown; league switch,
 refresh log from `GET /jobs`, server status). Pull down on Roster, Players, Plan or Matchup runs a
 Quick of the league shown; a screen with no plan yet has a Make a plan button; P1, the Roster screen (`app/roster.js`): your lineup,
-bench and IR for any day of the fantasy week from `GET /roster?day=` (roster.py: the projection, the
-season in the league's scoring; a day gone in the slots the platform kept that day, matchup.py's
-day_lineup), with today's games and live points from `GET /tonight` (games.py, every 20 s).
+bench and IR as a Season table from `GET /roster` (roster.py: each player's season in the league's
+scoring, sortable, Per game for rates). The day's view (each day's lineup, live points) is the
+Matchup's Players view since 2026-11-08.
 Players (`app/players.js`, `GET /players`, players.py): every free agent in the newest plan,
 sorted and filtered by position, status, the nights he plays this week and team.
 Plan (`app/plan.js`; was P2's AI suggestions and P3's Weekly planner): today's moves and the
@@ -163,7 +163,7 @@ kept. Pull down at the top of a screen to run Quick. The app's files are served 
 no-cache`, so an edit shows on the next load.
 
 On a PC (a window at least 1024 px wide, `app/layout.js`) the same files lay out wider, as the
-Fantasy Hockey PC design canvas: the tabs become a sidebar; Roster's day and Season views are tables;
+Fantasy Hockey PC design canvas: the tabs become a sidebar; Roster's Season view is a table;
 the Players filter and the Plan picker are panels beside them; Games puts the list, the chosen game and the goal feed side by
 side; Matchup and More use two columns. Content fills the window; 600–1023 px is the phone layout
 across the window. Esc closes the picker, the goal feed and the menus.

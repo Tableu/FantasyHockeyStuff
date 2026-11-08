@@ -3,13 +3,13 @@
 // else the plan's), then two views. Overview: tonight's live against projected, the
 // week day by day (final, live, projected), and the league's week so far. Players (GET
 // /matchup/players, headtohead.py): your players against your opponent's, by position, best week
-// first -- the week's points, or one day from the day picker drawn like the Roster's cards. The
+// first -- the week's points, or one day from the day picker as cards, each with his portrait. The
 // scores are the platform's (the server keeps them a minute), so this polls once a minute while
 // the app is on screen. On a PC the Overview's league week is a column beside the rest (.two-col).
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { DayPicker, dayName, shortDay, posLabel } from './layout.js';
-import { gameLine, boxTags, Tags } from './roster.js';
+import { DayPicker, dayName, shortDay, posLabel, Photo } from './layout.js';
+import { stateLabel } from './games.js';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
@@ -22,6 +22,49 @@ const OUT = new Set(['BN', 'IR']);
 const EVERY_MS = 60000;
 const f2 = (x) => (x === null || x === undefined ? '—' : Number(x).toFixed(2));
 const sg = (x) => (x > 0 ? '+' : x < 0 ? '−' : '') + Math.abs(x).toFixed(2);
+
+// The plan's puck times are UTC without a zone ("2026-10-10 23:00:00").
+function puckTime(utc) {
+  if (!utc) return '';
+  const t = new Date(utc.replace(' ', 'T') + 'Z');
+  const h = t.getHours() % 12 || 12;
+  const m = String(t.getMinutes()).padStart(2, '0');
+  return `${h}:${m} ${t.getHours() < 12 ? 'AM' : 'PM'}`;
+}
+
+// Under the name (the user, 2026-10-20): the opponent, @ on the road, and the score, his team's
+// first, with the period and clock or Final -- before the puck drops, its time.
+function gameLine(game) {
+  const vs = `${game.home ? '' : '@'}${game.vs}`;
+  if (!STARTED.has(game.state)) return `${vs} ${puckTime(game.start_utc.replace('T', ' ').replace('Z', ''))}`;
+  return `${vs} ${game.score ?? 0}–${game.vs_score ?? 0} · ${stateLabel(game)}`;
+}
+
+// His box line as tags: the league's scoring stats, the Season columns (the user, 2026-10-24), a
+// goalie's SV% after them, then TOI; a stat he has none of tonight is left out.
+function boxTags(line, goalie, columns) {
+  if (!line) return [];
+  const tags = columns.filter(([key]) => line[key]).map(([key, label]) => [label, line[key]]);
+  if (goalie && line.shots_against) tags.push(['SV%', svPct(line)]);
+  if (line.toi) tags.push(['TOI', line.toi]);
+  return tags;
+}
+
+// The week's box lines added up, as tags: games played, then the stats as boxTags (a goalie's SV%
+// over the week's shots), no TOI. The days that counted, as the week's points.
+function weekTags(lines, goalie, columns) {
+  if (!lines.length) return [];
+  const sum = {};
+  for (const line of lines) {
+    for (const [k, v] of Object.entries(line)) if (typeof v === 'number') sum[k] = (sum[k] || 0) + v;
+  }
+  sum.gp = lines.length;
+  const tags = boxTags({ ...sum, toi: null }, goalie, columns);
+  return columns.some(([key]) => key === 'gp') ? tags : [['GP', lines.length], ...tags];
+}
+
+const svPct = (line) => (line.saves / line.shots_against).toFixed(3).replace(/^0/, '');
+
 
 function dayLabel(iso, withMonth = true) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -42,7 +85,7 @@ export function Matchup({ league, version, wide }) {
   const [error, setError] = useState(null);
   // The view (kept on this device; Players first, as the design) and the Players view's span.
   const [view, setView] = useState(() => store.get('fh.matchup.view') || 'players');
-  const [day, setDay] = useState(null);       // null: the week; 'today' or a date: that day
+  const [day, setDay] = useState('today');    // 'today' (the default) or a date: that day; null: the week
 
   useEffect(() => {
     let gone = false;
@@ -158,17 +201,18 @@ export function Matchup({ league, version, wide }) {
   </div>`;
 }
 
-// One side's player in a head-to-head row: name, eligible positions and P% (or BN), his game or
-// team -- on a day, the Roster's stat tags from his box line beside it --, and on the right his
+// One side's player in a head-to-head row: his portrait, name, eligible positions and P% (or BN), his game or
+// team -- on a day, the stat tags from his box line beside it --, and on the right his
 // points: the week's, or that day's expected over what he scored.
 function playerCell(p, date, side, columns) {
   if (!p) return null;
-  const base = { name: p.name, elig: posLabel(p.positions), prob: '', probCls: '', info: '', top: '', bot: '', dim: false, tags: [] };
+  const base = { name: p.name, photo: p.photo, elig: posLabel(p.positions), prob: '', probCls: '', info: '', top: '', bot: '', dim: false, tags: [] };
   if (!date) {
     // Days with a lineup set (a day ahead has none: slot null).
     const counted = Object.values(p.days).filter((e) => e.counts && e.slot !== null);
     const pts = counted.reduce((t, e) => t + (e.points || 0), 0);
-    return { ...base, prob: counted.length ? '' : 'BN', dim: !counted.length, info: p.team || '', top: f2(pts) };
+    return { ...base, prob: counted.length ? '' : 'BN', dim: !counted.length, info: p.team || '', top: f2(pts),
+      tags: weekTags(counted.map((e) => e.line).filter(Boolean), p.goalie, p.goalie ? columns.goalie : columns.skater) };
   }
   const e = p.days[date];
   const bench = OUT.has(e.slot);
@@ -176,18 +220,18 @@ function playerCell(p, date, side, columns) {
   const out = { ...base, prob: bench ? e.slot : '', dim: bench };
   if (!game) return { ...out, info: 'No game', dim: true };
   if (STARTED.has(game.state)) {
-    return { ...out, prob: bench ? e.slot : '✓', info: gameLine({}, game), top: e.xpts === null ? '' : f2(e.xpts),
+    return { ...out, prob: bench ? e.slot : '✓', info: gameLine(game), top: e.xpts === null ? '' : f2(e.xpts),
       tags: boxTags(e.line, p.goalie, p.goalie ? columns.goalie : columns.skater),
       bot: e.points === null || e.points === undefined ? '' : f2(e.points), botCls: bench ? 'dim' : side };
   }
   const pp = e.p_plays === null || e.p_plays === undefined ? null : Math.round(e.p_plays * 100);
   return { ...out, prob: bench ? e.slot : pp === null ? '' : `${pp}%`, probCls: pp !== null && pp < 90 && !bench ? 'warn' : '',
-    info: gameLine({}, game), top: bench || e.xpts === null ? '' : f2(e.xpts) };
+    info: gameLine(game), top: bench || e.xpts === null ? '' : f2(e.xpts) };
 }
 
 // The Players view, each side's players paired row by row. The week: by their first position,
 // best week first, each player's points this week, bench (BN) days left out. A day: that day's
-// roster as the Roster's cards -- the players who play that day at the top (a game and a lineup
+// roster as cards -- the players who play that day at the top (a game and a lineup
 // slot; a day ahead has no lineup yet, so a game and not IR), the rest under Bench (the user, 2026-10-30),
 // closed until tapped (the user, 2026-10-31);
 // the totals add what counted (a day ahead: its projection).
@@ -230,15 +274,23 @@ function HeadToHead({ h2h, day }) {
   const cell = (c, right) => {
     if (!c) return html`<td></td>`;
     const pts = html`<span class="pts"><span class="xp">${c.top}</span><span class=${`lv ${c.botCls || ''}`}>${c.bot}</span></span>`;
-    const who = html`<span class="who"><span class=${`nm ${c.dim ? 'dim' : ''}`}>${right
-      ? html`${c.prob && html`<span class=${`pb pb-l ${c.probCls}`}>${c.prob}</span>`}<span class="el el-l">${c.elig}</span>${c.name}`
-      : html`${c.name}<span class="el">${c.elig}</span>${c.prob && html`<span class=${`pb ${c.probCls}`}>${c.prob}</span>`}`}</span>
-      <span class="inf-row"><span class="inf">${c.info}</span>${c.tags.length > 0 && html`<${Tags} tags=${c.tags} />`}</span></span>`;
-    return html`<td><div class=${`h2h-cell ${right ? 'right' : ''}`}>${right ? html`${pts}${who}` : html`${who}${pts}`}</div></td>`;
+    // Portrait, name with his positions and P% (or BN) under it, and points on one line; under
+    // them all the tags: the game (or team, or No game) first, then his box line's stats.
+    const sub = right
+      ? html`${c.prob && html`<span class=${`pb pb-l ${c.probCls}`}>${c.prob}</span>`}<span class="el el-l">${c.elig}</span>`
+      : html`<span class="el">${c.elig}</span>${c.prob && html`<span class=${`pb ${c.probCls}`}>${c.prob}</span>`}`;
+    const who = html`<span class="who"><span class=${`nm ${c.dim ? 'dim' : ''}`}>${c.name}</span>
+      <span class="sub">${sub}</span></span>`;
+    const face = html`<${Photo} src=${c.photo} name=${c.name} size=${36} />`;
+    const tags = (c.info || c.tags.length > 0) && html`<div class="tags">
+      ${c.info && html`<span class="tag gm">${c.info}</span>`}
+      ${c.tags.map(([k, v]) => html`<span class="tag"><span class="k">${k}</span> ${v}</span>`)}</div>`;
+    return html`<td><div class=${`h2h-cell ${right ? 'right' : ''}`}>
+      <div class="h2h-top">${right ? html`${pts}${who}${face}` : html`${face}${who}${pts}`}</div>${tags}</div></td>`;
   };
   const foot = !date
     ? 'Week points each player has scored. Bench days (BN) do not count toward the total. Players line up by position, best week first.'
-    : entry.state === 'today' ? 'As on the Roster: expected points tonight, and in colour under them, the points so far. Totals add the points so far; bench (BN) points do not count.'
+    : entry.state === 'today' ? 'Expected points tonight, and in colour under them, the points so far. Totals add the points so far; bench (BN) points do not count.'
       : entry.state === 'final' ? `${dayName(entry, h2h.days)}: expected points, and in colour under them, the points each player scored, in the slots the platform kept. Bench (BN) points do not count.`
         : `${dayName(entry, h2h.days)}: expected points for each player with a game; no lineup is set yet. Totals are the projection of your roster as it stands, its best lineup that night, before any of the plan's moves.`;
   const note = date && entry.state === 'ahead' ? '' : " Totals are the platform's own points.";

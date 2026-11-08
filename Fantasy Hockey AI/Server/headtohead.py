@@ -1,6 +1,6 @@
 """The Matchup tab's head-to-head (plan app-redesign.md, step 5): every player you and your
 opponent held this week, each day's slot, projection, game and points, for the app's Players
-view -- the week's points by player, or one day drawn like the Roster's cards.
+view -- the week's points by player, or one day as cards (each with his portrait: server.py adds photo).
 
     people(plans)                             {player id: {name, player, positions, team, side, goalie}}
     view(dates, today, plans, lineups, boxes, workbench)
