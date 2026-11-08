@@ -324,8 +324,6 @@ export function Roster({ league, version, wide }) {
     ${bar(data.week || [])}
     ${liveError && entry.state === 'today' && html`<div class="error" role="alert">Live points: ${liveError}</div>`}
     ${view === 'day' && !data.games_today && html`<div class="empty">No NHL games on ${data.day}: the roster, no lineup to set.</div>`}
-    ${view === 'day' && entry.state === 'today' && data.empty_slots > 0 && data.games_today
-      && html`<div class="error">${data.empty_slots} empty lineup slot${data.empty_slots > 1 ? 's' : ''} tonight</div>`}
     ${view === 'day' && !wide
       ? html`<div class="tn-list">${groups.map((g) => html`<${DayGroup} key=${g.name} group=${g} columns=${data.columns} live=${live} />`)}</div>`
       : html`<div class="table-scroll"><table class=${`roster ${view}`}>

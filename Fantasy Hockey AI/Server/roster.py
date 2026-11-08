@@ -84,12 +84,11 @@ def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, t
                 "rate": r.get("rate"), "ros": r.get("ros_points"), "games_left": r.get("games_left"),
                 "season": season(r.get("stats"), weights, goalie)}
 
-    lineup, empty = [], 0
+    lineup = []
     rank = {slot: i for i, slot in enumerate(dict.fromkeys(slot_rows))}
     for slot in sorted(plan.get("lineup_now", []), key=lambda s: rank.get(s["slot"], len(rank))):
         r = by_name.get(slot["player"]) if slot.get("player") else None
         if r is None:
-            empty += slot.get("player") is None
             continue
         lineup.append(row_of(r, slot, "lineup"))
     bench = [row_of(by_name[n], None, "bench") for n in plan.get("bench_now", []) if n in by_name]
@@ -100,7 +99,7 @@ def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, t
         "day": plan.get("game_date"), "games_today": plan.get("games_today", True),
         "team": plan.get("team"), "file_generated_at": plan.get("generated_at"),
         "proj_tonight": proj_of(plan),
-        "next_puck": ahead[0] if ahead else None, "empty_slots": empty,
+        "next_puck": ahead[0] if ahead else None,
         "columns": columns_of(plan),
         "groups": groups_of(lineup, bench, ir),
     }
@@ -144,5 +143,5 @@ def ahead(view: dict, plan: dict, date: str, workbench: dict | None) -> dict:
     proj = (((plan.get("matchup_projection") or {}).get("me") or {}).get("nights") or {}).get(date)
     if proj is None:
         proj = sum(r["xpts"] or 0 for r in rows if r["where"] == "lineup")
-    return {**view, "day": date, "proj_tonight": round(proj, 2), "next_puck": None, "empty_slots": 0,
+    return {**view, "day": date, "proj_tonight": round(proj, 2), "next_puck": None,
             "games_today": any(r["xpts"] is not None for r in rows)}
