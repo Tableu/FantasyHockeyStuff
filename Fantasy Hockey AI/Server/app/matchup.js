@@ -7,7 +7,7 @@
 // the app is on screen. On a PC the Overview's league week is a column beside the rest (.two-col).
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { DayPicker, dayName, shortDay } from './layout.js';
+import { DayPicker, dayName, shortDay, posLabel } from './layout.js';
 import { gameLine, boxTags, Tags } from './roster.js';
 
 const store = {
@@ -158,7 +158,7 @@ export function Matchup({ league, version, wide }) {
 // points: the week's, or that day's expected over what he scored.
 function playerCell(p, date, side, columns) {
   if (!p) return null;
-  const base = { name: p.name, elig: p.positions, prob: '', probCls: '', info: '', top: '', bot: '', dim: false, tags: [] };
+  const base = { name: p.name, elig: posLabel(p.positions), prob: '', probCls: '', info: '', top: '', bot: '', dim: false, tags: [] };
   if (!date) {
     // Days with a lineup set (a day ahead has none: slot null).
     const counted = Object.values(p.days).filter((e) => e.counts && e.slot !== null);

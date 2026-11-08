@@ -6,7 +6,7 @@
 // a PC (`wide`) the same two views as a table, the box line in its own columns.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { NoPlan, Photo, DayPicker, shortDay } from './layout.js';
+import { NoPlan, Photo, DayPicker, shortDay, posLabel } from './layout.js';
 import { stateLabel } from './games.js';
 
 const TONIGHT_EVERY_MS = 20000;     // the server's NHL feed cache is about 20 s
@@ -150,7 +150,7 @@ const groupColumns = (group, columns) => (group.goalie ? columns.goalie : column
 
 // Name, eligible positions and flag: the same on a card and in the table.
 function Who({ row }) {
-  return html`<span class=${`pname ${FLAG_CLASS[row.flag] || ''}`} title=${row.player}>${row.name}</span><span class="elig" title="Eligible positions">${row.positions}</span>
+  return html`<span class=${`pname ${FLAG_CLASS[row.flag] || ''}`} title=${row.player}>${row.name}</span><span class="elig" title="Eligible positions">${posLabel(row.positions)}</span>
     ${row.flag && html` <span class=${`flag ${FLAG_CLASS[row.flag] || 'warn'}`}>${row.flag}</span>`}`;
 }
 

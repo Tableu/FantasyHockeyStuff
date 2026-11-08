@@ -7,7 +7,7 @@
 // bottom sheet; on a PC (`wide`) a panel beside the table.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { NoPlan, Photo, useEscape } from './layout.js';
+import { NoPlan, Photo, useEscape, posLabel } from './layout.js';
 
 const POSITIONS = ['C', 'LW', 'RW', 'D', 'G'];
 const STATUS = { all: 'Any', fa: 'Free agent', w: 'Waivers' };
@@ -201,7 +201,7 @@ export function Players({ league, version, wide }) {
         ${shown.map((r) => html`<tr>
           <th scope="row" class="stick">
             <${Photo} src=${r.photo} name=${r.name} size=${34} />
-            <span class="pname-txt" title=${r.player}>${r.name}</span><span class="elig" title="Eligible positions">${r.positions}</span>
+            <span class="pname-txt" title=${r.player}>${r.name}</span><span class="elig" title="Eligible positions">${posLabel(r.positions)}</span>
             ${r.waivers && html` <span class="flag warn" title="On waivers: a claim, not an add">W</span>`}
             ${r.flag && html` <span class=${`flag ${FLAG_CLASS[r.flag] || 'warn'}`}>${r.flag}</span>`}
           </th>

@@ -58,6 +58,17 @@ export function Photo({ src, name, size = 26 }) {
   return html`<span class="photo" style=${style}><img src=${src} alt="" loading="lazy" decoding="async" onError=${() => setFailed(true)} /></span>`;
 }
 
+// Eligible positions as shown: "C/LW/RW" -> "F", "LW/RW" -> "W" (the data keeps the full list,
+// which filters and grouping split on "/").
+export function posLabel(positions) {
+  if (!positions) return positions;
+  const set = new Set(positions.split('/'));
+  const has = (...ps) => ps.every((p) => set.has(p));
+  if (has('C', 'LW', 'RW')) { ['C', 'LW', 'RW'].forEach((p) => set.delete(p)); return ['F', ...set].join('/'); }
+  if (has('LW', 'RW')) { set.delete('LW'); set.delete('RW'); return [...set, 'W'].join('/'); }
+  return positions;
+}
+
 // "2026-10-31" as a local date (a date, not a moment: no time zone shift).
 export function dateOf(iso) {
   const [y, m, d] = iso.split('-').map(Number);

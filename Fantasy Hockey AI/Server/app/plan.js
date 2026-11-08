@@ -11,7 +11,7 @@
 // beneath it only when opened. On a PC (`wide`) the picker is a panel beside the calendar.
 import { html, useState, useEffect } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
-import { useEscape, NoPlan, askRefresh } from './layout.js';
+import { useEscape, NoPlan, askRefresh, posLabel } from './layout.js';
 
 const TEAM = /\s*\(([A-Z]{2,3})\)\s*$/;
 const TAGS = {
@@ -172,7 +172,7 @@ function Sheet({ league, week, sheet, onClose, onDone, docked }) {
               <tr class=${sel && sel.player_id === f.player_id ? 'sel' : f.plans ? 'mine' : ''}>
                 <td class="state">${f.plans}</td>
                 <td><button type="button" class="link" aria-pressed=${!!sel && sel.player_id === f.player_id}
-                  onClick=${() => choosePlayer(f)}>${short(f.player)}${f.status && f.status !== 'ACTIVE' ? ` [${f.status}]` : ''}${' '}<span class="meta">${f.positions} · ${teamOf(f.player)}</span>${f.days && html`<span class="days">${f.days.map(weekday).join(' ')}</span>`}</button></td>
+                  onClick=${() => choosePlayer(f)}>${short(f.player)}${f.status && f.status !== 'ACTIVE' ? ` [${f.status}]` : ''}${' '}<span class="meta">${posLabel(f.positions)} · ${teamOf(f.player)}</span>${f.days && html`<span class="days">${f.days.map(weekday).join(' ')}</span>`}</button></td>
                 <td class="n">${f2(f.pts)}</td><td class="n good">${sg(f.gain)}</td><td class="n dim">${f.games}</td>
               </tr>`)}</tbody></table>`}
       </div>
