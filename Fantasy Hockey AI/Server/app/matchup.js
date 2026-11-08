@@ -201,7 +201,7 @@ export function Matchup({ league, version, wide }) {
   </div>`;
 }
 
-// One side's player in a head-to-head row: his portrait, name, eligible positions and P% (or BN), his game or
+// One side's player in a head-to-head row: his portrait, name, eligible positions and P% (none on the bench; IR), his game or
 // team -- on a day, the stat tags from his box line beside it --, and on the right his
 // points: the week's, or that day's expected over what he scored.
 function playerCell(p, date, side, columns) {
@@ -211,21 +211,22 @@ function playerCell(p, date, side, columns) {
     // Days with a lineup set (a day ahead has none: slot null).
     const counted = Object.values(p.days).filter((e) => e.counts && e.slot !== null);
     const pts = counted.reduce((t, e) => t + (e.points || 0), 0);
-    return { ...base, prob: counted.length ? '' : 'BN', dim: !counted.length, info: p.team || '', top: f2(pts),
+    return { ...base, dim: !counted.length, info: p.team || '', top: f2(pts),
       tags: weekTags(counted.map((e) => e.line).filter(Boolean), p.goalie, p.goalie ? columns.goalie : columns.skater) };
   }
   const e = p.days[date];
   const bench = OUT.has(e.slot);
+  const mark = e.slot === 'IR' ? 'IR' : '';     // on the bench: no mark (the user, 2026-11-08); IR says so
   const game = e.game;
-  const out = { ...base, prob: bench ? e.slot : '', dim: bench };
+  const out = { ...base, prob: mark, dim: bench };
   if (!game) return { ...out, info: 'No game', dim: true };
   if (STARTED.has(game.state)) {
-    return { ...out, prob: bench ? e.slot : '✓', info: gameLine(game), top: e.xpts === null ? '' : f2(e.xpts),
+    return { ...out, prob: bench ? mark : '✓', info: gameLine(game), top: e.xpts === null ? '' : f2(e.xpts),
       tags: boxTags(e.line, p.goalie, p.goalie ? columns.goalie : columns.skater),
       bot: e.points === null || e.points === undefined ? '' : f2(e.points), botCls: bench ? 'dim' : side };
   }
   const pp = e.p_plays === null || e.p_plays === undefined ? null : Math.round(e.p_plays * 100);
-  return { ...out, prob: bench ? e.slot : pp === null ? '' : `${pp}%`, probCls: pp !== null && pp < 90 && !bench ? 'warn' : '',
+  return { ...out, prob: bench ? mark : pp === null ? '' : `${pp}%`, probCls: pp !== null && pp < 90 && !bench ? 'warn' : '',
     info: gameLine(game), top: bench || e.xpts === null ? '' : f2(e.xpts) };
 }
 
@@ -274,7 +275,7 @@ function HeadToHead({ h2h, day }) {
   const cell = (c, right) => {
     if (!c) return html`<td></td>`;
     const pts = html`<span class="pts"><span class="xp">${c.top}</span><span class=${`lv ${c.botCls || ''}`}>${c.bot}</span></span>`;
-    // Portrait, name with his positions and P% (or BN) under it, and points on one line; under
+    // Portrait, name with his positions and P% under it, and points on one line; under
     // them all the tags: the game (or team, or No game) first, then his box line's stats.
     const sub = right
       ? html`${c.prob && html`<span class=${`pb pb-l ${c.probCls}`}>${c.prob}</span>`}<span class="el el-l">${c.elig}</span>`
@@ -289,9 +290,9 @@ function HeadToHead({ h2h, day }) {
       <div class="h2h-top">${right ? html`${pts}${who}${face}` : html`${face}${who}${pts}`}</div>${tags}</div></td>`;
   };
   const foot = !date
-    ? 'Week points each player has scored. Bench days (BN) do not count toward the total. Players line up by position, best week first.'
-    : entry.state === 'today' ? 'Expected points tonight, and in colour under them, the points so far. Totals add the points so far; bench (BN) points do not count.'
-      : entry.state === 'final' ? `${dayName(entry, h2h.days)}: expected points, and in colour under them, the points each player scored, in the slots the platform kept. Bench (BN) points do not count.`
+    ? `Each player's points and stats this week, from the days he was in the lineup; days on the bench don't count. Players line up by position, best week first.`
+    : entry.state === 'today' ? `Expected points tonight, and in colour under them, the points so far. Totals add the points so far; players on the bench don't count.`
+      : entry.state === 'final' ? `${dayName(entry, h2h.days)}: expected points, and in colour under them, the points each player scored, in the slots the platform kept. Players on the bench don't count.`
         : `${dayName(entry, h2h.days)}: expected points for each player with a game; no lineup is set yet. Totals are the projection of your roster as it stands, its best lineup that night, before any of the plan's moves.`;
   const note = date && entry.state === 'ahead' ? '' : " Totals are the platform's own points.";
   return html`<table class="h2h">
