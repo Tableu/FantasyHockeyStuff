@@ -81,7 +81,8 @@ def _tonight(players: list, today: str, side: str) -> tuple:
 
 def p_win(h2h: dict, projection: dict | None, today: str) -> dict | None:
     """`h2h`: headtohead.view's answer; `projection`: the plan's matchup_projection; `today`: ISO."""
-    if not projection or not all((projection.get(s) or {}).get("night_var") for s in ("me", "opp")):
+    # A plan from before night_var was kept has none; an empty one is a week with no nights left.
+    if not projection or not all("night_var" in (projection.get(s) or {}) for s in ("me", "opp")):
         return None
     banked = {"me": 0.0, "opp": 0.0}
     for d in h2h["days"]:
