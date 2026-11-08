@@ -68,7 +68,8 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                opponent, the league's week, from the platform (kept a minute), with
                                the plan's projection and P(win) (matchup.py)
     GET  /matchup/players      the Matchup's head-to-head: every player either side held this week,
-                               each day's slot (the platform's), projection, game and points (headtohead.py)
+                               each day's slot (the platform's), projection, game and points (headtohead.py);
+                               live_win: the plan's P(win) carried through tonight's games (livewin.py)
     POST /login {password}     a session cookie for the app (auth.py); 401 wrong, 429 too many tries
     POST /logout               ends this phone's session
     GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
@@ -109,6 +110,7 @@ import league as league_module  # noqa: E402
 import leagues  # noqa: E402
 import livepaths  # noqa: E402
 import matchup as matchup_module  # noqa: E402
+import livewin  # noqa: E402
 import roster  # noqa: E402
 import suggestions  # noqa: E402
 import week as week_module  # noqa: E402
@@ -675,9 +677,11 @@ def make_app(worker: Worker) -> FastAPI:
             boxes = dict(zip([d.isoformat() for d in dates],
                              pool.map(lambda d: nhl(league, "day", d, held)["players"], dates)))
         workbench = (suggestions.plans_shown(today_plan, "this") or [{}])[0].get("workbench")
-        return {"league": chosen.name,
-                **headtohead.view([d.isoformat() for d in dates], today.isoformat(), plans, lineups, boxes, workbench,
-                                  today_plan.get("matchup_projection"))}
+        projection = today_plan.get("matchup_projection")
+        h2h = headtohead.view([d.isoformat() for d in dates], today.isoformat(), plans, lineups, boxes, workbench,
+                              projection)
+        # The plan's P(win) carried through tonight's games (livewin.py): no call beyond the above.
+        return {"league": chosen.name, **h2h, "live_win": livewin.p_win(h2h, projection, today.isoformat())}
 
     @app.get("/suggestions")
     def get_suggestions(week: str = "this", league: str | None = None):

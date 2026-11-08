@@ -1,5 +1,6 @@
 // The Matchup screen (plan P5; redesign step 5), from GET /matchup: the week's score with each
-// side's projection and P(win), then two views. Overview: tonight's live against projected, the
+// side's projection and P(win) (live through tonight's games from GET /matchup/players' live_win,
+// else the plan's), then two views. Overview: tonight's live against projected, the
 // week day by day (final, live, projected), and the league's week so far. Players (GET
 // /matchup/players, headtohead.py): your players against your opponent's, by position, best week
 // first -- the week's points, or one day from the day picker drawn like the Roster's cards. The
@@ -62,7 +63,11 @@ export function Matchup({ league, version, wide }) {
   const { you, opp } = data;
   const lead = you.points - (opp ? opp.points : 0);
   const margin = data.projected ? data.projected.you - data.projected.opp : null;
-  const pwin = data.p_win === null || data.p_win === undefined ? null : Math.round(data.p_win * 100);
+  // P(win): the head-to-head's live one (the plan's carried through tonight's games, livewin.py)
+  // where it could be made, else the newest plan's.
+  const live = h2h && h2h.live_win ? h2h.live_win : null;
+  const planWin = data.p_win === null || data.p_win === undefined ? null : Math.round(data.p_win * 100);
+  const pwin = live ? Math.round(live.p_win * 100) : planWin;
   const rank = data.league.findIndex((t) => t.who === 'you') + 1;
   const daysLeft = data.days_left;
   const choose = (v) => { setView(v); store.set('fh.matchup.view', v); };
@@ -100,7 +105,7 @@ export function Matchup({ league, version, wide }) {
       ${pwin !== null && html`<div class="ws-win">
         <div class="ws-bar" role="img" aria-label=${`Chance to win ${pwin}%`}><span style=${`width: ${pwin}%`}></span><span></span></div>
         <div class="ws-foot"><span>P(win) <b class="mono you">${pwin}%</b></span>
-          <span class="dim">lead ${sg(lead)}${margin !== null ? ` · proj margin ${sg(margin)}` : ''}</span></div>
+          <span class="dim">lead ${sg(lead)}${live ? ` · margin ${sg(live.margin)}` : margin !== null ? ` · proj margin ${sg(margin)}` : ''}</span></div>
       </div>`}
       ${pwin === null && html`<div class="ws-foot"><span class="dim">lead ${sg(lead)}</span><span class="dim">No P(win) yet: refresh for this week's plan.</span></div>`}
     </section>`;

@@ -1412,13 +1412,17 @@ class LiveRunner:
 
 
 def _matchup_projection(manager):
-    """{"me"/"opp": {"rest": points still to come this week, "nights": {date: points}}} from the
+    """{"me"/"opp": {"rest": points still to come this week, "nights": {date: points},
+    "night_var": {date: that night's variance}}} from the
     manager's last z, or None when it has none (no opponent, a plan made before any z)."""
     last = getattr(manager, "_last_matchup", None)
     if not last:
         return None
-    return {side: {"rest": round(float(p["rest"]), 2),
-                   "nights": {pd.Timestamp(n).date().isoformat(): round(float(v), 2) for n, v in sorted(p["nights"].items())}}
+    def by_night(values, digits):
+        return {pd.Timestamp(n).date().isoformat(): round(float(v), digits) for n, v in sorted(values.items())}
+
+    return {side: {"rest": round(float(p["rest"]), 2), "nights": by_night(p["nights"], 2),
+                   "night_var": by_night(p.get("night_var") or {}, 3)}
             for side, p in last.items()}
 
 

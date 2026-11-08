@@ -455,11 +455,13 @@ class FullSystem(Manager):
         not being modelled as an adversary, and assuming he plays well is the conservative choice.
         """
         mine = self._week_projection(view, view.roster, moments)
-        my_nights = self._last_nights
+        my_nights, my_night_var = self._last_nights, self._last_night_var
         theirs = self._week_projection(view, view.opponent_roster(), moments)
-        # What each side still scores this week, night by night: the plan's matchup shows it.
-        self._last_matchup = {"me": {"rest": mine[0], "nights": my_nights},
-                              "opp": {"rest": theirs[0], "nights": self._last_nights}}
+        # What each side still scores this week, night by night, and each night's variance: the
+        # plan's matchup shows it, and the app's live P(win) (Server/livewin.py) sums it.
+        self._last_matchup = {"me": {"rest": mine[0], "nights": my_nights, "night_var": my_night_var},
+                              "opp": {"rest": theirs[0], "nights": self._last_nights,
+                                      "night_var": self._last_night_var}}
         d = (view.my_week_points + mine[0]) - (view.opponent_week_points + theirs[0])
         s = (mine[1] + theirs[1]) ** 0.5
         self._last_s = s
@@ -548,7 +550,7 @@ class FullSystem(Manager):
 
         eligibility = view._state.eligibility
         mean = var = 0.0
-        by_night = {}
+        by_night, var_by_night = {}, {}
         for night, players in nights.items():
             weight = view.night_weight(night)
             if weight <= 0:
@@ -561,8 +563,10 @@ class FullSystem(Manager):
                 mean += weight * mu
                 var += weight * sd * sd
                 by_night[night] = by_night.get(night, 0.0) + weight * mu
-        # Each night's share of the mean, for the plan's matchup (read after `_z`; changes nothing).
-        self._last_nights = by_night
+                var_by_night[night] = var_by_night.get(night, 0.0) + weight * sd * sd
+        # Each night's share of the mean and the variance, for the plan's matchup (read after `_z`;
+        # changes nothing).
+        self._last_nights, self._last_night_var = by_night, var_by_night
         return mean, var
 
     def set_lineup(self, view):
