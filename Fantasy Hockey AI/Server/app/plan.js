@@ -149,8 +149,8 @@ function Sheet({ league, week, sheet, onClose, onDone, docked }) {
             : html`Swapping out ${short(occupant.player)} from this night: <span class="bad">he is dropped for good</span>, and the week gain does not count what he is worth after this week`)
           : 'Open'}${counts}.
           ${occupant
-            ? `Free agents who can play ${sheet.slot === 'BN' ? 'any position' : `the ${sheet.slot} slot`} that night: the plans' picks first, then the most points that night. Week: the week's lineup points with the swap.`
-            : `Free agents who can play the ${sheet.slot} slot and would start that night: the plans' picks first, then the most points that night. Week: the lineup points he adds this week.`}</span>
+            ? `Free agents who can play ${sheet.slot === 'BN' ? 'any position' : `the ${sheet.slot} slot`} that night: the AI's picks first, then the most points that night. Week: the week's lineup points with the swap.`
+            : `Free agents who can play the ${sheet.slot} slot and would start that night: the AI's picks first, then the most points that night. Week: the lineup points he adds this week.`}</span>
       </div>
       ${error && html`<div class="error" role="alert">${error}</div>`}
       ${list && list.positions.length > 1 && html`
@@ -165,12 +165,12 @@ function Sheet({ league, week, sheet, onClose, onDone, docked }) {
             : list.moves_full ? "Your picks use up the week's moves left: take one out to add here."
             : 'No free agent who plays that night would start.'}</p>`
           : html`<table class="list fixed">
-            <thead><tr><th scope="col" style="width: 54px">AI</th><th scope="col">Player</th>
+            <thead><tr><th scope="col" style="width: 34px">AI</th><th scope="col">Player</th>
               <th scope="col" class="n" style="width: 50px">Pts</th><th scope="col" class="n" style="width: 58px">Week</th>
               <th scope="col" class="n" style="width: 48px">Left</th></tr></thead>
             <tbody>${shown.map((f) => html`
               <tr class=${sel && sel.player_id === f.player_id ? 'sel' : f.plans ? 'mine' : ''}>
-                <td class="state">${f.plans}</td>
+                <td class="state">${f.plans ? 'AI' : ''}</td>
                 <td><button type="button" class="link" aria-pressed=${!!sel && sel.player_id === f.player_id}
                   onClick=${() => choosePlayer(f)}>${short(f.player)}${f.status && f.status !== 'ACTIVE' ? ` [${f.status}]` : ''}${' '}<span class="meta">${posLabel(f.positions)} · ${teamOf(f.player)}</span>${f.days && html`<span class="days">${f.days.map(weekday).join(' ')}</span>`}</button></td>
                 <td class="n">${f2(f.pts)}</td><td class="n good">${sg(f.gain)}</td><td class="n dim">${f.games}</td>
@@ -184,7 +184,7 @@ function Sheet({ league, week, sheet, onClose, onDone, docked }) {
           ${drops && drops.drops.map((d) => html`
             <button type="button" role="radio" aria-checked=${d.player_id === drop} onClick=${() => setDrop(d.player_id)}>
               <span class="dot"></span>
-              <span class="who">${d.player_id === null ? 'Open roster spot' : short(d.player)}${' '}<span class="meta">${d.player_id === null ? 'nobody dropped' : teamOf(d.player)}${sel && sel.plan_drop === d.player_id && d.player_id !== null ? " · plan's drop" : ''}</span></span>
+              <span class="who">${d.player_id === null ? 'Open roster spot' : short(d.player)}${' '}<span class="meta">${d.player_id === null ? 'nobody dropped' : teamOf(d.player)}${sel && sel.plan_drop === d.player_id && d.player_id !== null ? " · AI's drop" : ''}</span></span>
               <span class="good mono">${sg(d.gain)}</span>
             </button>`)}
         </div>
