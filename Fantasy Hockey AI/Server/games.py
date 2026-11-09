@@ -469,6 +469,7 @@ class Games:
                 "period": (g.get("periodDescriptor") or {}).get("number"),
                 "period_type": (g.get("periodDescriptor") or {}).get("periodType"),
                 "clock": (g.get("clock") or {}).get("timeRemaining"),
+                "running": bool((g.get("clock") or {}).get("running")),
                 "intermission": bool((g.get("clock") or {}).get("inIntermission")),
                 "situation": situation(g),
                 "mine": owners.count("me", teams), "opp": owners.count("opp", teams),
@@ -476,50 +477,61 @@ class Games:
         return {"date": data.get("currentDate"), "team": owners.names["me"],
                 "opponent": owners.names["opp"], "games": rows}
 
+    def _goal_rows(self, g: dict, owners, day: dt.date, totals: dict | None = None) -> list:
+        """A score feed game's goals as the app shows them (the goal feed, a game's Summary): the
+        scorer and assists, each with his owner and the fantasy points the goal earned him, the
+        strength, and the score after it. `totals` ({"me", "opp"}) gathers the owners' points. The
+        shootout's deciding goal is left out: it is no goal or assist in the stats, and worth nothing
+        (the user, 2026-10-15); so is a goal whose scorer isn't named yet (the next copy has him)."""
+        weights = self.scoreset.skaters
+        away, home = g["awayTeam"]["abbrev"], g["homeTeam"]["abbrev"]
+        rows = []
+        for n, goal in enumerate(g.get("goals", [])):
+            if not goal.get("playerId"):
+                continue
+            period = goal.get("periodDescriptor") or {}
+            if period.get("periodType") == "SO":
+                continue
+            strength = goal.get("strength", "ev")
+            bonus = weights.get({"pp": "ppp", "sh": "shp"}.get(strength, ""), 0)
+
+            def person(player_id, name, to_date, base, photo=None):
+                owner = owners.of(player_id)
+                points = round(weights.get(base, 0) + bonus, 2) if owner else None
+                if owner and totals is not None:
+                    totals[owner] += points
+                return {"id": player_id, "name": name, "to_date": to_date, "owner": owner,
+                        "points": points,
+                        "photo": photo or headshot(player_id, goal.get("teamAbbrev"), day)}
+
+            rows.append({
+                "game_id": g["id"], "n": n,
+                "period": period.get("number"), "period_type": period.get("periodType"),
+                "time": goal.get("timeInPeriod"), "team": goal.get("teamAbbrev"),
+                "scorer": person(goal["playerId"], goal["name"]["default"], goal.get("goalsToDate"), "goals",
+                                 goal.get("mugshot")),
+                "assists": [person(a["playerId"], a["name"]["default"], a.get("assistsToDate"), "assists")
+                            for a in goal.get("assists", [])],
+                "strength": STRENGTHS.get(strength, strength.upper()),
+                "modifier": None if goal.get("goalModifier") in (None, "none") else goal["goalModifier"],
+                "score": f"{away} {goal.get('awayScore')}-{goal.get('homeScore')} {home}",
+                "away_score": goal.get("awayScore"), "home_score": goal.get("homeScore"),
+                "clip": goal.get("highlightClipSharingUrl"),
+            })
+        return rows
+
     def goals(self) -> dict:
         data, owners = self.score_now(), self._owners()
-        weights = self.scoreset.skaters
         day = dt.date.fromisoformat(data["currentDate"]) if data.get("currentDate") else dt.date.today()
         rows, totals = [], {"me": 0.0, "opp": 0.0}
         for g in data.get("games", []):
-            away, home = g["awayTeam"]["abbrev"], g["homeTeam"]["abbrev"]
-            for n, goal in enumerate(g.get("goals", [])):
-                if not goal.get("playerId"):    # just scored, no scorer named yet: next copy
-                    continue
-                period = goal.get("periodDescriptor") or {}
-                # The shootout's deciding goal is listed with the goals but is no goal or assist
-                # in the stats, and worth nothing: left out (the user, 2026-10-15).
-                if period.get("periodType") == "SO":
-                    continue
-                strength = goal.get("strength", "ev")
-                bonus = weights.get({"pp": "ppp", "sh": "shp"}.get(strength, ""), 0)
-
-                def person(player_id, name, to_date, base, photo=None):
-                    owner = owners.of(player_id)
-                    points = round(weights.get(base, 0) + bonus, 2) if owner else None
-                    if owner:
-                        totals[owner] += points
-                    return {"id": player_id, "name": name, "to_date": to_date, "owner": owner,
-                            "points": points,
-                            "photo": photo or headshot(player_id, goal.get("teamAbbrev"), day)}
-
+            for row in self._goal_rows(g, owners, day, totals):
+                goal = g["goals"][row["n"]]
                 scored, seen = self.store.clock.time_of(g, goal)
-                rows.append({
-                    "game_id": g["id"],
-                    # Seen arriving, or estimated; within one copy's arrivals, the estimate's order.
-                    "order": (scored.timestamp(), estimated_time(g, goal).timestamp(), n),
-                    "at": scored.isoformat(timespec="seconds"), "at_estimated": not seen,
-                    "period": period.get("number"), "period_type": period.get("periodType"),
-                    "time": goal.get("timeInPeriod"), "team": goal.get("teamAbbrev"),
-                    "scorer": person(goal["playerId"], goal["name"]["default"], goal.get("goalsToDate"), "goals",
-                                     goal.get("mugshot")),
-                    "assists": [person(a["playerId"], a["name"]["default"], a.get("assistsToDate"), "assists")
-                                for a in goal.get("assists", [])],
-                    "strength": STRENGTHS.get(strength, strength.upper()),
-                    "modifier": None if goal.get("goalModifier") in (None, "none") else goal["goalModifier"],
-                    "score": f"{away} {goal.get('awayScore')}-{goal.get('homeScore')} {home}",
-                    "clip": goal.get("highlightClipSharingUrl"),
-                })
+                # Seen arriving, or estimated; within one copy's arrivals, the estimate's order.
+                row["order"] = (scored.timestamp(), estimated_time(g, goal).timestamp(), row["n"])
+                row["at"], row["at_estimated"] = scored.isoformat(timespec="seconds"), not seen
+                rows.append(row)
         # Newest first, by when each goal was scored (GoalClock); game clocks don't compare
         # across games.
         rows.sort(key=lambda r: r["order"], reverse=True)
@@ -621,12 +633,15 @@ class Games:
             "period": (box.get("periodDescriptor") or {}).get("number"),
             "period_type": (box.get("periodDescriptor") or {}).get("periodType"),
             "clock": (box.get("clock") or {}).get("timeRemaining"),
+            "running": bool((box.get("clock") or {}).get("running")),
             "intermission": bool((box.get("clock") or {}).get("inIntermission")),
             "situation": situation(box),
             "away": sides["awayTeam"], "home": sides["homeTeam"],
             "linescore": (rail.get("linescore") or {}).get("byPeriod", []),
             "shots_by_period": rail.get("shotsByPeriod", []),
             "team_stats": rail.get("teamGameStats", []),
+            "goals": self._goal_rows(summary, owners, dt.date.fromisoformat(box["gameDate"]) if box.get("gameDate")
+                                     else dt.date.today()) if summary else [],
             "plays": [p for p in reversed(plays) if p["sort"] > after],
             "last_sort": max((p["sort"] for p in plays), default=-1),
             "team": owners.names["me"], "opponent": owners.names["opp"],

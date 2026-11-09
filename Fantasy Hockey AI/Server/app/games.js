@@ -4,6 +4,9 @@
 // /games/<id>) and Lines (GET /games/<id>/lines). Live, they poll every 5 s -- the server's feed
 // cache (about 20 s) is what bounds the calls to the NHL. On a PC (`wide`) the list, the chosen
 // game and the goal feed sit side by side: the game opens in the middle, the feed is a rail.
+// Live, as NHL.com (the design's Games artboards, 2026-11-08): each clock ticks with a sweep under it,
+// a whistle when play stops, the strength (5-on-4) by the clock, and a goal lights its card and the
+// game's header up, pops the score and drops into the goal feed.
 import { html, useState, useEffect, useRef } from './vendor/htm-preact-3.1.1.mjs';
 import { api } from './api.js';
 import { useEscape, Photo, DayPicker, dateOf } from './layout.js';
@@ -29,20 +32,89 @@ function clockTime(iso) {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-// A live game's man advantage (the server's situation): a red "PP" (or "Pulled", for a pulled
-// goalie) beside the team that has it, on a card and in the game's header. Even strength: none.
-function SituationTag({ s, team }) {
-  if (!s || s.team !== team) return null;
-  return html`<span class=${`sit ${s.kind}`}>${s.kind === 'pulled' ? 'Pulled' : 'PP'}</span>`;
+// ---------- the live clock (the design's Games animations, 2026-11-08) ----------
+// Between the 5 s reads the clocks tick each second, as on NHL.com: a clock counts down from when
+// its value was first seen (the server's feed copy can repeat it for ~20 s), while it runs -- the
+// game clock and the power play stop for a whistle, an intermission's clock always runs.
+const firstSeen = new Map();          // "<game>|<what>|<value>" -> when that value first arrived
+const secsOf = (t) => (t ? t.split(':').reduce((m, x) => m * 60 + Number(x), 0) : 0);
+const pad = (n) => String(n).padStart(2, '0');
+const mmss2 = (x) => `${pad(Math.floor(x / 60))}:${pad(x % 60)}`;           // 02:10, as NHL.com
+function ticking(id, what, text, runs, now) {
+  if (!text || !runs) return secsOf(text);
+  const key = `${id}|${what}|${text}`;
+  if (!firstSeen.has(key)) {
+    if (firstSeen.size > 400) firstSeen.clear();
+    firstSeen.set(key, now);
+  }
+  return Math.max(0, secsOf(text) - Math.floor((now - firstSeen.get(key)) / 1000));
 }
 
-// ...and, in the game's header, its skater count under the period and clock: "5v4 · 1:42" (the
-// power play's time left). Cards leave it out.
-function SituationLine({ s }) {
-  if (!s) return null;
-  const left = s.kind === 'pp' && s.left ? s.left.replace(/^0(?=\d:)/, '') : '';
-  return html`<span class="sit-line">${s.skaters[0]}v${s.skaters[1]}${left ? ` · ${left}` : ''}</span>`;
+// A second's re-render while `on` (a game live): the clocks tick, a goal's moment ends.
+function useNow(on) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!on) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [on]);
+  return now;
 }
+
+// A live game's man advantage (the server's situation) beside the team that has it: "PP 1:42"
+// (the power play's time left, running with the clock) or "Pulled" for a pulled goalie.
+function SituationTag({ g, team, now }) {
+  const s = g.situation;
+  if (!s || s.team !== team) return null;
+  if (s.kind === 'pulled') return html`<span class="sit pulled">Pulled</span>`;
+  const left = s.left ? ticking(g.id, 'pp', s.left, g.running && !g.intermission, now) : null;
+  return html`<span class="sit pp">PP${left !== null ? ` ${Math.floor(left / 60)}:${pad(left % 60)}` : ''}</span>`;
+}
+
+// ...and the skaters on the ice, as NHL.com: "5-on-4", "5-on-3", "6-on-5" with a pulled goalie.
+const strengthOf = (s) => (s ? `${s.skaters[0]}-on-${s.skaters[1]}` : '');
+
+const Whistle = () => html`<span class="whistle" role="img" aria-label="Play stopped" title="Play stopped"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="14" r="5"></circle><path d="M13 11h9v4h-6"></path><path d="M9 14h.01"></path><path d="M6 5l1.2 2"></path><path d="M10.5 3.5v2.5"></path><path d="M15 5l-1.2 2"></path></svg></span>`;
+
+// A live game's period and clock, as NHL.com's scores: the period in a grey pill ("2nd", "1st INT"),
+// the time (MM:SS) with the sweep under it -- white while the clock runs, grey through an
+// intermission, a still line and a whistle when play stops. `center` (the game's header): the
+// pill and time stay dead centre, the whistle hangs off the right. Not live: stateLabel's text.
+function GameClock({ g, now, center }) {
+  if (!LIVE.has(g.state)) return html`<span class="gclock-text">${stateLabel(g)}</span>`;
+  const per = periodName(g.period, g.period_type);
+  const int = g.intermission, runs = !int && g.running;
+  const time = mmss2(ticking(g.id, 'clock', g.clock, int || runs, now));
+  return html`<span class=${`gclock ${center ? 'center' : ''}`}>
+    <span class="pill">${int ? `${per} INT` : per}</span>
+    <span class="clk"><span class="t">${time}</span><span class=${`track ${int ? 'calm' : runs ? '' : 'still'}`} aria-hidden="true">${(int || runs) && html`<span></span>`}</span></span>
+    ${!int && !runs && html`<${Whistle} />`}
+  </span>`;
+}
+
+// The goals since the last read: a live game whose score went up lights up for 3 s -- {id: {side, at}}.
+const GOAL_MS = 3000;
+function useGoalFlash() {
+  const scores = useRef(new Map());
+  const [flash, setFlash] = useState({});
+  const see = (games) => {
+    const fresh = {};
+    for (const g of games) {
+      const was = scores.current.get(g.id), a = g.away.score ?? 0, h = g.home.score ?? 0;
+      if (was && LIVE.has(g.state)) {
+        if (a > was.a) fresh[g.id] = { side: 'away', at: Date.now() };
+        else if (h > was.h) fresh[g.id] = { side: 'home', at: Date.now() };
+      }
+      scores.current.set(g.id, { a, h });
+    }
+    if (Object.keys(fresh).length) setFlash((f) => ({ ...f, ...fresh }));
+  };
+  const active = (id, now) => (flash[id] && now - flash[id].at < GOAL_MS ? flash[id] : null);
+  return [active, see];
+}
+
+// A score, popping when its team just scored.
+const Score = ({ value, pop }) => (pop ? html`<span class="pop">${value}</span>` : value);
 
 // "2nd 14:21", "INT · end 1st", "Final", "Final/OT", or the start time.
 export function stateLabel(g) {
@@ -147,8 +219,18 @@ function useFeedDrag(open, onToggle) {
   return { sheet, height, settling, handlers: { onPointerDown: down, onPointerMove: move, onPointerUp: up, onPointerCancel: up, onClick: click } };
 }
 
-function GoalFeed({ goals, open: opened, onToggle, rail }) {
+// A goal's key in the feed, and when this screen first saw it (the first read seeds them all:
+// only goals arriving after it drop in).
+const goalKey = (g) => `${g.game_id}|${g.period}|${g.time}|${g.team}`;
+
+function GoalFeed({ goals, open: opened, onToggle, rail, now }) {
   const [filter, setFilter] = useState('all');
+  const seen = useRef(null);
+  if (goals) {
+    if (seen.current === null) seen.current = new Map(goals.goals.map((g) => [goalKey(g), 0]));
+    for (const g of goals.goals) if (!seen.current.has(goalKey(g))) seen.current.set(goalKey(g), Date.now());
+  }
+  const isNew = (g) => !!seen.current && now - (seen.current.get(goalKey(g)) || 0) < GOAL_MS;
   const { sheet, height, settling, handlers } = useFeedDrag(!!opened, onToggle);
   const dragging = !rail && height !== null;
   const open = rail || opened || dragging;
@@ -188,7 +270,7 @@ function GoalFeed({ goals, open: opened, onToggle, rail }) {
           <tbody>${(open ? rows : rows.slice(0, 1)).map((g) => {
             const by = fp(g);
             const side = by.me ? 'me' : by.opp ? 'opp' : '';
-            return html`<tr class=${side ? `tint-${side}` : ''}>
+            return html`<tr class=${`${side ? `tint-${side}` : ''} ${isNew(g) ? 'enter' : ''}`}>
               <td><b>${g.team}</b></td>
               <td class="who"><div class="who-row"><${Photo} src=${g.scorer.photo} name=${g.scorer.name} size=${36} />
                 <div class="who-text"><span class="scorer">${g.scorer.name} <span class="meta">(${g.scorer.to_date})</span></span>
@@ -205,19 +287,24 @@ function GoalFeed({ goals, open: opened, onToggle, rail }) {
     </section>`;
 }
 
-function card(g, href, current) {
+// A game's card: the period pill and clock (or the start time, or Final), the strength or GOAL at
+// the right; each team's logo, PP tag, shots and score. A goal lights the card up for 3 s.
+function card(g, href, current, now, goal) {
   const done = DONE.has(g.state), started = done || LIVE.has(g.state);
   const lead = started && g.away.score !== g.home.score ? (g.away.score > g.home.score ? 'away' : 'home') : null;
+  const strength = LIVE.has(g.state) && !g.intermission ? strengthOf(g.situation) : '';
   return html`<a class="game-card" href=${href} aria-current=${current ? 'page' : undefined}
     aria-label=${`${g.away.abbrev} at ${g.home.abbrev}, ${stateLabel(g)}`}>
+    ${goal && html`<span class="goal-flash" aria-hidden="true"></span>`}
     <div class="game-top">
-      <span class=${`state ${LIVE.has(g.state) ? 'live' : ''}`}>${LIVE.has(g.state) && !g.intermission && html`<span class="dot"></span>`}${stateLabel(g)}</span>
+      <${GameClock} g=${g} now=${now} />
+      ${goal ? html`<span class="goal-badge">GOAL</span>` : strength && html`<span class="strength">${strength}</span>`}
     </div>
     ${['away', 'home'].map((side) => html`<div class="game-team">
       <${Logo} abbr=${g[side].abbrev} />
-      <span class="tn"><span class="ab"><span class=${done && lead && lead !== side ? 'dim2' : ''}>${g[side].abbrev}</span><${SituationTag} s=${g.situation} team=${g[side].abbrev} /></span>
+      <span class="tn"><span class="ab"><span class=${done && lead && lead !== side ? 'dim2' : ''}>${g[side].abbrev}</span><${SituationTag} g=${g} team=${g[side].abbrev} now=${now} /></span>
         ${started && g[side].sog !== null && html`<span class="sog">SOG: ${g[side].sog}</span>`}</span>
-      <span class=${`score ${done && lead && lead !== side ? 'dim2' : ''}`}>${started ? g[side].score : ''}</span>
+      <span class=${`score ${done && lead && lead !== side ? 'dim2' : ''}`}>${started ? html`<${Score} value=${g[side].score} pop=${goal && goal.side === side} />` : ''}</span>
     </div>`)}
   </a>`;
 }
@@ -229,6 +316,7 @@ export function Games({ league, version, wide, selected, view }) {
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(false);
   const [day, setDay] = useState(shownDay);
+  const [goalOf, seeGoals] = useGoalFlash();
   const today = day === 'today';
   const pick = (d) => { shownDay = d; setDay(d); setGames(null); setOpen(false); };
 
@@ -240,7 +328,7 @@ export function Games({ league, version, wide, selected, view }) {
     try {
       // The goal feed is today's alone.
       const [g, gl] = await Promise.all([api.games(league, today ? undefined : day), today ? api.goals(league) : null]);
-      setGames(g); setGoals(gl); setError(null);
+      setGames(g); setGoals(gl); setError(null); seeGoals(g.games);
       return g;
     } catch (e) {
       setError(e.message);
@@ -249,6 +337,7 @@ export function Games({ league, version, wide, selected, view }) {
   }, [league, version, day], (g) => !!g && g.games.some((x) => LIVE.has(x.state)));
 
   const live = games && games.games.some((x) => LIVE.has(x.state));
+  const now = useNow(!!live);
   const count = games ? `${games.games.length} game${games.games.length === 1 ? '' : 's'}` : '';
   const picker = week && html`<${DayPicker} week=${week} day=${day} onDay=${pick}
     right=${(d) => [d.games === null ? '' : `${d.games} game${d.games === 1 ? '' : 's'}`, 'dim']} />`;
@@ -263,13 +352,13 @@ export function Games({ league, version, wide, selected, view }) {
         </header>
         ${error && html`<div class="error" role="alert">${error}</div>`}
         ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">${none}</div>`
-          : html`<div class="game-grid">${games.games.map((g) => card(g, `#/game/${g.id}/${view || 'summary'}`, g.id === selected))}</div>`}
+          : html`<div class="game-grid">${games.games.map((g) => card(g, `#/game/${g.id}/${view || 'summary'}`, g.id === selected, now, goalOf(g.id, now)))}</div>`}
       </section>
       <section class="game-pane" aria-label="Game">
         ${selected ? html`<${Game} key=${selected} league=${league} gameId=${selected} view=${view} embedded />`
           : html`<div class="empty">Choose a game for its summary, box score, plays and lines.</div>`}
       </section>
-      ${today && html`<${GoalFeed} goals=${goals} rail />`}
+      ${today && html`<${GoalFeed} goals=${goals} rail now=${now} />`}
     </div>`;
   }
   // The phone: the app's header (the team selector) is above it; the day picker and the day's count.
@@ -279,58 +368,101 @@ export function Games({ league, version, wide, selected, view }) {
       ${error && html`<div class="error" role="alert">${error}</div>`}
       ${!games ? html`<div class="empty">Loading…</div>` : !games.games.length ? html`<div class="empty">${none}</div>` : html`
       <div class="game-grid">
-        ${games.games.map((g) => card(g, `#/game/${g.id}/summary`, false))}
+        ${games.games.map((g) => card(g, `#/game/${g.id}/summary`, false, now, goalOf(g.id, now)))}
       </div>
       <p class="foot">Tap a game for its summary.</p>`}
     </main>
-    ${today && html`<${GoalFeed} goals=${goals} open=${open} onToggle=${() => setOpen(!open)} />`}`;
+    ${today && html`<${GoalFeed} goals=${goals} open=${open} onToggle=${() => setOpen(!open)} now=${now} />`}`;
 }
 
 // ---------- one game ----------
 
+// Game stats, as NHL.com's gamecenter: both numbers at the ends, the stat between, one bar split by
+// each team's share (the leader light, the other dark; for penalty minutes and giveaways the
+// lower leads). [category, label, shown as a %, the count shown under it, lower is better]
 const STAT_ROWS = [
-  ['sog', 'Shots on goal'], ['hits', 'Hits'], ['blockedShots', 'Blocked shots'], ['faceoffWins', 'Faceoff wins'],
-  ['giveaways', 'Giveaways', true], ['takeaways', 'Takeaways'], ['powerPlay', 'Power play'], ['pim', 'Penalty minutes', true],
+  ['sog', 'Shots on goal'], ['faceoffWinningPctg', 'Faceoff %', true, 'faceoffWins'],
+  ['powerPlayPctg', 'Power play %', true, 'powerPlay'], ['pim', 'Penalty minutes', false, null, true],
+  ['hits', 'Hits'], ['blockedShots', 'Blocked shots'], ['giveaways', 'Giveaways', false, null, true], ['takeaways', 'Takeaways'],
 ];
+
+function StatBar({ label, a, h, aText, hText, aSub, hSub, lower, awayName, homeName }) {
+  const known = a !== null && h !== null;
+  const aLead = known && (lower ? a < h : a > h), hLead = known && (lower ? h < a : h > a);
+  const total = known ? a + h : 0;
+  const aShare = total ? a / total : 0.5, hShare = total ? h / total : 0.5;
+  return html`<div class=${`stat ${known ? '' : 'none'}`}>
+    <div class="stat-top"><span class=${`v ${aLead ? 'lead' : ''}`}>${aText}</span><span class="l">${label}</span><span class=${`v r ${hLead ? 'lead' : ''}`}>${hText}</span></div>
+    ${aSub && html`<div class="stat-sub"><span>${aSub}</span><span>${hSub}</span></div>`}
+    <div class="stat-bar" role="img" aria-label=${known ? `${label}: ${awayName} ${aText}, ${homeName} ${hText}` : `${label}: not played yet`}>
+      <span class=${`l ${aLead ? 'hi' : ''}`} style=${`flex: ${aShare} 1 0%`}></span><span class=${`r ${hLead ? 'hi' : ''}`} style=${`flex: ${hShare} 1 0%`}></span>
+    </div>
+  </div>`;
+}
+
+// The periods a game has had or will have: 1st to 3rd, then any overtime it went to.
+function periodsOf(game, seen) {
+  const last = Math.max(3, game.period || 0, ...seen);
+  return Array.from({ length: last }, (_, i) => i + 1);
+}
+const periodTitle = (n) => (n <= 3 ? `${ORD[n]} period` : n === 4 ? 'Overtime' : `Overtime ${n - 3}`);
+
+// Goals by period, a card each as the goal feed's rows: the scorer's portrait, name (his goal
+// count), assists, team · strength · time; the score after it (the scoring team's first) and the
+// fantasy points it earned your players or your opponent's, tinted as the feed.
+function Goals({ game }) {
+  const goals = game.goals || [];
+  const started = LIVE.has(game.state) || DONE.has(game.state);
+  if (!started) return null;
+  const played = DONE.has(game.state) ? 99 : game.period || 0;
+  return html`<h2 class="sum-h">Goals</h2>
+    ${periodsOf(game, goals.map((g) => g.period)).map((n) => {
+      const here = goals.filter((g) => g.period === n);
+      if (!here.length && n > 3 && n > played) return null;
+      return html`<h3 class="per">${periodTitle(n)}</h3>
+        ${!here.length ? html`<p class="per-none">${n < played ? 'No goals' : n === played ? 'No goals yet' : 'Not played yet'}</p>`
+          : here.map((g) => {
+            const by = { me: 0, opp: 0 };
+            for (const q of [g.scorer, ...g.assists]) if (q.owner) by[q.owner] += q.points;
+            const side = by.me ? 'me' : by.opp ? 'opp' : '';
+            const away = g.team === game.away.abbrev;
+            const score = `${away ? g.away_score : g.home_score}–${away ? g.home_score : g.away_score} ${g.team}`;
+            return html`<div class=${`goal-card ${side ? `tint-${side}` : ''}`}>
+              <${Photo} src=${g.scorer.photo} name=${g.scorer.name} size=${34} />
+              <span class="who"><span class="nm">${g.scorer.name} <span class="meta">(${g.scorer.to_date})</span></span>
+                <span class="meta">${g.assists.length ? g.assists.map((x) => x.name).join(', ') : 'Unassisted'}</span>
+                <span class="meta dim2">${g.team} · ${g.strength} · ${g.time}</span></span>
+              <span class="sc"><span class="s">${score}</span>${by.me ? html`<span class="you">${signed(by.me)}</span>` : ''}${by.opp ? html`<span class="opp">${signed(by.opp)}</span>` : ''}</span>
+              ${g.clip ? html`<a class="clip" href=${g.clip} target="_blank" rel="noopener" aria-label=${`Highlight: ${g.scorer.name}`}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"></path></svg></a>` : html`<span></span>`}
+            </div>`;
+          })}`;
+    })}`;
+}
 
 function Summary({ game }) {
   const stats = Object.fromEntries((game.team_stats || []).map((s) => [s.category, s]));
-  const num = (v) => (typeof v === 'string' && v.includes('/') ? Number(v.split('/')[0]) : Number(v));
-  const rows = STAT_ROWS.filter(([key]) => stats[key]).map(([key, label, lowerBetter]) => {
-    const s = stats[key];
-    let a = num(s.awayValue), h = num(s.homeValue);
-    let aText = String(s.awayValue), hText = String(s.homeValue);
-    if (key === 'faceoffWins' && stats.faceoffWinningPctg) {
-      aText = `${a} · ${Math.round(stats.faceoffWinningPctg.awayValue * 100)}%`;
-      hText = `${Math.round(stats.faceoffWinningPctg.homeValue * 100)}% · ${h}`;
-    }
-    if (key === 'powerPlay' && stats.powerPlayPctg) {
-      aText = `${s.awayValue} · ${Math.round(stats.powerPlayPctg.awayValue * 100)}%`;
-      hText = `${Math.round(stats.powerPlayPctg.homeValue * 100)}% · ${s.homeValue}`;
-      a = stats.powerPlayPctg.awayValue; h = stats.powerPlayPctg.homeValue;
-    }
-    const total = a + h || 1;
-    const aLead = lowerBetter ? a < h : a > h, hLead = lowerBetter ? h < a : h > a;
-    return { label, aText, hText, aLead, hLead, share: `${Math.round((a / total) * 100)}%` };
+  const names = { awayName: game.away.abbrev, homeName: game.home.abbrev };
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const rows = STAT_ROWS.filter(([key]) => stats[key]).map(([key, label, isPct, subKey, lower]) => {
+    const s = stats[key], sub = subKey && stats[subKey];
+    const a = Number(s.awayValue), h = Number(s.homeValue);
+    return { label, a, h, lower, aText: isPct ? pct(a) : String(s.awayValue), hText: isPct ? pct(h) : String(s.homeValue),
+      aSub: sub ? String(sub.awayValue) : '', hSub: sub ? String(sub.homeValue) : '' };
   });
-  const periods = game.linescore || [];
   const shots = Object.fromEntries((game.shots_by_period || []).map((p) => [p.periodDescriptor.number, p]));
+  const shotPeriods = periodsOf(game, Object.keys(shots).map(Number)).filter((n) => n <= 3 || shots[n]);
   return html`
-    ${periods.length > 0 && html`<table class="list periods">
-      <thead><tr><th scope="col">Goals (shots)</th>${periods.map((p) => html`<th scope="col" class="n">${periodName(p.periodDescriptor.number, p.periodDescriptor.periodType)}</th>`)}<th scope="col" class="n">T</th></tr></thead>
-      <tbody>${['away', 'home'].map((side) => html`<tr><th scope="row">${game[side].abbrev}</th>
-        ${periods.map((p) => html`<td class="n">${p[side]} <span class="meta">(${(shots[p.periodDescriptor.number] || {})[side] ?? ''})</span></td>`)}
-        <td class="n"><b>${game[side].score}</b> <span class="meta">(${game[side].sog})</span></td></tr>`)}</tbody>
-    </table>`}
-    <table class="list team-stats">
-      <thead><tr><th scope="col">${game.away.abbrev}</th><th scope="col" style="text-align: center">Team stats</th><th scope="col" style="text-align: right">${game.home.abbrev}</th></tr></thead>
-      <tbody>${rows.map((r) => html`<tr>
-        <td class=${`n ${r.aLead ? 'lead' : 'dim2'}`} style="text-align: left">${r.aText}</td>
-        <th scope="row"><span>${r.label}</span><span class="bar" aria-hidden="true"><span class=${r.aLead ? 'hi' : ''} style=${`width: ${r.share}`}></span><span class=${r.hLead ? 'hi' : ''} style="flex: 1"></span></span></th>
-        <td class=${`n ${r.hLead ? 'lead' : 'dim2'}`}>${r.hText}</td>
-      </tr>`)}</tbody>
-    </table>
-    <p class="foot">The higher number in each row is bold; for giveaways and penalty minutes, the lower. Power play = goals / chances.${LIVE.has(game.state) ? ' Updates every 5 s while the game is live.' : ''}</p>`;
+    <${Goals} game=${game} />
+    ${rows.length > 0 && html`<h2 class="sum-h">Game stats</h2>
+    <div class="stats">${rows.map((r) => html`<${StatBar} ...${r} ...${names} />`)}</div>`}
+    ${(game.shots_by_period || []).length > 0 && html`<h2 class="sum-h">Shots on goal</h2>
+    <div class="stats">${shotPeriods.map((n) => {
+      const p = shots[n];
+      return p ? html`<${StatBar} label=${periodTitle(n)} a=${p.away} h=${p.home} aText=${String(p.away)} hText=${String(p.home)} ...${names} />`
+        : html`<${StatBar} label=${periodTitle(n)} a=${null} h=${null} aText="–" hText="–" ...${names} />`;
+    })}</div>`}
+    <p class="foot">Each bar splits the stat between the teams, ${game.away.abbrev} on the left, ${game.home.abbrev} on the right; the leader is bright (for penalty minutes and giveaways, the lower). Faceoffs: wins / faceoffs. Power play: goals / chances.${LIVE.has(game.state) ? ' Updates every 5 s while the game is live.' : ''}</p>`;
 }
 
 // FP first, so it stays on screen while the rest scroll sideways on a phone. PP / SH TOI come from
@@ -499,13 +631,14 @@ const VIEWS = [['summary', 'Summary'], ['box', 'Box'], ['plays', 'Plays'], ['lin
 export function Game({ league, gameId, view, embedded }) {
   const [game, setGame] = useState(null);
   const [error, setError] = useState(null);
+  const [goalOf, seeGoals] = useGoalFlash();
   usePoll(async () => {
-    try { const got = await api.game(league, gameId); setGame(got); setError(null); return got; } catch (e) { setError(e.message); throw e; }
+    try { const got = await api.game(league, gameId); setGame(got); setError(null); seeGoals([got]); return got; } catch (e) { setError(e.message); throw e; }
   }, [league, gameId], (g) => !!g && !DONE.has(g.state));
   const live = !!game && LIVE.has(game.state);
-  const state = game && (DONE.has(game.state) ? (game.period_type && game.period_type !== 'REG' ? `Final/${game.period_type}` : 'Final')
-    : LIVE.has(game.state) ? (game.intermission ? `INT · end ${periodName(game.period, game.period_type)}` : `${periodName(game.period, game.period_type)} ${game.clock || ''}`)
-      : 'Not started');
+  const now = useNow(live);
+  const goal = game && goalOf(game.id, now);
+  const strength = live && !game.intermission ? strengthOf(game.situation) : '';
   const lead = game && game.away.score !== game.home.score ? (game.away.score > game.home.score ? 'away' : 'home') : null;
   return html`
     ${!embedded && html`<header class="game-head">
@@ -515,11 +648,12 @@ export function Game({ league, gameId, view, embedded }) {
     </header>`}
     ${error && html`<div class="error" role="alert">${error}</div>`}
     ${game && html`<section class="scoreboard" aria-label="Score">
-      <div class="side"><${Logo} abbr=${game.away.abbrev} big /><span class="nm"><span class="ab"><span class=${lead === 'home' ? 'dim2' : ''}>${game.away.abbrev}</span><${SituationTag} s=${game.situation} team=${game.away.abbrev} /></span><span class="meta">Away</span></span></div>
-      <div class="mid"><span class="num mono"><span class=${lead === 'home' ? 'dim' : ''}>${game.away.score ?? 0}</span><span class="dash">–</span><span class=${lead === 'away' ? 'dim' : ''}>${game.home.score ?? 0}</span></span>
-        <span class=${`st ${live ? 'live' : ''}`}>${live && !game.intermission && html`<span class="dot"></span>`}${state}</span>
-        <${SituationLine} s=${game.situation} /></div>
-      <div class="side right"><span class="nm"><span class="ab"><${SituationTag} s=${game.situation} team=${game.home.abbrev} /><span class=${lead === 'away' ? 'dim2' : ''}>${game.home.abbrev}</span></span><span class="meta">Home</span></span><${Logo} abbr=${game.home.abbrev} big /></div>
+      ${goal && html`<span class="goal-flash" aria-hidden="true"></span>`}
+      <div class="side"><${Logo} abbr=${game.away.abbrev} big /><span class="nm"><span class="ab"><span class=${lead === 'home' ? 'dim2' : ''}>${game.away.abbrev}</span><${SituationTag} g=${game} team=${game.away.abbrev} now=${now} /></span><span class="meta">Away</span></span></div>
+      <div class="mid"><span class="num mono"><span class=${lead === 'home' ? 'dim' : ''}><${Score} value=${game.away.score ?? 0} pop=${goal && goal.side === 'away'} /></span><span class="dash">–</span><span class=${lead === 'away' ? 'dim' : ''}><${Score} value=${game.home.score ?? 0} pop=${goal && goal.side === 'home'} /></span></span>
+        <span class="st">${game.state === 'FUT' || game.state === 'PRE' ? 'Not started' : html`<${GameClock} g=${game} now=${now} center />`}</span>
+        <span class="st-sub">${goal ? html`<span class="goal-badge">GOAL</span>` : strength && html`<span class="strength">${strength}</span>`}</span></div>
+      <div class="side right"><span class="nm"><span class="ab"><${SituationTag} g=${game} team=${game.home.abbrev} now=${now} /><span class=${lead === 'away' ? 'dim2' : ''}>${game.home.abbrev}</span></span><span class="meta">Home</span></span><${Logo} abbr=${game.home.abbrev} big /></div>
     </section>`}
     <nav class="game-views" aria-label="Game views">
       ${VIEWS.map(([id, label]) => html`<a href=${`#/game/${gameId}/${id}`} aria-current=${id === view ? 'page' : undefined}>${label}</a>`)}

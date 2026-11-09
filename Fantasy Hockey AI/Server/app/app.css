@@ -278,10 +278,8 @@ table.cal td.rental .pt { color: #9FD0FF; }
 .dot { display: inline-block; width: 6px; height: 6px; border-radius: 3px; background: var(--live); flex: none; }
 .games-screen { padding-bottom: 64px; }
 .game-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px 12px 0; }
-.game-card { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--ground-2); text-decoration: none; color: var(--text); }
+.game-card { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--ground-2); text-decoration: none; color: var(--text); }
 .game-top { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; }
-.game-top .state { display: flex; align-items: center; gap: 5px; font-weight: 600; color: var(--text-3); }
-.game-top .state.live { color: #FF7A7E; }
 .game-team { display: grid; grid-template-columns: 26px minmax(0, 1fr) 24px; gap: 6px; align-items: center; height: 34px; }
 .game-team .tn { display: flex; flex-direction: column; line-height: 1.15; font-size: 14px; font-weight: 600; }
 .game-team .sog { font-family: var(--mono); font-size: 10.5px; font-weight: 400; color: var(--text-3); }
@@ -310,7 +308,7 @@ table.list tr.tint-me td, table.list tr.tint-me th { background: #0F2236; }
 table.list tr.tint-opp td, table.list tr.tint-opp th { background: #2A1A10; }
 .game-head { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; height: 44px; flex: none; border-bottom: 1px solid var(--rule); text-align: center; font-size: 13px; }
 .game-head .back { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--text); }
-.scoreboard { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 14px 16px 12px; border-bottom: 1px solid var(--rule); flex: none; }
+.scoreboard { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 14px 16px 12px; border-bottom: 1px solid var(--rule); flex: none; }
 .scoreboard .side { display: flex; align-items: center; gap: 10px; }
 .scoreboard .side.right { justify-content: flex-end; text-align: right; }
 .scoreboard .nm { display: flex; flex-direction: column; line-height: 1.1; font-size: 16px; font-weight: 700; }
@@ -318,18 +316,9 @@ table.list tr.tint-opp td, table.list tr.tint-opp th { background: #2A1A10; }
 .scoreboard .num { font-size: 30px; font-weight: 600; line-height: 1; }
 .scoreboard .dash { color: #4A5B7C; margin: 0 8px; }
 .scoreboard .st { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text-3); }
-.scoreboard .st.live { color: #FF7A7E; }
 .game-views { display: flex; height: 36px; flex: none; border-bottom: 1px solid var(--rule); background: var(--ground-2); }
 .game-views a { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 12.5px; color: var(--text-3); text-decoration: none; }
 .game-views a[aria-current="page"] { font-weight: 700; color: var(--text); background: var(--ground); box-shadow: inset 0 -2px 0 var(--you); }
-table.list.periods th[scope="row"] { font-weight: 700; }
-table.list.team-stats th[scope="row"] { text-align: center; font-weight: 500; color: var(--text-2); }
-table.list.team-stats th[scope="row"] > span:first-child { display: block; }
-table.list.team-stats .bar { display: flex; gap: 2px; width: 150px; height: 3px; margin: 5px auto 0; padding: 0; }
-table.list.team-stats .bar span { background: #3A4A68; }
-table.list.team-stats .bar span.hi { background: #C9D4E6; }
-table.list.team-stats td { height: 38px; font-size: 14px; }
-table.list.team-stats td.lead { font-weight: 700; color: var(--text); }
 table.list.box th[scope="row"] { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table.list.box th.n { width: 26px; }
 table.list.box th.n:nth-child(4), table.list.box th.n:nth-child(5), table.list.box th.n:nth-child(6) { width: 38px; }
@@ -513,7 +502,6 @@ table.list.plays thead th { top: 44px; }
 .game-team .ab, .scoreboard .ab { display: flex; align-items: center; gap: 5px; }
 .scoreboard .side.right .ab { justify-content: flex-end; }
 .scoreboard .sit { font-size: 11px; }
-.scoreboard .sit-line { font-size: 12px; font-weight: 600; color: #FF8A8E; }   /* the clock's font (.scoreboard .st) */
 
 /* The header's gear: More (the redesign). */
 .gear { flex: none; width: 44px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-2); }
@@ -665,3 +653,74 @@ table.h2h tr.total td { font-weight: 700; }
 table.h2h tr.bench-h td { background: var(--ground-2); color: var(--text-3); height: 24px; padding-top: 0; padding-bottom: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
 table.h2h tr.bench-h td { padding: 0; }
 table.h2h tr.bench-h button { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 32px; padding: 0 6px; background: none; border: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+
+/* Games, live (the design's Games artboards, 2026-11-08). A live game's period in a grey pill and its
+   clock (MM:SS) with NHL.com's sweep under it -- a white bar crossing a 2 px track in 1 s, then 4 s
+   still; grey through an intermission; a still line and a white whistle when play stops. In the
+   game's header (.center) the pill and time stay dead centre and the whistle hangs off the right. */
+.gclock { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+.gclock-text { font-weight: 600; color: var(--text-3); }
+.gclock .pill { flex: none; padding: 1px 6px; border-radius: 3px; background: #1F2A3D; color: #C9D4E6; font-size: 11px; font-weight: 600; }
+.gclock .clk { display: inline-flex; flex-direction: column; gap: 2px; }
+.gclock .t { font-family: var(--mono); }
+.gclock .track { position: relative; height: 2px; overflow: hidden; border-radius: 1px; background: #2A3854; }
+.gclock .track > span { position: absolute; top: 0; left: -105%; width: 100%; height: 2px; background: var(--text); animation: sweep 5s linear infinite; }
+.gclock .track.calm > span { background: var(--text-3); }
+@keyframes sweep { 0% { left: -105%; } 20% { left: 105%; } 100% { left: 105%; } }
+.whistle { flex: none; display: inline-flex; color: var(--text); animation: whistle .6s ease-out; }
+@keyframes whistle { 0% { transform: scale(.4) rotate(-20deg); opacity: 0; } 45% { transform: scale(1.2) rotate(12deg); opacity: 1; } 70% { transform: rotate(-8deg); } 100% { transform: none; } }
+.gclock.center { position: relative; }
+.gclock.center .whistle { position: absolute; left: 100%; top: 50%; margin: -7px 0 0 6px; }
+/* The skaters on the ice while a team is up a man (NHL.com's "5-on-4"). */
+.strength { font-size: 11px; font-weight: 600; color: #FF8A8E; white-space: nowrap; }
+.scoreboard .st-sub { display: flex; align-items: center; min-height: 18px; }
+.scoreboard .strength { font-size: 12px; }
+/* A goal: the card (or header) lights up red and fades, GOAL slides in, the scorer's score pops;
+   in the goal feed the new row drops in tinted red and settles to its own colour. */
+.goal-flash { position: absolute; left: -1px; right: -1px; top: -1px; bottom: -1px; border-radius: inherit; border: 1px solid #FF5A5F; background: rgba(255, 90, 95, .12); pointer-events: none; animation: flash 3s ease-out forwards; }
+.scoreboard .goal-flash { left: 0; right: 0; top: 0; bottom: 0; border: 0; box-shadow: inset 0 0 0 1px #FF5A5F; }
+@keyframes flash { 0% { opacity: 0; } 12% { opacity: 1; } 100% { opacity: 0; } }
+.goal-badge { font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 1px 5px; border-radius: 3px; background: #FF5A5F; color: var(--ground); animation: badge 3s ease-out forwards; }
+.scoreboard .goal-badge { font-size: 11px; }
+@keyframes badge { 0% { transform: translateX(10px); opacity: 0; } 12% { transform: none; opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+.pop { display: inline-block; animation: pop 1.4s ease-out; }
+@keyframes pop { 0% { transform: scale(1); } 20% { transform: scale(1.7); color: #FF5A5F; } 55% { transform: scale(1); color: #FF5A5F; } 100% { color: inherit; } }
+table.list tr.enter td { animation: rowin 2.4s ease-out; }
+table.list tr.enter td > * { animation: slidein .45s ease-out; }
+@keyframes rowin { 0% { background: rgba(255, 90, 95, .35); } 100% { background: transparent; } }
+@keyframes slidein { 0% { transform: translateY(-10px); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .gclock .track > span, .whistle, .goal-flash, .goal-badge, .pop, table.list tr.enter td, table.list tr.enter td > * { animation: none; }
+  .gclock .track > span { left: 0; }
+}
+
+/* A game's Summary: the goals by period, a card each as the goal feed's rows; game stats and shots
+   by period as NHL.com's gamecenter draws them -- the numbers at the ends, the stat between, one
+   8 px bar split by each team's share, the halves cut on a slant 8 px apart (the leader light). */
+.sum-h { margin: 0; padding: 14px 16px 6px; font-size: 15px; font-weight: 700; }
+.per { margin: 10px 16px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.per-none { margin: 0 16px 6px; font-size: 12px; color: var(--text-3); }
+.goal-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto 28px; align-items: center; gap: 8px; margin: 0 12px 6px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--ground-2); }
+.goal-card.tint-me { background: #0F2236; }
+.goal-card.tint-opp { background: #2A1A10; }
+.goal-card .who { min-width: 0; line-height: 1.3; }
+.goal-card .who > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.goal-card .nm { font-weight: 600; }
+.goal-card .sc { display: flex; flex-direction: column; align-items: flex-end; font-family: var(--mono); font-size: 12px; line-height: 1.3; }
+.goal-card .sc .s { font-size: 13px; font-weight: 600; }
+.stats { display: flex; flex-direction: column; gap: 8px; padding: 6px 16px 2px; }
+.stat { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
+.stat-top { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: baseline; gap: 8px; }
+.stat-top .v { font-family: var(--mono); font-size: 20px; font-weight: 400; line-height: 1; color: var(--text-2); }
+.stat-top .v.lead { font-weight: 700; color: var(--text); }
+.stat-top .v.r { text-align: right; }
+.stat.none .stat-top .v { color: #4A5B7C; }
+.stat-top .l { font-size: 13px; font-weight: 500; color: var(--text-2); text-align: center; }
+.stat-sub { display: flex; justify-content: space-between; margin-top: -4px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.stat-bar { display: flex; gap: 8px; height: 8px; }
+.stat-bar > .l { box-sizing: border-box; min-width: 8px; border-top: 8px solid #3A4A68; border-right: 8px solid transparent; border-radius: 1px 0 0 1px; }
+.stat-bar > .r { box-sizing: border-box; min-width: 8px; border-bottom: 8px solid #3A4A68; border-left: 8px solid transparent; border-radius: 0 1px 1px 0; }
+.stat-bar > .l.hi { border-top-color: #C9D4E6; }
+.stat-bar > .r.hi { border-bottom-color: #C9D4E6; }
+.stat.none .stat-bar > .l { border-top-color: #1F2A3D; }
+.stat.none .stat-bar > .r { border-bottom-color: #1F2A3D; }

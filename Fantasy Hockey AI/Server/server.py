@@ -30,17 +30,13 @@ Every call but the job's takes ?league=<name> (default: the first league served,
                                your opponent's on each
     GET  /games/week           each day of this fantasy week with its NHL games (the Games day picker)
     GET  /goals                every goal today, newest first, with the fantasy points it earned
-    GET  /games/{id}?after=n   one game: line score, team stats, box score with fantasy points, plays
-                               after sortOrder n
+    GET  /games/{id}?after=n   one game: its goals, team stats, shots by period, box score with fantasy
+                               points, plays after sortOrder n
     GET  /games/{id}/lines     each team's lines, pairs and special-teams units as used (games.py)
     GET  /tonight              every player you and your opponent hold: his game today, his live box
                                line and fantasy points; your lineup's live total (games.py)
     GET  /roster               the app's Roster screen from the newest plan: lineup as it stands,
                                bench, IR, each player's season in the league's scoring (roster.py).
-                               day: 'today', 'tomorrow' or a date in this fantasy week -- a day
-                               before today shows that day's plan with its games' box lines, a day
-                               ahead its games and the projection. `week`: each day's state, projection
-                               and (a day gone) its lineup's points, for the day picker
     GET  /players              the app's Players screen from the newest plan: every free agent, his
                                season, ROS, waivers and the nights he plays the rest of this week (players.py)
     GET  /choices              what you chose in the app (choices.py): {league,
