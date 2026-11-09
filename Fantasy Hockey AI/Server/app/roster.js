@@ -97,7 +97,6 @@ function Group({ group, columns, span, sort, onSort, perGame }) {
       return html`
         <tr>
           <th scope="row" class="stick">
-            <span class="slot">${row.slot}</span>
             <${Photo} src=${row.photo} name=${row.name} size=${30} />
             <${Who} row=${row} />
           </th>

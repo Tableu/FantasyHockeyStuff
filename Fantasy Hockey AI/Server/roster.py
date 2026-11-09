@@ -61,7 +61,6 @@ def roster_view(plan: dict, scoreset, slot_rows: list, photo=lambda player_id, t
         short, team = split_name(r["player"])
         weights = scoreset.goalies if goalie else scoreset.skaters
         return {"player_id": r["player_id"], "player": r["player"], "name": short, "team": team,
-                "slot": slot["slot"] if slot is not None else ("IR" if where == "ir" else "BN"),
                 "positions": r["positions"], "goalie": goalie, "where": where,
                 "photo": photo(r["player_id"], team),
                 "flag": (slot or {}).get("flag") or r.get("status"),
