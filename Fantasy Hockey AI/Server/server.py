@@ -463,6 +463,39 @@ def make_app(worker: Worker) -> FastAPI:
             hit = plans_read[path] = (mtime, json.loads(path.read_text(encoding="utf-8")))
         return hit[1]
 
+    def week_projection(league, plan):
+        """`plan`'s matchup_projection with each night taken from the newest plan of its week that
+        projects it: once tonight's games have all started the newest plan is tomorrow's, which has
+        no tonight, while today's morning plan has an older tomorrow. Overview, Players and the live
+        P(win) all read this, so a day shows one projection everywhere (2026-11-14: Sunday 34.46 on
+        the Overview, 29.34 on Players)."""
+        base = (plan or {}).get("matchup_projection")
+        if not base or not plan.get("game_date"):
+            return base
+        plan_day = dt.date.fromisoformat(plan["game_date"])
+        out = {side: {**(base.get(side) or {}), "nights": {}, "night_var": {}} for side in ("me", "opp")}
+        for day in sorted((d for d in roster.week_dates(plan_day, configs[league.name].week_starts_on)
+                           if d <= plan_day), reverse=True):
+            files = planpass.saved_plans(league, day)
+            if not files:
+                continue
+            p = read_plan(files[-1])
+            if p.get("week") != plan.get("week"):
+                continue
+            mp = p.get("matchup_projection") or {}
+            for night in (mp.get("me") or {}).get("nights", {}):
+                if night in out["me"]["nights"]:
+                    continue            # a newer plan has it
+                for side in ("me", "opp"):
+                    got = mp.get(side) or {}
+                    out[side]["nights"][night] = (got.get("nights") or {}).get(night)
+                    if night in (got.get("night_var") or {}):
+                        out[side]["night_var"][night] = got["night_var"][night]
+        for side in ("me", "opp"):
+            if "night_var" not in (base.get(side) or {}):
+                del out[side]["night_var"]          # an old plan without it: livewin says no
+        return out
+
     @app.get("/roster")
     def get_roster(league: str | None = None):
         """The Roster's Season table: the newest plan's roster as it stands (roster.py)."""
@@ -552,7 +585,9 @@ def make_app(worker: Worker) -> FastAPI:
         if not chosen.readable:
             raise HTTPException(409, f"{chosen.name} has no platform to read its matchup from")
         path = worker.newest_plan(chosen)
-        plan = json.loads(path.read_text(encoding="utf-8")) if path else None
+        plan = read_plan(path) if path else None
+        if plan:
+            plan = {**plan, "matchup_projection": week_projection(chosen, plan)}
         try:
             return {"league": chosen.name, **matchups.view(chosen, plan)}
         except Exception as error:  # noqa: BLE001 -- the platform unreachable or changed: say so
@@ -585,7 +620,11 @@ def make_app(worker: Worker) -> FastAPI:
             boxes = dict(zip([d.isoformat() for d in dates],
                              pool.map(lambda d: nhl(league, "day", d, held)["players"], dates)))
         workbench = (suggestions.plans_shown(today_plan, "this") or [{}])[0].get("workbench")
-        projection = today_plan.get("matchup_projection")
+        # The projection the Overview shows (week_projection); the newest plan only while it is
+        # still this week's -- on the week's last night it can be next week's.
+        newest_path = worker.newest_plan(chosen)
+        newest_plan = read_plan(newest_path) if newest_path else today_plan
+        projection = week_projection(chosen, newest_plan if newest_plan.get("week") == today_plan.get("week") else today_plan)
         h2h = headtohead.view([d.isoformat() for d in dates], today.isoformat(), plans, lineups, boxes, workbench,
                               projection)
         for p in h2h["players"]:

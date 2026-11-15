@@ -27,7 +27,7 @@ import statistics
 CV = 0.9                # Decisions/managers.py FALLBACK_CV: a game's sd over its mean
 Z_CLIP = 3.0            # Settings/strategy-*.json z_clip: the plan's z is clipped the same
 STARTED = {"LIVE", "CRIT"}
-FINAL = {"OFF", "FINAL"}
+FINAL = {"OVER", "OFF", "FINAL"}         # OVER: the last horn, before the official Final
 OUT_OF_LINEUP = ("BN", "IR")
 
 

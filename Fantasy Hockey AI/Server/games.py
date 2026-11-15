@@ -61,7 +61,9 @@ REPORT_INTERVAL_S = 60          # the HTML TOI reports change about once a minut
 FEED_IDLE_S = 3 * 3600          # a feed nobody asked about for this long is dropped
 FINAL_RECHECK_S = 1800          # a final game's copy is read again this often: the NHL corrects stats later
 FINAL_STATES = {"OFF", "FINAL"}
-LIVE_STATES = {"LIVE", "CRIT"}
+# OVER: the last horn has gone, the game not yet official -- still watched and fetched as live,
+# never cached as final (the box score can still change).
+LIVE_STATES = {"LIVE", "CRIT", "OVER"}
 # A goal's wall-clock time when the server could not see it arrive, estimated from puck drop --
 # about 8 minutes to the first faceoff, 37 minutes of real time per 20-minute period, 18 between.
 FIRST_FACEOFF_S, PERIOD_REAL_S, INTERMISSION_S = 8 * 60, 37 * 60, 18 * 60

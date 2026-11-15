@@ -12,7 +12,8 @@ import { api } from './api.js';
 import { useEscape, Photo, DayPicker, dateOf } from './layout.js';
 
 const LIVE = new Set(['LIVE', 'CRIT']);
-const DONE = new Set(['OFF', 'FINAL']);
+// OVER: the NHL's word between the last horn and the official Final -- over, its score shown.
+const DONE = new Set(['OVER', 'OFF', 'FINAL']);
 const LIVE_EVERY_MS = 5000;
 const IDLE_EVERY_MS = 60000;
 const ORD = { 1: '1st', 2: '2nd', 3: '3rd' };
@@ -34,20 +35,26 @@ function clockTime(iso) {
 
 // ---------- the live clock (the design's Games animations, 2026-11-08) ----------
 // Between the 5 s reads the clocks tick each second, as on NHL.com: a clock counts down from when
-// its value was first seen (the server's feed copy can repeat it for ~20 s), while it runs -- the
-// game clock and the power play stop for a whistle, an intermission's clock always runs.
-const firstSeen = new Map();          // "<game>|<what>|<value>" -> when that value first arrived
+// its value arrived (the server's feed copy can repeat it for ~20 s), while it runs -- the game
+// clock and the power play stop for a whistle, an intermission's clock always runs. Kept per game
+// and clock with its period: a value seen again later (10:00 in the 1st and again in the 2nd, every
+// power play's 2:00) starts afresh rather than counting from its first sighting long ago, and a copy
+// that stops changing (a stalled feed) holds after STALE_S instead of running down to 00:00.
+const seen = new Map();               // "<game>|<what>" -> {text, ctx, at}: the value and when it arrived
+const STALE_S = 30;                   // the feed cache (~20 s) and a poll (5 s), with room
 const secsOf = (t) => (t ? t.split(':').reduce((m, x) => m * 60 + Number(x), 0) : 0);
 const pad = (n) => String(n).padStart(2, '0');
 const mmss2 = (x) => `${pad(Math.floor(x / 60))}:${pad(x % 60)}`;           // 02:10, as NHL.com
-function ticking(id, what, text, runs, now) {
-  if (!text || !runs) return secsOf(text);
-  const key = `${id}|${what}|${text}`;
-  if (!firstSeen.has(key)) {
-    if (firstSeen.size > 400) firstSeen.clear();
-    firstSeen.set(key, now);
+function ticking(id, what, text, ctx, runs, now) {
+  const key = `${id}|${what}`;
+  if (!text || !runs) { seen.delete(key); return secsOf(text); }
+  let was = seen.get(key);
+  if (!was || was.text !== text || was.ctx !== ctx) {
+    was = { text, ctx, at: now };
+    seen.set(key, was);
   }
-  return Math.max(0, secsOf(text) - Math.floor((now - firstSeen.get(key)) / 1000));
+  const gone = Math.min(STALE_S, Math.floor((now - was.at) / 1000));
+  return Math.max(0, secsOf(text) - gone);
 }
 
 // A second's re-render while `on` (a game live): the clocks tick, a goal's moment ends.
@@ -67,7 +74,7 @@ function SituationTag({ g, team, now }) {
   const s = g.situation;
   if (!s || s.team !== team) return null;
   if (s.kind === 'pulled') return html`<span class="sit pulled">Pulled</span>`;
-  const left = s.left ? ticking(g.id, 'pp', s.left, g.running && !g.intermission, now) : null;
+  const left = s.left ? ticking(g.id, 'pp', s.left, g.period, g.running && !g.intermission, now) : null;
   return html`<span class="sit pp">PP${left !== null ? ` ${Math.floor(left / 60)}:${pad(left % 60)}` : ''}</span>`;
 }
 
@@ -84,7 +91,7 @@ function GameClock({ g, now, center }) {
   if (!LIVE.has(g.state)) return html`<span class="gclock-text">${stateLabel(g)}</span>`;
   const per = periodName(g.period, g.period_type);
   const int = g.intermission, runs = !int && g.running;
-  const time = mmss2(ticking(g.id, 'clock', g.clock, int || runs, now));
+  const time = g.clock ? mmss2(ticking(g.id, 'clock', g.clock, `${g.period}|${int}`, int || runs, now)) : '';
   return html`<span class=${`gclock ${center ? 'center' : ''}`}>
     <span class="pill">${int ? `${per} INT` : per}</span>
     <span class="clk"><span class="t">${time}</span><span class=${`track ${int ? 'calm' : runs ? '' : 'still'}`} aria-hidden="true">${(int || runs) && html`<span></span>`}</span></span>

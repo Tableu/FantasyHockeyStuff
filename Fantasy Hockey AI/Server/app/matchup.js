@@ -15,7 +15,7 @@ const store = {
   get(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
   set(key, value) { try { localStorage.setItem(key, value); } catch (_) { /* private window */ } },
 };
-const STARTED = new Set(['LIVE', 'CRIT', 'OFF', 'FINAL']);
+const STARTED = new Set(['LIVE', 'CRIT', 'OVER', 'OFF', 'FINAL']);
 const POSITIONS = ['C', 'LW', 'RW', 'D', 'G'];
 const OUT = new Set(['BN', 'IR']);
 
