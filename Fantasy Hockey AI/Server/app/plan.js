@@ -318,6 +318,7 @@ export function Plan({ league, version, wide }) {
       ${!shown && data.picks > 0 && html`<button type="button" class="btn use" disabled=${busy}
         onClick=${() => tryEdit({ action: 'clear' })}>Clear picks</button>`}
     </div>`}
+    ${data.no_plans && html`<div class="plan-none">${data.no_plans}</div>`}
     ${error && html`<div class="error" role="alert">${error.message}</div>`}
     ${!data.nights.length ? html`<div class="empty">No nights left to plan this week.</div>` : html`
     <div class="table-scroll">

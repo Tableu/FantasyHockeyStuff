@@ -58,6 +58,21 @@ class Book:
                                   if m.get("add_id") is not None])
         return [{**m, "index": index.get((m["picked"], m["add"]))} for m in placed]
 
+    def no_plans(self, plans: list) -> str | None:
+        """Why the Plan tab has no plan chips (None when it has some): the planner found no pickup
+        whose week gain clears its bar -- the best one named, with its gain against the bar."""
+        if plans:
+            return None
+        if self.plan.get("stream_mode") != "week":
+            return "Streaming decides a day at a time (strategy mode 'daily'): no week plans."
+        when = "next" if self.which == "next" else "this"
+        best = max(self.plan.get("options") or [], key=lambda o: o.get("edge", float("-inf")), default=None)
+        if best is None:
+            return f"No week plans {when} week: no free agent worth a move."
+        drop = f" for {best['drop']}" if best.get("drop") else ""
+        return (f"No week plans {when} week: no pickup clears its bar. Best: {best['add']}{drop}, "
+                f"{best['gain']:+.1f} pts vs a {best['bar']:.1f} bar.")
+
     def view(self, slot_rows: list, show: str | None = None) -> dict:
         """`show`: a week plan's label (the Plan tab's chips, the user's design 2026-10-30) -- its week
         drawn on the calendar, its picks and pickups that are not yours marked `ghost`, to take
@@ -100,7 +115,7 @@ class Book:
         plans = [{"label": p["label"],
                   "points": round(b.week_points([m for m in self.plan_moves(p) if m["problem"] is None]), 2)}
                  for p in self.plans if p.get("moves")]
-        return {"shown": shown["label"] if shown else None, "plans": plans,
+        return {"shown": shown["label"] if shown else None, "plans": plans, "no_plans": self.no_plans(plans),
                 "mine_points": round(b.week_points(b.made(self.moves)), 2),
                 "which": self.which, "has_next": bool(self.plan.get("next_week_plans")),
                 "week": self.plan.get("week"), "next_week": self.plan.get("next_week"),
