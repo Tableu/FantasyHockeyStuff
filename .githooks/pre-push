@@ -1,0 +1,29 @@
+#!/bin/sh
+# Before a push: Fantasy Hockey AI/Server/check.py (the offline tests, the settings fixtures check
+# and one rehearsal plan on local data), when the commits being pushed touch "Fantasy Hockey AI/".
+# Turned on per clone with:  git config core.hooksPath .githooks
+# Skip it once (on purpose):  git push --no-verify
+
+zero=0000000000000000000000000000000000000000
+touched=no
+while read local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue                       # a branch being deleted
+    if [ "$remote_sha" = "$zero" ]; then
+        range="$local_sha --not --remotes"                       # a new branch: what no remote has
+    else
+        range="$remote_sha..$local_sha"
+    fi
+    if git log --format= --name-only $range -- "Fantasy Hockey AI/" | grep -q .; then
+        touched=yes
+    fi
+done
+
+[ "$touched" = no ] && exit 0
+
+cd "$(git rev-parse --show-toplevel)/Fantasy Hockey AI/Server" || exit 1
+echo "pre-push: running check.py (skip once with git push --no-verify)"
+if command -v python >/dev/null 2>&1; then py=python; else py=python3; fi
+"$py" check.py
+status=$?
+[ $status -ne 0 ] && echo "pre-push: check.py failed; push stopped"
+exit $status

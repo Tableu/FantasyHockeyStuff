@@ -231,7 +231,9 @@ Change locally, check, then push. A push only runs the tests on GitHub; it never
 - **`python check.py`** runs three checks before a push: the tests, `sync_league_settings.py
   --check`, and one rehearsal plan of beagles on fixtures/beagles/fake_league.json. The rehearsal
   uses today's real models and features and saves to a temporary reports folder. `--fast` skips the
-  rehearsal.
+  rehearsal. It is also the git pre-push hook (`.githooks/pre-push`), which runs it whenever the
+  commits being pushed touch `Fantasy Hockey AI/`. Turn the hook on once per clone with
+  `git config core.hooksPath .githooks`; skip it for one push with `git push --no-verify`.
 - **CI** (`.github/workflows/server-tests.yml`) builds the production image and runs the tests and
   the settings check inside it on every push touching `Fantasy Hockey AI/`, so a dependency missing
   from requirements.txt fails there.
