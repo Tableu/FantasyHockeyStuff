@@ -1,27 +1,31 @@
 #!/usr/bin/env python
 """The phone app's server (Fantasy Hockey Phone App Plan, Phase 1.5): the plan refreshes behind a
-small HTTP API, which the app (app/) shows. Every active league in
-Settings/leagues/ (beagles, espn-la), one refresh at a time.
+small HTTP API, which the app (app/) shows, one job at a time. Open to anyone since 2026-11-15:
+a browser adds its own leagues (POST /leagues) and its cookie (auth.py) is all that ties them to
+it (users.py); every user is treated the same.
 
-    python server.py                                   # the active leagues, today, 127.0.0.1:8000
-    python server.py --league beagles                  # one league (repeat --league for several)
+    python server.py                                   # the users' leagues, today, 127.0.0.1:8000
     python server.py --host 0.0.0.0                    # in the container (compose publishes 8000)
     python server.py --league beagles --date 2026-09-29 \
-        --league-file fixtures/beagles/fake_league.json --skip-snapshots --no-auto   # rehearsal
+        --league-file fixtures/beagles/fake_league.json --skip-snapshots --no-daily   # rehearsal
 
-Every call but the job's takes ?league=<name> (default: the first league served, beagles):
+Every league call takes ?league=<name> (default: the caller's first league) and answers 404 for a
+league the caller's cookie doesn't link -- with {"add": true} when it links none:
 
     GET  /plan                 the league's newest plan for the plan's day -- today, or tomorrow once
                                every game today has started: {league, file, saved_at, plan}
-    POST /refresh {mode, scope}   mode (planpass.Planner.run): 'full' (reports with line charts,
-                               projections, leagues read again), 'quick' (the same without line
-                               charts), 'news' (reports and projections, leagues planned on their
-                               kept read), 'league' (leagues read again, no reports), 'plan' (your
-                               choices changed: planned on the kept read, about 2 s). scope:
-                               'league' (the ?league= one) or 'all'; default 'all' for full and
-                               quick, 'league' otherwise. Returns the job. A tap while a refresh
-                               runs joins it (a 'plan' is queued behind it); the auto window plans
-                               every league
+    POST /refresh {mode}       the ?league= league refreshed, mode (planpass.Planner.run): 'full'
+                               (reports with line charts, projections, league read again), 'quick'
+                               (the same without line charts), 'news' (reports and projections,
+                               planned on the kept read), 'league' (read again, no reports), 'plan'
+                               (your choices changed: planned on the kept read, about 2 s). Fresh
+                               reports are reused (planpass.FRESH_FOR). Returns the job; asked for
+                               while one runs, the queued job it joined. 429 within TAP_LEAGUE_S of
+                               the league's last tap or TAP_USER_S of the user's ('plan' excepted)
+    POST /leagues/preview {url, espn_s2?, swid?}   a league's teams and settings from its link
+    POST /leagues {url, team_id, espn_s2?, swid?}  your team added (and this browser's cookie made)
+    GET  /leagues, DELETE /leagues/{name}          your leagues; one unlinked (deleted once nobody has it)
+    POST /forget               this browser's cookie dropped
     GET  /jobs/{id}?after=n    the job's state and its progress lines after line n
     GET  /jobs                 the recent jobs, newest first, without their lines (the app's refresh log)
     GET  /status               the leagues served (each with its team), the day, the running job, when
@@ -66,18 +70,18 @@ Every call but the job's takes ?league=<name> (default: the first league served,
     GET  /matchup/players      the Matchup's head-to-head: every player either side held this week,
                                each day's slot (the platform's), projection, game and points (headtohead.py);
                                live_win: the plan's P(win) carried through tonight's games (livewin.py)
-    POST /login {password}     a session cookie for the app (auth.py); 401 wrong, 429 too many tries
-    POST /logout               ends this phone's session
     GET  /app/                 the phone app (Server/app/: static files, it calls the API above)
 
 A refresh is planpass.Planner's: the snapshots and tonight's projections once, then each league's
 read, plan and saved plan files in a child process that exits after -- so the server's memory does
 not grow with the leagues it plans -- and one league's failure (its platform down) leaves the
-others' plans. The auto window runs here: a refresh about 30 minutes before each group of games, once
-per group -- Full when the line charts are none today or over 4 h old, else Quick -- for every league, and one more once today's last game has started -- the plan is then
-tomorrow's (moves, lineup and projections), since tonight has no lineup left to set. The live games' NHL feeds are fetched once for all leagues; each league
-sees them with its own rosters and scoring. Every call but /login, /logout and the app's files needs
-a session (the app's password; auth.py, `python auth.py set-password` first).
+others' plans. The daily pass runs here (DAILY_JOB): a Full refresh of every league a user came by in
+the last 14 days, DAILY_LEAD before the day's first game and no later than DAILY_FALLBACK, then the
+cleanup of users and leagues long gone (users.cleanup); beyond it a league is planned on its users'
+taps. (Until 2026-11-15 an auto window re-planned every league before each group of games.) Once
+today's last game has started the plan is tomorrow's (moves, lineup and projections), since tonight
+has no lineup left to set. The live games' NHL feeds are fetched once for all leagues; each league
+sees them with its own rosters and scoring.
 """
 
 import argparse
@@ -85,6 +89,7 @@ import concurrent.futures
 import datetime as dt
 import itertools
 import json
+import re
 import sys
 import threading
 import time
@@ -93,11 +98,12 @@ from pathlib import Path
 import pandas as pd  # noqa: E402
 import requests  # noqa: E402
 import uvicorn  # noqa: E402
-from fastapi import FastAPI, HTTPException  # noqa: E402
+from fastapi import FastAPI, HTTPException, Request, Response  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 import auth  # noqa: E402
+import users  # noqa: E402
 import corelayer  # noqa: E402,F401 -- puts Core/ on sys.path; see corelayer.py
 import choices  # noqa: E402
 import games as live_games  # noqa: E402
@@ -111,15 +117,48 @@ import roster  # noqa: E402
 import suggestions  # noqa: E402
 import week as week_module  # noqa: E402
 import paths  # noqa: E402
+import league_secrets  # noqa: E402
 import planpass  # noqa: E402
+import platforms  # noqa: E402
+import platforms.espn  # noqa: E402,F401
+import platforms.fleaflicker  # noqa: E402,F401
 import players as players_module  # noqa: E402
 import scheduled  # noqa: E402
 import simlayer  # noqa: E402
+import sync_league_settings  # noqa: E402
 
 APP = Path(__file__).resolve().parent / "app"     # the phone app's static files, served at /app/
-AUTO_CHECK_S = 60               # how often the auto window looks at the clock
-LINES_MAX_AGE = dt.timedelta(hours=4)   # an auto window runs Full when the line charts are older
+JOBS_CHECK_S = 60               # how often the jobs loop looks at the clock
 JOBS_KEPT = 20                  # finished jobs /jobs still answers for
+DAILY_JOB = "daily_plans"       # the daily pass: every league planned once a day (Worker._daily)
+DAILY_LEAD = dt.timedelta(minutes=30)   # ... this long before the day's first game,
+DAILY_FALLBACK = dt.time(15, 30)        # ... and no later than this (local)
+TAP_LEAGUE_S = 5 * 60           # one refresh per league per 5 min, whoever asks
+TAP_USER_S = 2 * 60             # one per user per 2 min, across its leagues
+LEAGUES_PER_USER = 3
+LEAGUES_MAX = 40                # leagues the server plans, all users together
+ADD_TRIES_PER_HOUR = 5          # add-league checks from one address (each reads a platform)
+PREVIEW_KEEP_S = 10 * 60        # a league looked up is kept this long for the add that follows
+NHL_API = "https://api-web.nhle.com/v1"
+_first_pucks: dict = {}         # date -> its first puck (local, naive) or None
+
+
+def first_puck(day: dt.date):
+    """The day's first NHL game's start, local time (naive), from the NHL's schedule; None
+    when it has none or can't be read (read again next time)."""
+    if day in _first_pucks:
+        return _first_pucks[day]
+    try:
+        week = requests.get(f"{NHL_API}/schedule/{day.isoformat()}", timeout=20).json()["gameWeek"]
+    except (requests.RequestException, ValueError, KeyError):
+        return None
+    starts = [g["startTimeUTC"] for d in week if d.get("date") == day.isoformat() for g in d.get("games", [])
+              if g.get("gameType") in (2, 3) and g.get("startTimeUTC")]
+    first = None
+    if starts:
+        first = dt.datetime.fromisoformat(min(starts).replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
+    _first_pucks[day] = first
+    return first
 
 
 def utc_now() -> dt.datetime:
@@ -131,50 +170,136 @@ def iso(when) -> str | None:
 
 
 class Job:
-    def __init__(self, number: int, mode: str, by: str):
+    def __init__(self, number: int, mode: str, by: str, only=None, state: str = "running"):
         self.id, self.mode, self.by = str(number), mode, by
-        self.state = "running"          # running -> done | failed
+        self.state = state              # queued -> running -> done | failed
         self.lines: list[str] = []
-        self.started, self.finished = dt.datetime.now(), None
+        self.started, self.finished = (dt.datetime.now() if state == "running" else None), None
         self.error = None
         self.plan_files = {}            # league -> the plan file this job saved for it
-        self.only = None                # the job's leagues (a tap's scope, or whose choices changed); None: all
+        self.league_errors = {}         # league -> why it failed (shown only to its users)
+        self.only = list(only or [])    # the leagues it plans (none: a scheduled data job)
+        self.fresh = False              # every report fetched anew (the daily pass, an added league)
 
     def echo(self, text):
         self.lines.append(f"{dt.datetime.now():%H:%M:%S}  {text}")
 
-    def view(self, after=0) -> dict:
-        return {"id": self.id, "mode": self.mode, "by": self.by, "state": self.state,
-                "started": iso(self.started), "finished": iso(self.finished), "error": self.error,
-                "plan_files": self.plan_files, "lines": self.lines[after:], "next": len(self.lines)}
+    def view(self, after=0, mine=None) -> dict:
+        """`mine`: the leagues the caller links. A job for none of them is shown without its
+        lines, its leagues or its files -- another user's leagues are not this caller's to see."""
+        shown = mine is None or not self.only or bool(set(self.only) & set(mine))
+        lines = self.lines if shown else []
+        errors = self.league_errors
+        if shown and mine is not None and self.only:
+            # A line about another user's league -- one that starts with its name: "fl-123-4: plan:
+            # ...", "fl-123-4 settings: ..." -- is left out, and so is its error.
+            others = {name for name in self.only if name not in mine}
+            lines = [line for line in lines if line_league(line) not in others]
+            errors = {name: e for name, e in errors.items() if name not in others}
+        error = "; ".join([*([self.error] if self.error else []),
+                           *(f"{name}: {e}" for name, e in errors.items())]) or None
+        return {"id": self.id, "mode": self.mode,
+                "by": self.by if shown else "another user's refresh", "state": self.state,
+                "started": iso(self.started), "finished": iso(self.finished),
+                "error": error if shown else None,
+                "plan_files": {k: v for k, v in self.plan_files.items() if mine is None or k in mine},
+                "lines": lines[after:], "next": len(lines), "mine": shown}
+
+
+def line_league(line: str) -> str:
+    """The league a progress line is about: its first word after the time, up to ':' or ' '
+    ("21:32:01  fl-123-4: plan: ..." -> "fl-123-4")."""
+    text = line.split("  ", 1)[1] if "  " in line else line
+    return re.split(r"[: ]", text, maxsplit=1)[0]
+
+
+# How a refresh tapped while another is waiting merges with it: the bigger refresh, for both
+# sets of leagues (news + league together is quick: the reports and a fresh read).
+MODE_RANK = {"plan": 0, "league": 1, "news": 2, "quick": 3, "full": 4}
+
+
+def merged_mode(a: str, b: str) -> str:
+    if {a, b} == {"news", "league"}:
+        return "quick"
+    return a if MODE_RANK[a] >= MODE_RANK[b] else b
 
 
 class Worker:
-    """Runs one refresh at a time on its own thread, for every league served; keeps the day's
-    Planner (when each step last ran) and the recent jobs. The leagues are planned in a child
-    process per refresh (planpass.plan_in_child), so this process stays small."""
+    """Runs one job at a time on its own thread -- a refresh of some users' leagues, or a scheduled
+    job -- and keeps the day's Planner (when each step last ran) and the recent jobs. A refresh
+    asked for while one runs waits as one queued job, which every later ask joins (its leagues
+    added). The leagues are planned in a child process per refresh (planpass.plan_in_child), so
+    this process stays small.
+
+    Every user is treated the same (the user, 2026-11-15): a league is served to the users whose
+    cookie links it (users.py), and planned in the daily pass and on its users' taps."""
 
     def __init__(self, args):
         self.args = args
-        names = args.league or [league.name for league in leagues.active()]
-        self.leagues = {name: leagues.load(name) for name in names}
+        # --league: leagues every caller sees, cookie or not -- a rehearsal's (--league-file) or a
+        # test server's; none on the real server, where a caller sees the leagues it added.
+        self.shown_to_all = list(args.league or [])
+        self.cache: dict = {}           # league name -> leagues.League, loaded on first use
+        self.caches: list = []          # the app's per-league objects (make_app's PerLeague)
         self.planner = None
         self.jobs: dict[str, Job] = {}
         self.current: Job | None = None
+        self.queued: Job | None = None  # the refresh waiting for the running job
         self.numbers = itertools.count(1)
         self.lock = threading.Lock()
-        self.windows_done = set()       # puck times the auto window re-planned since it started
-        self.pending = set()            # leagues whose choices changed during a running job
-        self.queued = None              # (mode, only, by): a refresh tapped during a scheduled job
+        self.tapped: dict = {}          # league name -> when its users last asked for a refresh
+        self.tapped_by: dict = {}       # user id -> when it last asked
+        self.added_by_ip: dict = {}     # address -> the times it added a league (ADD_TRIES_PER_HOUR)
         self.scheduled_state = scheduled.load_state()   # job -> the scheduled time it last ran for
 
+    # ---------- leagues and who sees them ----------
+
+    def loaded(self, name: str):
+        league = self.cache.get(name)
+        if league is None:
+            league = self.cache[name] = leagues.load(name)
+        return league
+
+    def forget(self, name: str | None = None):
+        """A league's loaded objects dropped (None: every league's) -- it was deleted, or its
+        settings may have changed (the daily pass re-detects them)."""
+        for cache in [self.cache, *self.caches]:
+            if name is None:
+                cache.clear()
+            else:
+                cache.pop(name, None)
+
+    def mine(self) -> list:
+        """The leagues this call's caller sees: those its cookie links, and --league's."""
+        names = auth.leagues_of(auth.viewer.get())
+        return list(dict.fromkeys(names + self.shown_to_all))
+
     def league(self, name=None):
-        """A league served, by name (None: the first); a 404 for one it does not serve."""
+        """A league the caller sees, by name (None: its first); a 404 for any other -- the same
+        as for no such league, so another user's league names nothing. A caller with no league
+        gets a 404 saying so (`add`: the app shows its add-league screen)."""
+        mine = self.mine()
+        if not mine:
+            raise HTTPException(404, {"detail": "no league yet: add one", "add": True})
         if name is None:
-            return next(iter(self.leagues.values()))
-        if name not in self.leagues:
-            raise HTTPException(404, f"this server plans {', '.join(self.leagues)}, not {name}")
-        return self.leagues[name]
+            return self.loaded(mine[0])
+        if name not in mine:
+            raise HTTPException(404, f"no league {name} here")
+        return self.loaded(name)
+
+    def daily_leagues(self) -> list:
+        """The leagues the daily pass plans: every league a user came by in the last
+        users.ACTIVE_DAYS days, and --league's."""
+        names = list(dict.fromkeys(users.active_leagues(self.today()) + self.shown_to_all))
+        out = []
+        for name in names:
+            try:
+                out.append(self.loaded(name))
+            except (SystemExit, ValueError) as error:
+                print(f"daily pass: {name} not loaded ({error})", file=sys.stderr)
+        return out
+
+    # ---------- the clock ----------
 
     def today(self) -> dt.date:
         return dt.date.fromisoformat(self.args.date) if self.args.date else dt.date.today()
@@ -190,25 +315,60 @@ class Worker:
     def now(self) -> dt.datetime:
         return dt.datetime.fromisoformat(self.args.now) if self.args.now else utc_now()
 
-    def start(self, mode: str, by: str = "tap", only=None) -> Job:
-        """A new refresh or scheduled job, or the running one if there is one. A 'plan' (`only`:
-        the leagues whose choices changed) asked for while one runs is queued: it starts when that
-        one ends, with the choices saved by then. So is a refresh tapped during a scheduled job (the
-        nightly import): it runs after it, on what it imported, instead of joining it."""
+    # ---------- taps ----------
+
+    def tap_wait(self, uid, names) -> int:
+        """Seconds before this user may refresh these leagues again (0: now): one refresh per
+        league per TAP_LEAGUE_S, one per user per TAP_USER_S, whoever's league it is."""
+        now = time.time()
+        waits = [self.tapped.get(name, 0) + TAP_LEAGUE_S - now for name in names]
+        if uid is not None:
+            waits.append(self.tapped_by.get(uid, 0) + TAP_USER_S - now)
+        return max(0, int(max(waits, default=0)) + 1) if max(waits, default=0) > 0 else 0
+
+    def tapped_now(self, uid, names):
+        now = time.time()
+        for name in names:
+            self.tapped[name] = now
+        if uid is not None:
+            self.tapped_by[uid] = now
+
+    # ---------- jobs ----------
+
+    def start(self, mode: str, by: str = "tap", only=None, fresh: bool = False) -> Job:
+        """A refresh of the leagues `only`, or a scheduled job (`only` None). Asked for while a job
+        runs, a refresh waits as the one queued job, which later asks join: the bigger refresh
+        (merged_mode) for every league asked for. A scheduled job asked for while one runs is the
+        jobs loop's to start again next minute (the daily pass too); it returns the running one.
+        `fresh`: every report fetched anew rather than reused while fresh (the daily pass, an
+        added league's first refresh; a tap reuses them)."""
+        only = list(only or [])
         with self.lock:
             if self.current is not None:
-                if mode == "plan":
-                    self.pending.update(only or self.leagues)
-                elif self.current.mode in scheduled.JOBS and mode not in scheduled.JOBS:
-                    self.queued = (mode, only, by)
-                return self.current
-            job = Job(next(self.numbers), mode, by)
-            job.only = only
-            self.jobs[job.id] = job
-            for old in list(self.jobs)[:-JOBS_KEPT]:
-                del self.jobs[old]
-            self.current = job
+                if mode in scheduled.JOBS or mode == DAILY_JOB:
+                    return self.current
+                if self.queued is None:
+                    self.queued = self._new_job(mode, by, only, state="queued")
+                    self.queued.fresh = fresh
+                else:
+                    q = self.queued
+                    q.mode = merged_mode(q.mode, mode)
+                    q.only = list(dict.fromkeys(q.only + only))
+                    q.fresh = q.fresh or fresh
+                    if by not in q.by:
+                        q.by = f"{q.by}; {by}"
+                return self.queued
+            job = self.current = self._new_job(mode, by, only)
+            job.fresh = fresh
         threading.Thread(target=self._work, args=(job,), daemon=True).start()
+        return job
+
+    def _new_job(self, mode, by, only, state="running") -> Job:
+        job = Job(next(self.numbers), mode, by, only, state)
+        self.jobs[job.id] = job
+        for old in list(self.jobs)[:-JOBS_KEPT]:
+            if self.jobs[old] not in (self.current, self.queued, job):
+                del self.jobs[old]
         return job
 
     def _work(self, job: Job):
@@ -216,18 +376,23 @@ class Worker:
             day = self.day()
             if self.planner is None or self.planner.day != day:
                 a = self.args
-                self.planner = planpass.Planner(list(self.leagues.values()), day, a.league_file,
-                                                a.platform_season, a.skip_snapshots)
+                self.planner = planpass.Planner([], day, a.league_file, a.platform_season, a.skip_snapshots)
             if job.mode in scheduled.JOBS:
                 scheduled.run(job.mode, self.today(), job.echo, self.args.jobs_db)
                 job.state = "done"
                 return
-            results = self.planner.run(job.mode, self.now(), job.echo, only=job.only, today=self.today())
-            failed = {name: r for name, r in results.items() if isinstance(r, BaseException)}
-            job.plan_files = {name: r for name, r in results.items() if name not in failed}
-            if failed:
-                job.error = "; ".join(f"{name}: {type(e).__name__}: {e}" for name, e in failed.items())
-            job.state = "failed" if len(failed) == len(results) else "done"
+            if job.mode == DAILY_JOB:
+                self._daily(job)
+                return
+            chosen = []
+            for name in job.only:
+                try:
+                    chosen.append(self.loaded(name))
+                except (SystemExit, ValueError) as error:
+                    job.echo(f"{name}: not planned ({error})")
+            results = self.planner.run(job.mode, self.now(), job.echo, today=self.today(), leagues=chosen,
+                                       reuse=not job.fresh)
+            self._finish(job, results)
         except BaseException as error:  # SystemExit from a step included: report it, keep serving
             job.error = f"{type(error).__name__}: {error}"
             job.echo(job.error)
@@ -235,92 +400,93 @@ class Worker:
         finally:
             job.finished = dt.datetime.now()
             with self.lock:
-                self.current = None
-                queued, self.pending = sorted(self.pending), set()
-                tapped, self.queued = self.queued, None
-            if tapped:
-                self.start(tapped[0], tapped[2], only=tapped[1])
-            elif queued:
-                self.start("plan", "choices", only=queued)
+                self.current, nxt = None, self.queued
+                self.queued = None
+                if nxt is not None:
+                    nxt.state, nxt.started = "running", dt.datetime.now()
+                    self.current = nxt
+            if nxt is not None:
+                threading.Thread(target=self._work, args=(nxt,), daemon=True).start()
 
-    def planned_for(self, window) -> bool:
-        """Whether this group of games already has its plans: re-planned by the auto window since
-        the server started, or (on the real clock) every league with a plan saved inside its lead
-        -- so a restart does not re-run a window the server ran before it, and a tap there counts."""
-        if window in self.windows_done:
-            return True
-        if self.args.now:                   # rehearsal: the files' real times are not its clock
-            return False
-        since = (window - planpass.WINDOW_LEAD).to_pydatetime()
+    def _finish(self, job: Job, results: dict):
+        failed = {name: r for name, r in results.items() if isinstance(r, BaseException)}
+        job.plan_files = {name: r for name, r in results.items() if name not in failed}
+        job.league_errors = {name: f"{type(e).__name__}: {e}" for name, e in failed.items()}
+        job.state = "failed" if results and len(failed) == len(results) else "done"
 
-        def saved_since(league):
-            return any(dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc).replace(tzinfo=None) >= since
-                       for f in planpass.saved_plans(league, self.day()))
-        return all(saved_since(league) for league in self.leagues.values())
+    def _daily(self, job: Job):
+        """The daily pass: a full refresh of every league a user came by lately, then the
+        cleanup of users long gone and the leagues nobody links (users.cleanup)."""
+        chosen = self.daily_leagues()
+        job.only = [league.name for league in chosen]
+        job.echo(f"daily pass: {len(chosen)} league(s)")
+        results = (self.planner.run("full", self.now(), job.echo, today=self.today(), leagues=chosen, reuse=False)
+                   if chosen else {})
+        self._finish(job, results)
+        self.forget()                   # settings re-detected: each league loaded afresh
+        try:
+            gone = users.cleanup(self.today())
+            for name in [g.split(" ", 1)[1] for g in gone if g.startswith("league ")]:
+                self.forget(name)
+            if gone:
+                job.echo("cleanup: " + ", ".join(gone))
+        except Exception as error:  # noqa: BLE001 -- a failed cleanup waits for tomorrow
+            job.echo(f"cleanup failed: {type(error).__name__}: {error}")
 
-    def lines_age(self) -> dt.timedelta | None:
-        """How old the line charts this server fetched today are; None: none today (or since a
-        restart, which forgets -- that window takes them again, ~15 s)."""
-        fetched = self.planner.last.get("lines") if self.planner is not None else None
-        if fetched is None or fetched.date() != dt.date.today():
+    def daily_due(self, now: dt.datetime):
+        """The daily pass's time today once it has passed and the pass has not run today:
+        DAILY_LEAD before the day's first game (the NHL's schedule), but no later than
+        DAILY_FALLBACK -- also the time when the schedule can't be read or has no games."""
+        at = dt.datetime.combine(now.date(), DAILY_FALLBACK)
+        first = first_puck(now.date())
+        if first is not None:
+            at = min(at, first - DAILY_LEAD)
+        ran = self.scheduled_state.get(DAILY_JOB)
+        if now < at or (ran is not None and dt.datetime.fromisoformat(ran).date() == now.date()):
             return None
-        return dt.datetime.now() - fetched
+        return at
 
     def jobs_loop(self):
-        """The daily jobs (scheduled.py), checked each minute: one that is due starts when nothing
-        else runs, nightly first; its scheduled time is kept so a restart does not run it again."""
+        """The daily jobs (scheduled.py) and the daily pass, checked each minute: one that is due
+        starts when nothing else runs, nightly first; its scheduled time is kept so a restart does
+        not run it again."""
         shift = dt.timedelta(minutes=self.args.jobs_shift)
         while True:
             try:
                 now = dt.datetime.now()
-                for name in scheduled.JOBS:
-                    at = scheduled.due(name, now, self.scheduled_state, shift)
-                    if at is None or self.current is not None:
-                        continue
+                due = None
+                if self.args.jobs:
+                    for name in scheduled.JOBS:
+                        at = scheduled.due(name, now, self.scheduled_state, shift)
+                        if at is not None:
+                            due = (name, at, scheduled.JOBS[name]["label"])
+                            break                     # one at a time, nightly first
+                if due is None and not self.args.no_daily:
+                    at = self.daily_due(now)
+                    if at is not None:
+                        due = (DAILY_JOB, at, "Daily plans")
+                if due is not None and self.current is None:
+                    name, at, label = due
                     late = now - at > dt.timedelta(minutes=10)
-                    by = f"{'catch-up' if late else 'scheduled'}: {scheduled.JOBS[name]['label']} {at:%a %H:%M}"
+                    by = f"{'catch-up' if late else 'scheduled'}: {label} {at:%a %H:%M}"
                     job = self.start(name, by=by)
                     if job.mode == name and job.by == by:     # ours, not one already running
                         self.scheduled_state[name] = at.isoformat()
                         scheduled.save_state(self.scheduled_state)
-                    break                                     # one at a time, nightly first
             except Exception as error:  # noqa: BLE001 -- a bad check must not end the loop
                 print(f"scheduled job check failed: {type(error).__name__}: {error}", file=sys.stderr)
-            time.sleep(AUTO_CHECK_S)
+            time.sleep(JOBS_CHECK_S)
 
-    def auto_loop(self):
-        """A refresh ~30 minutes before each group of games, once per group: Full when the line
-        charts are stale (none today, or older than LINES_MAX_AGE -- most days the first window,
-        after the morning skates; a matinee day's later ones too), else Quick."""
-        while True:
-            try:
-                window = planpass.next_window(self.day(), self.now())
-                if window is not None and self.current is None and not self.planned_for(window):
-                    self.windows_done.add(window)
-                    age = self.lines_age()
-                    mode = "full" if age is None or age > LINES_MAX_AGE else "quick"
-                    why = ("" if mode == "quick" else " (no line charts today)" if age is None
-                           else f" (line charts {age.total_seconds() / 3600:.0f} h old)")
-                    self.start(mode, by=f"auto: games at {window:%H:%M} UTC{why}")
-                # Once today's last game starts, tomorrow's plan, once (or on a restart before
-                # any plan for tomorrow was saved).
-                day = self.day()
-                if (day != self.today() and self.current is None and day not in self.windows_done
-                        and not all(planpass.saved_plans(league, day) for league in self.leagues.values())):
-                    self.windows_done.add(day)
-                    self.start("quick", by=f"auto: today's games have started, planning {day:%a}")
-            except Exception as error:  # noqa: BLE001 -- a bad check must not end the loop
-                print(f"auto window check failed: {type(error).__name__}: {error}", file=sys.stderr)
-            time.sleep(AUTO_CHECK_S)
+    # ---------- plans ----------
 
     def newest_plan(self, league):
         """The newest plan for the plan's day -- or, once it is tomorrow and none is saved yet,
-        today's."""
+        today's -- or, before any today (the daily pass plans once a day), the newest saved."""
         for day in dict.fromkeys((self.day(), self.today())):
             files = planpass.saved_plans(league, day)
             if files:
                 return files[-1]
-        return None
+        return planpass.newest_saved(league)
 
     def games_plan(self, league):
         """The newest plan for today, whose games the live views show: once they have all started
@@ -341,10 +507,14 @@ class AppFiles(StaticFiles):
 
 
 class Refresh(BaseModel):
-    mode: str = "quick"
-    # Which leagues: "league" the ?league= one, "all" every league served. Default: "all" for
-    # full and quick, "league" for news, league and plan.
-    scope: str | None = None
+    mode: str = "quick"             # for the ?league= league (every refresh is one league's)
+
+
+class LeagueAsk(BaseModel):
+    url: str                        # the league's page on Fleaflicker or ESPN
+    team_id: int | None = None      # POST /leagues: the team that is yours
+    espn_s2: str | None = None      # a private ESPN league's cookies (league_secrets.py)
+    swid: str | None = None
 
 
 class Choices(BaseModel):
@@ -377,22 +547,37 @@ class Pick(BaseModel):
 
 def make_app(worker: Worker) -> FastAPI:
     app = FastAPI(title="Fantasy hockey plan server", docs_url=None, redoc_url=None, openapi_url=None)
-    auth.install(app, auth.Login())
+    issue = auth.install(app, auth.Cookies())
     store = live_games.FeedStore(livepaths.REPORTS_DIR / "goals")
     threading.Thread(target=store.watch_loop, daemon=True).start()
-    scoresets = {name: simlayer.load_scoreset(league.scoring) for name, league in worker.leagues.items()}
+
+    class PerLeague(dict):
+        """A league's object, made on first use (leagues come and go as users add them)."""
+
+        def __init__(self, make):
+            super().__init__()
+            self.make = make
+            worker.caches.append(self)
+
+        def __missing__(self, name):
+            value = self[name] = self.make(worker.loaded(name))
+            return value
+
+    scoresets = PerLeague(lambda league: simlayer.load_scoreset(league.scoring))
     # Each league's lineup slots in its own order (C C LW LW ... G G), as the window's calendar,
     # and the lineup solver's order and fits (weekbook.Week, as the window's).
-    configs = {name: league_module.load(league.rules) for name, league in worker.leagues.items()}
-    slot_rows = {name: [slot for slot, count in config.active_slots.items() for _ in range(count)]
-                 for name, config in configs.items()}
-    views = {name: live_games.Games(lambda league=league: worker.games_plan(league),
-                                    scoresets[name], paths.players(), store)
-             for name, league in worker.leagues.items()}
+    configs = PerLeague(lambda league: league_module.load(league.rules))
+    slot_rows = PerLeague(lambda league: [slot for slot, count in configs[league.name].active_slots.items()
+                                          for _ in range(count)])
+    views = PerLeague(lambda league: live_games.Games(lambda: worker.games_plan(league),
+                                                      scoresets[league.name], paths.players(), store))
 
     def nhl(league, call, *args):
-        """A live-games call through the league's view; the NHL unreachable is a 502, not a crash."""
-        view = views[worker.league(league).name]
+        """A live-games call through the league's view; the NHL unreachable is a 502, not a crash.
+        `league`: a name (checked against the caller's leagues) or a League already checked -- what
+        a worker thread passes, since the caller (auth.viewer) is not known on it."""
+        name = league.name if isinstance(league, leagues.League) else worker.league(league).name
+        view = views[name]
         try:
             return getattr(view, call)(*args)
         except requests.RequestException as error:
@@ -618,7 +803,7 @@ def make_app(worker: Worker) -> FastAPI:
                 for pid, p in headtohead.people(plans).items()]
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             boxes = dict(zip([d.isoformat() for d in dates],
-                             pool.map(lambda d: nhl(league, "day", d, held)["players"], dates)))
+                             pool.map(lambda d: nhl(chosen, "day", d, held)["players"], dates)))
         workbench = (suggestions.plans_shown(today_plan, "this") or [{}])[0].get("workbench")
         # The projection the Overview shows (week_projection); the newest plan only while it is
         # still this week's -- on the week's last night it can be next week's.
@@ -665,44 +850,241 @@ def make_app(worker: Worker) -> FastAPI:
 
     @app.post("/refresh")
     def refresh(body: Refresh, league: str | None = None):
+        """A refresh of the ?league= league (planpass.Planner.run's modes). Anyone's league is
+        refreshed alike: once per TAP_LEAGUE_S per league and TAP_USER_S per user, a 429 sooner
+        -- but a 'plan' (your choices changed: planned on the kept read) any time."""
         if body.mode not in planpass.MODES:
             raise HTTPException(422, f"mode must be one of {', '.join(planpass.MODES)}")
-        scope = body.scope or ("all" if body.mode in ("full", "quick") else "league")
-        if scope not in ("league", "all"):
-            raise HTTPException(422, "scope must be 'league' or 'all'")
-        only = [worker.league(league).name] if scope == "league" else None
-        return worker.start(body.mode, only=only).view()
+        chosen = worker.league(league)
+        uid = auth.viewer.get()
+        if body.mode != "plan":
+            wait = worker.tap_wait(uid, [chosen.name])
+            if wait:
+                raise HTTPException(429, f"refreshed a moment ago: try again in {(wait + 59) // 60} min")
+            worker.tapped_now(uid, [chosen.name])
+        return worker.start(body.mode, by="choices" if body.mode == "plan" else "tap",
+                            only=[chosen.name]).view(mine=worker.mine())
 
     @app.get("/jobs/{job_id}")
     def get_job(job_id: str, after: int = 0):
         job = worker.jobs.get(job_id)
         if job is None:
             raise HTTPException(404, f"no job {job_id}")
-        return job.view(after)
+        return job.view(after, mine=worker.mine())
 
     @app.get("/jobs")
     def get_jobs():
-        return [job.view(after=len(job.lines)) for job in reversed(list(worker.jobs.values()))]
+        """The recent jobs that planned the caller's leagues, and the scheduled data jobs."""
+        mine = worker.mine()
+        shown = [job.view(mine=mine) for job in reversed(list(worker.jobs.values()))]
+        return [{**v, "lines": []} for v in shown if v["mine"]]
 
     @app.get("/status")
     def status(league: str | None = None):
         chosen, planner, args = worker.league(league), worker.planner, worker.args
+        mine = worker.mine()
         path = worker.newest_plan(chosen)
         today = planner is not None and planner.day == worker.day()
         last = {**planner.last, **planner.league_last.get(chosen.name, {})} if today else {}
+        running, queued = worker.current, worker.queued
+        teams = {}
+        for name in mine:
+            try:
+                lg = worker.loaded(name)
+                teams[name] = {"team": lg.team_name, "platform": lg.platform}
+            except (SystemExit, ValueError):
+                continue
         return {
-            "league": chosen.name, "leagues": list(worker.leagues), "day": worker.day().isoformat(),
-            "teams": {name: {"team": lg.team_name, "platform": lg.platform} for name, lg in worker.leagues.items()},
-            "job": None if worker.current is None else worker.current.view(after=len(worker.current.lines)),
+            "league": chosen.name, "leagues": list(teams), "day": worker.day().isoformat(),
+            "teams": teams,
+            "job": None if running is None else running.view(after=len(running.lines), mine=mine),
+            "queued": None if queued is None else queued.view(after=len(queued.lines), mine=mine),
             "last": {step: iso(when) for step, when in last.items()},
             "plan_file": None if path is None else path.name,
             "plan_saved_at": None if path is None else iso(dt.datetime.fromtimestamp(path.stat().st_mtime)),
-            "auto": not args.no_auto, "skip_snapshots": args.skip_snapshots,
+            "daily": {"last": worker.scheduled_state.get(DAILY_JOB),
+                      "lead_min": int(DAILY_LEAD.total_seconds() // 60), "latest": DAILY_FALLBACK.strftime("%H:%M")},
+            "tap_wait_s": worker.tap_wait(auth.viewer.get(), [chosen.name]),
+            "skip_snapshots": args.skip_snapshots,
             "scheduled": None if not args.jobs else {
                 name: {"label": job["label"], "times": job["times"], "shift_min": args.jobs_shift,
                        "last": worker.scheduled_state.get(name)} for name, job in scheduled.JOBS.items()},
             "league_file": args.league_file,
         }
+
+    # ---------- adding a league ----------
+
+    previews: dict = {}         # (platform, league id, cookies) -> (when, what inspect found)
+
+    def address(request: Request) -> str:
+        # Through the tunnel every call comes from cloudflared; Cloudflare names the real one.
+        return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+
+    def parse_url(url: str) -> tuple:
+        url = (url or "").strip()
+        found = re.search(r"fleaflicker\.com/nhl/leagues/(\d+)", url, re.I)
+        if found:
+            return "fleaflicker", int(found.group(1))
+        found = re.search(r"espn\.com/.*hockey.*[?&]leagueId=(\d+)", url, re.I)
+        if found:
+            return "espn", int(found.group(1))
+        raise HTTPException(422, "paste the league's page: fleaflicker.com/nhl/leagues/<id> or "
+                                 "fantasy.espn.com/hockey/league?leagueId=<id>")
+
+    def cookies_of(ask: LeagueAsk) -> dict | None:
+        if not (ask.espn_s2 or ask.swid):
+            return None
+        if not (ask.espn_s2 and ask.swid):
+            raise HTTPException(422, "a private ESPN league needs both espn_s2 and SWID")
+        swid = ask.swid.strip().strip("{}")
+        return {"espn_s2": ask.espn_s2.strip(), "SWID": "{" + swid + "}"}
+
+    def inspect(ask: LeagueAsk, request: Request) -> dict:
+        """The league's teams and settings as its platform shows them, and why it can't be planned
+        if it can't -- kept PREVIEW_KEEP_S, so the add that follows reads nothing again."""
+        platform, league_id = parse_url(ask.url)
+        cookies = cookies_of(ask)
+        key = (platform, league_id, json.dumps(cookies, sort_keys=True))
+        now = time.time()
+        for old in [k for k, (at, _) in previews.items() if now - at >= PREVIEW_KEEP_S]:
+            del previews[old]           # an expired lookup goes, its ESPN cookies with it
+        for old in [k for k, times in worker.added_by_ip.items() if all(now - t >= 3600 for t in times)]:
+            del worker.added_by_ip[old]
+        hit = previews.get(key)
+        if hit:
+            return hit[1]
+        who = address(request)
+        recent = [t for t in worker.added_by_ip.get(who, []) if time.time() - t < 3600]
+        if len(recent) >= ADD_TRIES_PER_HOUR:
+            raise HTTPException(429, "too many leagues looked up from here: try again in an hour")
+        worker.added_by_ip[who] = recent + [time.time()]
+        season = scheduled.season_of(worker.today())
+        name = leagues.added_name(platform, league_id, 0)
+        if platform == "fleaflicker":
+            adapter = platforms.fleaflicker.Fleaflicker(league_id)
+        else:
+            adapter = platforms.espn.Espn(league_id, platforms.espn.espn_year(season), cookies=cookies)
+        try:
+            teams = adapter.teams()
+        except SystemExit:          # ESPN's 401: a private league
+            raise HTTPException(401, {"detail": "this ESPN league is private: it needs your espn_s2 and SWID cookies"
+                                                + (" (those didn't work)" if cookies else ""), "needs_cookies": True})
+        except Exception as error:  # noqa: BLE001 -- no such league, the platform down
+            raise HTTPException(404, f"couldn't read {platform} league {league_id} ({type(error).__name__})")
+        if not teams:
+            raise HTTPException(404, f"{platform} league {league_id} has no teams")
+        draft = leagues.League(name=name, description="", platform=platform, league_id=league_id, season=season,
+                               team=None, rules=name, scoring=name, strategy=None, eligibility_platform=platform,
+                               adp_platform="espn", active=True, auth=None, overrides=leagues.ADDED_OVERRIDES,
+                               draft_window={}, path=Path("(not saved)"))
+        rosters = scoring = None
+        notes, problem = [], None
+        try:
+            rosters, scoring, notes = sync_league_settings.assemble(draft, adapter.league_settings())
+            problem = sync_league_settings.supported(rosters, scoring)
+        except (Exception, SystemExit) as error:  # noqa: BLE001 -- wording or a rule not read
+            problem = f"this league's settings couldn't be read ({type(error).__name__}: {error})"
+        found = {"platform": platform, "league_id": league_id, "season": season, "cookies": cookies,
+                 "teams": {int(k): v for k, v in teams.items()}, "rosters": rosters, "scoring": scoring,
+                 "notes": notes, "problem": problem}
+        previews[key] = (time.time(), found)
+        return found
+
+    def summary(found) -> dict:
+        taken = users.linked_by_anyone()
+        known = leagues.index()
+        rows = []
+        for team_id, team_name in sorted(found["teams"].items(), key=lambda t: str(t[1]).lower()):
+            existing = leagues.find(found["platform"], found["league_id"], team_id, known)
+            rows.append({"id": team_id, "name": team_name, "linked": bool(existing and existing.name in taken)})
+        rosters, scoring = found["rosters"] or {}, found["scoring"] or {}
+        slots = " ".join(f"{slot}" + (f" x{n}" if n > 1 else "")
+                         for slot, n in (rosters.get("active_slots") or {}).items())
+        points = ", ".join(f"{k} {v:g}" for k, v in {**(scoring.get("skaters") or {}),
+                                                     **(scoring.get("goalies") or {})}.items())
+        return {"platform": found["platform"], "league_id": found["league_id"], "teams": rows,
+                "summary": {"teams": len(rows), "slots": slots, "bench": rosters.get("bench"),
+                            "moves_per_week": rosters.get("moves_per_week"), "points": points,
+                            "not_held": found["notes"]},
+                "problem": found["problem"], "private": bool(found["cookies"])}
+
+    @app.post("/leagues/preview")
+    def preview_league(ask: LeagueAsk, request: Request):
+        """A league's teams and settings, read from its page's link (and, for a private ESPN
+        league, its cookies): what the add screen shows before you pick your team."""
+        return summary(inspect(ask, request))
+
+    @app.post("/leagues")
+    def add_league(ask: LeagueAsk, request: Request, response: Response):
+        """Your team added: the league set up (its settings detected and written) unless someone
+        has it already, linked to this browser (its cookie made now if it has none), and given a
+        full refresh at once (reports, projections, its read and plan; reports still fresh are reused)."""
+        if ask.team_id is None:
+            raise HTTPException(422, "pick your team")
+        found = inspect(ask, request)
+        if found["problem"]:
+            raise HTTPException(409, found["problem"])
+        if ask.team_id not in found["teams"]:
+            raise HTTPException(404, f"no team {ask.team_id} in that league")
+        uid = auth.viewer.get()
+        mine = users.linked(uid)
+        existing = leagues.find(found["platform"], found["league_id"], ask.team_id)
+        if existing is not None and existing.name in mine:
+            return {"league": existing.name, "job": None, "leagues": mine}
+        if len(mine) >= LEAGUES_PER_USER:
+            raise HTTPException(409, f"{LEAGUES_PER_USER} leagues at most: remove one first")
+        if existing is None and len(users.linked_by_anyone()) >= LEAGUES_MAX:
+            raise HTTPException(503, "the server is planning as many leagues as it can: try again later")
+        with worker.lock:
+            if existing is None:
+                team_name = found["teams"][ask.team_id]
+                league = leagues.create(found["platform"], found["league_id"], ask.team_id, team_name,
+                                        found["season"], f"{found['platform']} league {found['league_id']}, "
+                                        f"team {team_name}; added in the app {worker.today()}.",
+                                        private=bool(found["cookies"]))
+                if found["cookies"]:
+                    league_secrets.put(league.auth, found["cookies"])
+                sync_league_settings.write_settings(league, found["rosters"], found["scoring"], found["notes"],
+                                                    write=True)
+                worker.forget(league.name)
+            else:
+                league = existing
+                if found["cookies"] and league.auth and leagues.is_added(league):
+                    league_secrets.put(league.auth, found["cookies"])   # fresher cookies
+            uid = issue(response, uid)
+            user = users.link(uid, league.name)
+        token, token_user = auth.viewer.set(uid), auth.viewer_user.set(user)
+        try:
+            worker.tapped_now(uid, [league.name])
+            job = worker.start("full", by="added", only=[league.name], fresh=True)
+            return {"league": league.name, "job": job.view(mine=worker.mine()), "leagues": worker.mine()}
+        finally:
+            auth.viewer.reset(token)
+            auth.viewer_user.reset(token_user)
+
+    @app.get("/leagues")
+    def get_leagues():
+        out = []
+        for name in worker.mine():
+            try:
+                lg = worker.loaded(name)
+            except (SystemExit, ValueError):
+                continue
+            out.append({"name": name, "team": lg.team_name, "platform": lg.platform,
+                        "league_id": lg.league_id, "private": bool(lg.auth)})
+        return {"leagues": out, "max": LEAGUES_PER_USER}
+
+    @app.delete("/leagues/{name}")
+    def remove_league(name: str):
+        """Your link to a league gone; the league itself too once nobody links it (an added one;
+        Settings/leagues' never are)."""
+        uid = auth.viewer.get()
+        if name not in users.linked(uid):
+            raise HTTPException(404, f"no league {name} here")
+        auth.viewer_user.set(users.unlink(uid, name))
+        if users.drop_league(name):
+            worker.forget(name)
+        return {"leagues": worker.mine()}
 
     app.mount("/app", AppFiles(directory=APP, html=True), name="app")
     return app
@@ -711,13 +1093,14 @@ def make_app(worker: Worker) -> FastAPI:
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--league", action="append", default=None,
-                        help="A league in Settings/leagues/; repeat for several (default: every active one)")
+                        help="A league every caller sees, cookie or not (a rehearsal's or a test server's); "
+                             "repeat for several. Without it a caller sees the leagues it added")
     parser.add_argument("--date", default=None, help="Game date (default: today on this machine)")
     parser.add_argument("--league-file", default=None,
                         help="A league snapshot JSON instead of the platform (one league)")
     parser.add_argument("--platform-season", type=int, default=None, help="Read a past season's league (rehearsal)")
     parser.add_argument("--now", default=None, help="UTC moment for the per-game lock (default: now; rehearsal)")
-    parser.add_argument("--no-auto", action="store_true", help="No auto window")
+    parser.add_argument("--no-daily", action="store_true", help="No daily pass (every league planned once a day)")
     parser.add_argument("--skip-snapshots", action="store_true",
                         help="Use the scheduled snapshots instead of taking fresh ones (faster)")
     parser.add_argument("--jobs", action="store_true",
@@ -732,10 +1115,7 @@ def main():
     if args.league_file and (args.league is None or len(args.league) != 1):
         parser.error("--league-file is one league's snapshot: give that league alone with --league")
     worker = Worker(args)
-    if not args.no_auto:
-        threading.Thread(target=worker.auto_loop, daemon=True).start()
-    if args.jobs:
-        threading.Thread(target=worker.jobs_loop, daemon=True).start()
+    threading.Thread(target=worker.jobs_loop, daemon=True).start()     # the daily pass, and --jobs' jobs
     uvicorn.run(make_app(worker), host=args.host, port=args.port, log_level="warning")
 
 

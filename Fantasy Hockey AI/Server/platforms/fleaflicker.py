@@ -86,6 +86,8 @@ def picks_from(board_json: dict) -> list:
     cells = []
     for row in board_json.get("rows", []):
         for cell in row.get("cells", []):
+            if "slot" not in cell or "team" not in cell:
+                continue            # no pick in this cell (league 12088's board, 2026-11-15)
             player = (cell.get("player") or {}).get("proPlayer") or {}
             cells.append({"overall": cell["slot"]["overall"], "round": cell["slot"]["round"],
                           "team_id": cell["team"]["id"], "team": cell["team"]["name"],
@@ -574,9 +576,15 @@ def settings_from(api: dict, page: str, scoreboard: dict, board: dict, teams: in
                      f"splits them; the live plan reads the platform's weeks)")
     picks = picks_from(board)
     overall = {(c["round"], c["team_id"]): c["overall"] for c in picks}
-    first = next(c for c in picks if c["overall"] == 1)
-    size = sum(1 for c in picks if c["round"] == 1)
-    draft = "snake" if overall.get((2, first["team_id"])) == 2 * size else "linear"
+    first = next((c for c in picks if c["overall"] == 1), None)
+    if first is None:
+        # No draft order on the board (an offline draft): the draft's type matters to the draft
+        # tools only, never to a plan.
+        notes.append("no draft order on the draft board (written as snake)")
+        draft = "snake"
+    else:
+        size = sum(1 for c in picks if c["round"] == 1)
+        draft = "snake" if overall.get((2, first["team_id"])) == 2 * size else "linear"
 
     return {"settings": {
         "teams": teams,

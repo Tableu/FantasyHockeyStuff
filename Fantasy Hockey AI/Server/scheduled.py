@@ -32,7 +32,8 @@ PIPELINE = SIBLINGS.parent / "pipeline"
 MODEL_FEATURES = SIBLINGS / "ModelFeatures"
 PROJECTIONS = SIBLINGS / "Projections"
 LOGS = PIPELINE / "logs" / "live"
-STATE = HERE / "state" / "scheduled_jobs.json"      # job -> the scheduled time it last ran for
+# job -> the scheduled time it last ran for (FH_STATE_DIR: a test server's own state folder)
+STATE = Path(os.environ.get("FH_STATE_DIR") or HERE / "state") / "scheduled_jobs.json"
 PC_DB = "host.docker.internal"                     # the PC's SQL Server, as the container reaches it
 
 # In the order a catch-up runs them: the database jobs never overlap (one worker), nightly first.
@@ -105,9 +106,8 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = STATE.with_name(STATE.name + ".tmp")
-    tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
-    os.replace(tmp, STATE)
+    import jsonfile
+    jsonfile.write(STATE, state)
 
 
 def run(name: str, day: dt.date, echo, db_server: str | None = None) -> None:

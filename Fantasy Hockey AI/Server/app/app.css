@@ -396,7 +396,7 @@ table.list .strong { font-weight: 700; }
 /* The box score's sorted header carries its arrow past a narrow column's edge rather than clip it. */
 table.list.box thead th.n { overflow: visible; }
 
-/* The password screen (app.js Login). */
+/* The add-league screen (app.js AddLeague), on the old password screen's layout. */
 .login { display: flex; flex-direction: column; gap: 10px; padding: 64px 24px 24px; }
 .login h1 { margin: 0 0 16px; font-size: 22px; font-weight: 700; }
 .login label { color: var(--text-2); font-size: 12.5px; }
@@ -404,6 +404,14 @@ table.list.box thead th.n { overflow: visible; }
 .login input:focus { outline: 2px solid var(--you); outline-offset: 1px; }
 .login .error { margin: 0; }
 .login .btn { height: 44px; margin-top: 6px; }
+.add-league { padding-top: 40px; overflow-y: auto; }
+.add-step { display: flex; flex-direction: column; gap: 10px; }
+.add-league .note { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.add-league .choices { border: 1px solid var(--rule); border-radius: 4px; max-height: 50vh; overflow-y: auto; }
+.add-league .choice { color: var(--text); }
+.league-row { display: flex; align-items: stretch; }
+.league-row .choice { flex: 1; min-width: 0; }
+.league-row .remove { align-self: center; margin: 0 12px; }
 
 /* Wider than a phone (a tablet, a narrow window): the phone layout across the window, so tables
    stop truncating. */

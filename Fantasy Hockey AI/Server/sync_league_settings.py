@@ -114,12 +114,18 @@ def assemble(league, found: dict) -> tuple:
 def sync(league, write: bool) -> list:
     """Detect, compare with the files in place, and (with `write`) replace them. Returns the
     changes, descriptions aside."""
-    rosters, scoring, notes = detect(league)
-    targets = {paths.ROSTERS_DIR / f"{league.name}.json": rosters,
-               paths.SCORESETS_DIR / f"{league.name}.json": scoring}
+    return write_settings(league, *detect(league), write=write)
+
+
+def write_settings(league, rosters: dict, scoring: dict, notes: list, write: bool) -> tuple:
+    """sync's comparison and write, on settings already detected (the app's add-league check
+    detects once and writes what it showed). A league added in the app writes beside its own
+    file (leagues.settings_dirs)."""
+    rosters_dir, scoring_dir = leagues.settings_dirs(league)
+    targets = {rosters_dir / f"{league.name}.json": rosters, scoring_dir / f"{league.name}.json": scoring}
     # Compared with the files the league uses now (the registry's rules and scoring), which are
     # these same files once a league has been synced.
-    in_use = [paths.ROSTERS_DIR / f"{league.rules}.json", paths.SCORESETS_DIR / f"{league.scoring}.json"]
+    in_use = [paths.league_config(league.rules), paths.scoreset(league.scoring)]
     found = []
     for (path, new), current in zip(targets.items(), in_use):
         old = json.loads(current.read_text(encoding="utf-8")) if current.exists() else {}
@@ -127,12 +133,28 @@ def sync(league, write: bool) -> list:
             {k: v for k, v in old.items() if k != "description"},
             {k: v for k, v in new.items() if k != "description"})]
         if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(new, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    if write and (league.rules, league.scoring) != (league.name, league.name):
+    if write and not leagues.is_added(league) and (league.rules, league.scoring) != (league.name, league.name):
         raw = json.loads(league.path.read_text(encoding="utf-8"))
         raw["rules"], raw["scoring"] = league.name, league.name
         league.path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return found, notes, targets
+
+
+def supported(rosters: dict, scoring: dict) -> str | None:
+    """Why the engine cannot plan a league with these settings (shown when it is added), or None.
+    The plan scores points: a league scoring categories (no points per stat) is refused, and so is
+    one that scores no skater stat our projections carry."""
+    skaters = {k: v for k, v in (scoring.get("skaters") or {}).items() if v}
+    goalies = {k: v for k, v in (scoring.get("goalies") or {}).items() if v}
+    if not skaters and not goalies:
+        return "this league doesn't score points per stat (a categories or roto league?): only points leagues can be planned"
+    if not skaters:
+        return "this league scores no skater stat the projections carry"
+    if not rosters.get("active_slots"):
+        return "this league's lineup slots were not read"
+    return None             # the rules themselves: assemble() has built them into a LeagueConfig
 
 
 def history_path(league) -> Path:

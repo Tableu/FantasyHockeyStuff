@@ -10,6 +10,7 @@ pandas>=2.2
 pyarrow>=17
 pyodbc>=5.0
 requests>=2.31
+cryptography>=42
 scikit-learn>=1.5
 scipy>=1.14
 uvicorn>=0.30

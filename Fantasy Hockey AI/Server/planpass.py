@@ -34,7 +34,7 @@ Before a league has rosters, a made-up one to rehearse on (every seat drafting t
 
     python planpass.py --league beagles --date 2026-09-29 --make-fake   # -> fixtures/beagles/fake_league.json
 
-and a rehearsal server plans on it (server.py --league-file ... --no-auto).
+and a rehearsal server plans on it (server.py --league-file ... --no-daily).
 """
 
 import argparse
@@ -67,6 +67,11 @@ SNAPSHOT_KINDS = ("injuries", "lines", "goalies")
 # along since the Fleaflicker listing reads its pages in parallel (~5 s instead of ~16 s), so a
 # late scratch posted as an injury reaches the next window's plan.
 QUICK_SNAPSHOT_KINDS = ("injuries", "goalies")
+# A refresh reuses a report fetched this recently instead of fetching it again (any user's tap
+# plans on what the last one fetched; the user, 2026-11-15): tonight's projections are rebuilt
+# only after a report was fetched.
+FRESH_FOR = {"injuries": dt.timedelta(minutes=10), "goalies": dt.timedelta(minutes=10),
+             "lines": dt.timedelta(hours=4)}
 MODES = ("full", "quick", "news", "league", "plan")   # Planner.run's refreshes
 READ_TRIES, READ_RETRY_S = 4, 0.5   # puck_times: a file just swapped in, read again (Docker share)
 PLAN_TIMEOUT_S = 600            # a planning child still running after this is stopped
@@ -203,6 +208,15 @@ def saved_plans(league, day: dt.date) -> list:
     return sorted(plans.glob(f"plan_{day.isoformat()}_*.json"), key=lambda f: f.stat().st_mtime)
 
 
+def newest_saved(league, days: int = 3):
+    """The newest plan JSON saved in the last `days` days, any day's, or None: what a league shows
+    before today's daily pass has planned it."""
+    plans = livepaths.league_reports(league.name) / "plans"
+    since = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    files = [f for f in plans.glob("plan_*_*.json") if f.name[5:15] >= since]
+    return max(files, key=lambda f: f.stat().st_mtime) if files else None
+
+
 def last_read_path(league) -> Path:
     """Where a league's last read is kept (plan_leagues), for a re-plan without one."""
     return livepaths.league_reports(league.name) / "last_read.json"
@@ -311,16 +325,20 @@ class Planner:
         self.league_file, self.platform_season = league_file, platform_season
         self.skip_snapshots = skip_snapshots
         self.last = {}                     # data step -> when it last ran
-        self.league_last = {league.name: {} for league in self.leagues}
+        self.league_last = collections.defaultdict(dict)
 
-    def run(self, mode: str, now: dt.datetime, echo=print, only=None, today: dt.date | None = None) -> dict:
-        """One refresh of the leagues `only` (default all): {league name: its saved plan's file
+    def run(self, mode: str, now: dt.datetime, echo=print, only=None, today: dt.date | None = None,
+            leagues=None, reuse: bool = True) -> dict:
+        """One refresh of `leagues` (default: the Planner's own), those named in `only` (default
+        all). `reuse`: reports fetched within FRESH_FOR are reused, and the projections with them
+        (a tap); False fetches every report and rebuilds the projections (the daily pass, an added
+        league's first refresh). Returns {league name: its saved plan's file
         name -- or, for a league that failed (its platform down; the others still plan), the error
         as an exception}. The modes (MODES):
 
             full    injury, line-chart and goalie reports and tonight's projections, while each
                     league's settings check and read run alongside; then each league planned
-            quick   the same without the line charts (the auto windows' usual)
+            quick   the same without the line charts (the app's Refresh button)
             news    injury and goalie reports and projections; each league planned on today's
                     kept read (a late scratch, a goalie confirmed: nothing on the rosters moved)
             league  each league read again and planned on today's projections, no reports (a
@@ -334,8 +352,13 @@ class Planner:
         """
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}, not {mode!r}")
-        chosen = [league for league in self.leagues if only is None or league.name in only]
+        pool = self.leagues if leagues is None else list(leagues)
+        if self.league_file and len(pool) > 1:
+            raise SystemExit("a league file is one league's snapshot: plan that league alone")
+        chosen = [league for league in pool if only is None or league.name in only]
         names = [league.name for league in chosen]
+        if not chosen:
+            return {}
         if mode == "plan":
             return self._results(chosen, plan_in_child(names, self.day, now, self.league_file,
                                                        self.platform_season, echo, reuse_read=True))
@@ -352,7 +375,7 @@ class Planner:
         fresh_read = mode != "news"
         reading = None if self.league_file else self._read_in_background(chosen, now, echo, fresh_read)
         try:
-            self._data_steps(mode, echo)
+            self._data_steps(mode, echo, reuse)
         finally:
             read = reading() if reading else {}
         # A league whose read failed is read again by the planning child: never planned on an
@@ -414,17 +437,27 @@ class Planner:
             return box.get("read", {})
         return wait
 
-    def _data_steps(self, mode, echo):
+    def _data_steps(self, mode, echo, reuse=True):
+        fetched = set()
         if not self.skip_snapshots:
             kinds = SNAPSHOT_KINDS if mode == "full" else QUICK_SNAPSHOT_KINDS
+            now = dt.datetime.now()
+            stale = [k for k in kinds if not reuse or now - self.last.get(k, dt.datetime.min) > FRESH_FOR[k]]
+            fresh = [k for k in kinds if k not in stale]
+            if fresh:
+                echo("fresh, reused: " + ", ".join(f"{k} ({self.last[k]:%H:%M})" for k in fresh))
             # Every refresh fetches injuries; between full listings that is about 4 Fleaflicker
             # calls, far from the ~100-call lockout. The first refresh never takes the whole
             # 44-page listing (the 10:00 / 15:00 runs do, at least every 20 h).
-            fetched = snapshots(kinds, echo, injuries_targeted=not self.last)
+            if stale:
+                fetched = snapshots(stale, echo, injuries_targeted=not self.last)
             for kind in fetched:                   # a reused report keeps its own time
                 self.last[kind] = dt.datetime.now()
-        tonight(self.day, echo)
-        self.last["projections"] = dt.datetime.now()
+        if not reuse or fetched or self.skip_snapshots or "projections" not in self.last:
+            tonight(self.day, echo)
+            self.last["projections"] = dt.datetime.now()
+        else:
+            echo(f"projections: fresh, reused ({self.last['projections']:%H:%M})")
 
 
 def make_fake(league_name: str, day: dt.date, me: int, opponent: int, seed: int) -> Path:

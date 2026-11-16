@@ -10,21 +10,42 @@ tools (Desktop/).
 
 ## The server
 
-    python server.py                    # every active league (beagles, espn-la), today, http://127.0.0.1:8000
-    python server.py --league beagles   # one league; repeat --league for several
-    python server.py --league beagles --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --skip-snapshots --no-auto      # rehearsal
+    python server.py                    # the users' leagues, today, http://127.0.0.1:8000
+    python server.py --league beagles --date 2026-09-29 --league-file fixtures/beagles/fake_league.json --skip-snapshots --no-daily      # rehearsal
 
-One server plans every league. A refresh takes the snapshots and tonight's projections once, then
-reads, plans and saves each league in turn (one league failing leaves the others' plans), and the
-auto window re-plans every league. Every call but the job's takes `?league=<name>`, defaulting to
-the first league served; plan_gui.py sends its own `--league`.
+**Users (since 2026-11-15).** The site is open to anyone, with no password or accounts. A browser
+adds its leagues in the app: it pastes the league's Fleaflicker or ESPN link and picks its team.
+That browser's `fh_user` cookie (auth.py) is the user, and its leagues are kept in
+`state/users/<id>.json` (users.py). Every user is treated the same: a caller sees the leagues its
+cookie links and gets a 404 for every other league. A league added for the first time is set up
+in `state/leagues/` (leagues.py; its settings are detected by sync_league_settings.py, and a
+private ESPN league's cookies are kept encrypted by league_secrets.py). A team that is already set
+up, beagles and espn-la in Settings/leagues/ included, is linked rather than set up again, so its
+users share its plan and choices. Limits: 3 leagues per user, 40 on the server, and 5 league
+lookups per address per hour. `--league` makes a league visible to every caller, cookie or not
+(rehearsals and test servers only).
+
+**Planning.** Every league is planned once a day by the daily pass: a Full refresh 30 minutes
+before the day's first game, and no later than 15:30. It plans every league whose users came by in
+the last 14 days, then deletes users unseen for 60 days and any added league nobody links. Outside
+the pass, a league is planned when its users tap Refresh: once per league per 5 minutes and once
+per user per 2 minutes, with a 429 sooner; a 'plan' after a choice changed is allowed any time.
+Taps that arrive while a job runs wait as one queued job (`state: "queued"`) and run as one
+refresh of every league asked for. The global reports are reused when fresh: injuries and goalies
+within 10 minutes, line charts within 4 hours, and projections unless a report was fetched
+(planpass.FRESH_FOR). The pre-game auto windows were removed on 2026-11-15.
 
 | Call | Does |
 | --- | --- |
 | GET /plan | The league's newest saved plan for the plan's day -- today, or tomorrow once every game today has started (today's until tomorrow's is saved): {league, file, saved_at, plan} (404 before the first) |
-| POST /refresh {"mode", "scope"} | Starts a refresh and returns its job; a tap while one runs joins it. mode: "full" (injury, line-chart and goalie reports, projections, leagues read again), "quick" (the same without line charts), "news" (reports and projections, leagues planned on today's kept read), "league" (leagues read again and planned, no reports; on a day with no projections yet, those first), "plan" (planned on the kept read and your choices, about 2 s, queued behind a running refresh). scope: "league" (?league= alone) or "all"; default "all" for full and quick (plan_gui), "league" for the rest. The auto window plans every league |
-| GET /jobs/{id}?after=n | The job's state, each league's saved plan file, its progress lines after line n |
-| GET /status | The leagues served, the day, the running job, when each step last ran (with the league's own read), its newest plan |
+| POST /refresh {"mode"} | Refreshes the ?league= league and returns its job (or the queued job it joined). mode: "full" (injury, line-chart and goalie reports, projections, league read again), "quick" (the same without line charts), "news" (reports and projections, league planned on today's kept read), "league" (league read again and planned, no reports; on a day with no projections yet, those first), "plan" (planned on the kept read and your choices, about 2 s). Fresh reports are reused. 429 within the tap limits |
+| POST /leagues/preview {"url", "espn_s2"?, "swid"?} | The league's teams (each `linked` when someone already added it), its settings summary, and `problem` when it can't be planned (for example a categories league). 401 `needs_cookies`: a private ESPN league |
+| POST /leagues {"url", "team_id", "espn_s2"?, "swid"?} | Adds your team: makes this browser's cookie if it has none, sets up or links the league, and starts a full refresh of it (reports still fresh are reused). Returns {league, job} |
+| GET /leagues | Your leagues |
+| DELETE /leagues/{name} | Unlinks it; an added league nobody links any more is deleted |
+| POST /forget | This browser's cookie is dropped |
+| GET /jobs/{id}?after=n | The job's state, each league's saved plan file and its progress lines after line n. Another user's job shows its state alone, and lines naming other users' leagues are left out |
+| GET /status | Your leagues, the day, the running and queued jobs, when each step last ran (with the league's own read), its newest plan, the daily pass, how long until the next tap is allowed. With no league, 404 `{"add": true}` |
 | GET /games | Today's games: score, clock, how many of your players and your opponent's are in each |
 | GET /goals | Every goal today, newest first, with the fantasy points it earned either side |
 | GET /games/{id}?after=n | One game: line score, team stats, box score with fantasy points, plays after sortOrder n, each with the fantasy points it earned either side (`fp`; a goalie's decision comes with the box score) |
@@ -51,12 +72,10 @@ the play-by-play's situation codes, which lag and misreport during a game. Fanta
 the newest plan and players.parquet's NHL ids.
 
 The refreshes are planpass.Planner's and save the plan files under reports/<league>/plans/.
-The auto window (a refresh ~30 minutes before each group of games -- Full when the line charts
-are none today or over 4 h old (LINES_MAX_AGE), else Quick -- and one once today's last
-game has started) runs in the server unless --no-auto. From that last puck on, the plan is
-tomorrow's: its moves, lineup and projections, since tonight has no lineup left to set. It
-listens on this PC only (in the container: --host 0.0.0.0, which compose publishes to 127.0.0.1
-alone); the tunnel reaches it from outside, behind the login.
+The daily pass runs unless --no-daily. Once today's last game has started, the plan's day is
+tomorrow: a refresh then plans tomorrow's moves, lineup and projections, since tonight has no
+lineup left to set. The server listens on this PC only (in the container: --host 0.0.0.0, which
+compose publishes to 127.0.0.1 alone); the tunnel reaches it from outside.
 
 ## The engine
 
@@ -172,26 +191,25 @@ Testing it never uses port 8000 or a real league's name: run a test server on 80
 temporary `Settings/leagues/<name>-test.json` (deleted after), e.g.
 
     python server.py --league beagles-test --port 8001 --date 2026-09-29 \
-        --league-file fixtures/beagles/fake_league.json --skip-snapshots --no-auto
+        --league-file fixtures/beagles/fake_league.json --skip-snapshots --no-daily
 
 then open `http://127.0.0.1:8001/app/` in Chrome (DevTools device mode, 390x844). On an Android
 phone over USB: `chrome://inspect` -> Port forwarding 8001 -> localhost:8001, then open
 `http://localhost:8001/app/` on the phone; as `localhost` it can be installed without HTTPS.
 
-## Login
+## Who is calling
 
-The server is meant to be reached from the internet (plan: Phone App Remote Access), so every call
-but `/login`, `/logout` and the app's files (`/app/...`) needs a session (auth.py):
+Nothing needs a login (the password went 2026-11-15). auth.py names the caller by its `fh_user`
+cookie: `<user id>.<HMAC>`, signed with `user_secret` under `"plan-server"` in
+`Settings/secrets.json`, which is made on first start (`FH_LOGIN_SECRETS` points a test server at
+its own file). The cookie is made when a browser adds its first league, lasts 400 days and is
+renewed on every call. More -> "Forget this browser" drops it, along with the saved screens.
+Private ESPN cookies are encrypted with `league_key` in the same entry (league_secrets.py).
+FastAPI's `/docs`, `/redoc` and `/openapi.json` are off.
 
-- **The phone** logs in with the password (`POST /login`) and gets a signed cookie for 90 days,
-  renewed once it has under 60 left; More -> Log out ends it and deletes the saved screens.
-  Five wrong passwords from one address in 15 minutes and it waits 15 minutes.
-- **Settings:** `"plan-server"` in `Settings/secrets.json` (gitignored): the password's scrypt hash
-  and the session-signing secret. Read again when the file changes, no restart needed. (A key for
-  plan_gui went with the window, 2026-10-24.)
-- **Setting the password:** `python auth.py set-password` (in this folder, on Windows or in the
-  container). A new password signs everyone out. Until one is set every call answers 503.
-- FastAPI's `/docs`, `/redoc` and `/openapi.json` are off.
+A test server keeps its users and leagues apart with `FH_STATE_DIR` (state/ by default: users/,
+leagues/, league_secrets.json, scheduled_jobs.json). It must never run on :8000 or plan a real
+league's name, because reports/<league>/ is shared with the Docker server.
 
 ## Running it
 
@@ -209,7 +227,7 @@ exits after, so the server stays the same size however many leagues it plans; it
 with two leagues planned in its own process (2026-10-02), of which under 1 MB per league was
 anything it kept.
 
-A rehearsal server (--league, --date, --league-file, --skip-snapshots, --no-auto) runs by hand in the shell
+A rehearsal server (--league, --date, --league-file, --skip-snapshots, --no-daily) runs by hand in the shell
 on another port, e.g. `python server.py --host 0.0.0.0 --port 8001 ...`, which compose does not
 publish -- or stop the container and run server.py on Windows.
 

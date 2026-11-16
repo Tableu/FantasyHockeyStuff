@@ -5,7 +5,7 @@
 // nothing is computed here. A window WIDE_PX or wider (layout.js) gets the PC layout: the tabs as a
 // sidebar, and Games as a list, the chosen game and the goal feed side by side.
 import { html, render, useState, useEffect, useRef, useCallback, useErrorBoundary } from './vendor/htm-preact-3.1.1.mjs';
-import { api, onStale, onAuth } from './api.js';
+import { api, onStale, needsLeague } from './api.js';
 import { Roster } from './roster.js';
 import { Players } from './players.js';
 import { Plan } from './plan.js';
@@ -22,10 +22,13 @@ const GEAR = html`<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24
 // /status `last` steps, in the header's order, with their short names.
 const STEPS = [['injuries', 'Inj'], ['goalies', 'Gl'], ['projections', 'Proj'], ['league read', 'Lg'], ['lines', 'Lines']];
 const MODE_LABELS = { full: 'Full', quick: 'Quick', news: 'News', league: 'League', plan: 'Re-plan',
-  nightly: 'Nightly import', player_teams: 'Player teams', injuries: 'Injury listing' };
+  nightly: 'Nightly import', player_teams: 'Player teams', injuries: 'Injury listing',
+  settings_check: 'Settings check', daily_plans: 'Daily plans' };
+// A job still to finish: running, or queued behind another (the server runs one at a time).
+const active = (job) => !!job && (job.state === 'running' || job.state === 'queued');
 const STALE_MIN = 120;          // a step older than this shows amber
 const PULL_PX = 70;             // how far down a pull at the top of a screen must go to refresh
-const STATUS_EVERY_MS = 60000;  // follows the server's auto refreshes
+const STATUS_EVERY_MS = 60000;  // follows the server's refreshes (the daily pass, other users' taps)
 const JOB_EVERY_MS = 1000;
 
 const store = {
@@ -162,7 +165,7 @@ function Header({ status, league, onLeague, job, onRefresh, now, wide, tab }) {
   const teams = (status && status.teams) || {};
   const leagues = (status && status.leagues) || [];
   const team = (teams[league] && teams[league].team) || league || 'Fantasy Hockey';
-  const running = job && job.state === 'running';
+  const running = active(job);
   useEscape(open, () => setOpen(false));
   return html`
     <header class="top">
@@ -196,10 +199,10 @@ function Header({ status, league, onLeague, job, onRefresh, now, wide, tab }) {
 function JobStrip({ job, onClose }) {
   if (!job) return null;
   const last = job.lines.length ? job.lines[job.lines.length - 1].replace(/^\d\d:\d\d:\d\d\s+/, '') : 'starting…';
-  if (job.state === 'running') {
+  if (active(job)) {
     return html`<div class="job" role="status"><span class="spin" aria-hidden="true"></span>
       <span>${MODE_LABELS[job.mode] || job.mode}</span>
-      <span class="line">${last}</span></div>`;
+      <span class="line">${job.state === 'queued' ? 'waiting for the refresh before it…' : last}</span></div>`;
   }
   const failed = job.state === 'failed';
   return html`<div class="job" role="status">
@@ -257,37 +260,89 @@ function RefreshLog({ version }) {
   })}</div>`;
 }
 
-// The password screen (auth.py): shown whenever the server answers 401, until a login works.
-function Login({ onDone }) {
-  const [password, setPassword] = useState('');
+// Adding a league (server.py POST /leagues): the league's link, then -- a private ESPN league --
+// its cookies, then which team is yours. Shown when this browser has no league yet, and from More.
+// The browser's cookie is all that ties the leagues to it (auth.py): no account, no password.
+function AddLeague({ onAdded, onCancel }) {
+  const [url, setUrl] = useState('');
+  const [s2, setS2] = useState('');
+  const [swid, setSwid] = useState('');
+  const [needCookies, setNeedCookies] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [team, setTeam] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const submit = async (e) => {
+  const ask = () => ({ url: url.trim(), ...(s2 && swid ? { espn_s2: s2.trim(), swid: swid.trim() } : {}) });
+  const lookUp = async (e) => {
     e.preventDefault();
-    if (!password || busy) return;
-    setBusy(true);
+    if (!url.trim() || busy) return;
+    setBusy(true); setError(null); setPreview(null); setTeam(null);
     try {
-      await api.login(password);
-      setPassword('');
-      setError(null);
-      onDone();
+      setPreview(await api.previewLeague(ask()));
     } catch (err) {
+      if (err.status === 401 && err.data.needs_cookies) setNeedCookies(true);
       setError(err.status === 0 ? "Can't reach the server" : err.message);
     } finally {
       setBusy(false);
     }
   };
-  return html`<div class="app"><form class="login" onSubmit=${submit}>
+  const add = async () => {
+    if (team === null || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const got = await api.addLeague({ ...ask(), team_id: team });
+      onAdded(got.league, got.job);
+    } catch (err) {
+      setError(err.status === 0 ? "Can't reach the server" : err.message);
+      setBusy(false);
+    }
+  };
+  const sum = preview && preview.summary;
+  return html`<div class="app"><div class="login add-league">
     <h1>Fantasy Hockey</h1>
-    <label for="pw">Password</label>
-    <input id="pw" type="password" autocomplete="current-password" autofocus value=${password}
-      onInput=${(e) => setPassword(e.currentTarget.value)} />
+    <form onSubmit=${lookUp} class="add-step">
+      <label for="league-url">Your league's page</label>
+      <input id="league-url" type="url" inputmode="url" autocomplete="off" autofocus
+        placeholder="fleaflicker.com/nhl/leagues/… or fantasy.espn.com/hockey/league?leagueId=…"
+        value=${url} onInput=${(e) => { setUrl(e.currentTarget.value); setPreview(null); }} />
+      ${needCookies && html`
+        <p class="note">This ESPN league is private. While logged in to ESPN, open your browser's
+          developer tools → Application (Storage) → Cookies → espn.com, and copy <b>espn_s2</b> and <b>SWID</b>.
+          They let this server read your league (it never changes anything); they stop working when you log out of ESPN.</p>
+        <label for="espn-s2">espn_s2</label>
+        <input id="espn-s2" autocomplete="off" value=${s2} onInput=${(e) => setS2(e.currentTarget.value)} />
+        <label for="espn-swid">SWID</label>
+        <input id="espn-swid" autocomplete="off" placeholder="{…}" value=${swid} onInput=${(e) => setSwid(e.currentTarget.value)} />`}
+      <button type="submit" class="btn" disabled=${busy || !url.trim() || (needCookies && !(s2 && swid))}>
+        ${busy && !preview ? 'Looking it up…' : 'Look it up'}</button>
+    </form>
     ${error && html`<div class="error" role="alert">${error}</div>`}
-    <button type="submit" class="btn primary" disabled=${busy || !password}>${busy ? 'Logging in…' : 'Log in'}</button>
-  </form></div>`;
+    ${preview && html`
+      <div class="add-step">
+        <p class="note">${sum.teams} teams · ${sum.slots}${sum.bench != null ? ` · bench ${sum.bench}` : ''}${sum.moves_per_week ? ` · ${sum.moves_per_week >= 99 ? 'unlimited' : sum.moves_per_week} moves a week` : ''}<br />${sum.points}</p>
+        ${preview.problem
+          ? html`<div class="error" role="alert">Can't plan this league: ${preview.problem}</div>`
+          : html`
+            <label>Which team is yours?</label>
+            <div class="choices" role="radiogroup" aria-label="Your team">
+              ${preview.teams.map((t) => html`
+                <button type="button" class="choice" role="radio" aria-checked=${team === t.id} aria-pressed=${team === t.id}
+                  onClick=${() => setTeam(t.id)}>
+                  <span><span class="name">${t.name}</span>
+                  ${t.linked && html`<br /><span class="sub">Someone added this team already: you'll share its picks</span>`}</span>
+                  ${team === t.id && html`<span class="mark">Yours</span>`}
+                </button>`)}
+            </div>
+            <button type="button" class="btn primary" disabled=${busy || team === null} onClick=${add}>
+              ${busy ? 'Adding…' : 'Add league'}</button>`}
+      </div>`}
+    <p class="note">Your leagues are kept for this browser only, by a cookie: no account or password.
+      Clear this site's cookies and you'll add them again.</p>
+    ${onCancel && html`<button type="button" class="btn" onClick=${onCancel}>Cancel</button>`}
+  </div></div>`;
 }
 
-// The refreshes More offers, each for the league on screen (the auto window does every league).
+// The refreshes More offers, each for the league on screen (the daily pass does every league once a day).
 const REFRESHES = [
   ['league', 'League', 'Made a move? Read the roster again', '~7 s'],
   ['news', 'News', 'Injuries and goalies, on the roster as last read', '~12 s'],
@@ -295,13 +350,14 @@ const REFRESHES = [
   ['full', 'Full', 'Everything, line charts too', '~20 s'],
 ];
 
-function More({ status, league, onLeague, version, onLogout, onRefresh, running }) {
+function More({ status, league, onLeague, version, onLogout, onRefresh, running, onAdd, onRemove }) {
   if (!status) return html`<div class="empty">Loading…</div>`;
   const teams = status.teams || {};
   const last = status.last || {};
   const rows = [
     ['Server day', dayLabel(status.day)],
-    ['Auto refresh', status.auto ? 'on' : 'off'],
+    ['Daily plan', `${status.daily ? `${status.daily.lead_min} min before the first game, by ${status.daily.latest}` : '—'}`
+      + `${status.daily && status.daily.last ? ` · last ${new Date(status.daily.last).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}`],
     ['Plan', status.plan_file || 'none saved yet'],
     ['Plan saved', status.plan_saved_at ? clock(status.plan_saved_at) : '—'],
     ...Object.entries(last).map(([step, when]) => [step[0].toUpperCase() + step.slice(1), clock(when)]),
@@ -319,7 +375,7 @@ function More({ status, league, onLeague, version, onLogout, onRefresh, running 
   if (status.league_file) rows.push(['League', `${status.league_file} (not the platform)`]);
   return html`<div class="more">
     <div class="more-refresh">
-    <div class="sec"><h2>Refresh</h2><span class="note">this league<span class="pull-hint"> · pull down = Quick</span></span></div>
+    <div class="sec"><h2>Refresh</h2><span class="note">this league${status.tap_wait_s ? ` · again in ${Math.ceil(status.tap_wait_s / 60)} min` : ''}<span class="pull-hint"> · pull down = Quick</span></span></div>
     <div class="choices" role="group" aria-label="Refresh">
       ${REFRESHES.map(([mode, label, what, takes]) => html`
         <button type="button" class="choice" disabled=${running} onClick=${() => onRefresh(mode)}>
@@ -332,12 +388,17 @@ function More({ status, league, onLeague, version, onLogout, onRefresh, running 
     <div class="sec"><h2>League</h2></div>
     <div class="choices" role="group" aria-label="League">
       ${status.leagues.map((name) => html`
-        <button type="button" class="choice" aria-pressed=${name === league} onClick=${() => onLeague(name)}>
-          <span><span class="name">${(teams[name] && teams[name].team) || name}</span><br />
-          <span class="sub">${name} · ${(teams[name] && teams[name].platform) || ''}</span></span>
-          ${name === league && html`<span class="mark">Shown</span>`}
-        </button>`)}
+        <div class="league-row">
+          <button type="button" class="choice" aria-pressed=${name === league} onClick=${() => onLeague(name)}>
+            <span><span class="name">${(teams[name] && teams[name].team) || name}</span><br />
+            <span class="sub">${name} · ${(teams[name] && teams[name].platform) || ''}</span></span>
+            ${name === league && html`<span class="mark">Shown</span>`}
+          </button>
+          <button type="button" class="btn small remove" onClick=${() => onRemove(name)}
+            aria-label=${`Remove ${(teams[name] && teams[name].team) || name}`}>Remove</button>
+        </div>`)}
     </div>
+    <div style="padding: 10px 12px"><button type="button" class="btn" onClick=${onAdd}>Add a league</button></div>
     </div>
     <div class="more-log">
     <div class="sec"><h2>Refresh log</h2><span class="note">tap one for its lines</span></div>
@@ -350,8 +411,10 @@ function More({ status, league, onLeague, version, onLogout, onRefresh, running 
     </tbody></table>
     </div>
     <div class="more-device">
-    <div class="sec"><h2>This device</h2></div>
-    <div style="padding: 0 12px 16px"><button type="button" class="btn" onClick=${onLogout}>Log out</button></div>
+    <div class="sec"><h2>This browser</h2></div>
+    <p class="empty" style="padding-top: 0; padding-bottom: 8px">Your leagues are kept for this browser by a cookie,
+      not an account: forget it (or clear this site's cookies) and you'll add them again.</p>
+    <div style="padding: 0 12px 16px"><button type="button" class="btn" onClick=${onLogout}>Forget this browser</button></div>
     </div>
   </div>`;
 }
@@ -365,11 +428,11 @@ function App() {
   const [job, setJob] = useState(null);
   const [now, setNow] = useState(() => new Date());
   const [version, setVersion] = useState(0);     // bumps when a refresh ends: screens re-fetch
-  const [locked, setLocked] = useState(false);   // the server wants a login (any 401)
+  const [noLeague, setNoLeague] = useState(false); // this browser has no league yet: the add screen
+  const [adding, setAdding] = useState(false);     // More's "Add a league"
   const wide = useWide();
   const savedAt = useStale();
   const screen = useRef(null);
-  useEffect(() => onAuth(() => setLocked(true)), []);
   const tracking = useRef(null);
 
   const loadStatus = useCallback(async (name) => {
@@ -378,15 +441,17 @@ function App() {
       try {
         got = await api.status(name || undefined);
       } catch (e) {
-        if (e.status !== 404 || !name) throw e;
-        got = await api.status();             // a league this server doesn't plan: its first
+        if (e.status !== 404 || !name || needsLeague(e)) throw e;
+        got = await api.status();             // a league this browser doesn't have: its first
       }
+      setNoLeague(false);
       setStatus(got);
       setError(null);
       setNow(new Date());
       if (got.league !== name) { setLeague(got.league); store.set('fh.league', got.league); }
-      if (got.job && tracking.current !== got.job.id) track(got.job);
+      if (got.job && got.job.mine && tracking.current !== got.job.id) track(got.job);
     } catch (e) {
+      if (needsLeague(e)) { setNoLeague(true); setStatus(null); return; }
       setError(e.message);
     }
   }, []);
@@ -397,7 +462,7 @@ function App() {
     let current = { ...start, lines: start.lines || [] };
     setJob(current);
     setVersion((v) => v + 1);                // the refresh log shows it running
-    while (current.state === 'running' && tracking.current === start.id) {
+    while (active(current) && tracking.current === start.id) {
       await new Promise((r) => setTimeout(r, JOB_EVERY_MS));
       try {
         const got = await api.job(start.id, current.next || current.lines.length);
@@ -429,7 +494,7 @@ function App() {
       setError(e.message);
     }
   };
-  const running = !!(job && job.state === 'running');
+  const running = active(job);
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
   useEffect(() => {
@@ -438,17 +503,38 @@ function App() {
     return () => removeEventListener(REFRESH_EVENT, on);
   }, []);
   const closeJob = () => { tracking.current = null; setJob(null); };
-  const loggedIn = () => { setLocked(false); setError(null); loadStatus(league); setVersion((v) => v + 1); };
-  // Logged out: the saved screens go too, so the phone keeps no league data without a login.
+  // A league added: shown, and its first read and plan followed.
+  const added = (name, started) => {
+    store.set('fh.league', name);
+    setAdding(false); setNoLeague(false); setError(null); setStatus(null);
+    setLeague(name);
+    if (started) track(started);
+    location.hash = '#/roster';
+  };
+  const remove = async (name) => {
+    try {
+      const got = await api.removeLeague(name);
+      const next = (got.leagues || [])[0] || null;
+      store.set('fh.league', next || '');
+      setStatus(null);
+      setLeague(next);
+      if (!next) setNoLeague(true);
+      setVersion((v) => v + 1);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  // Forgotten: the cookie and the saved screens go, so the browser keeps no league data.
   const logout = async () => {
-    try { await api.logout(); } catch (_) { /* out of reach: the copy still goes */ }
+    try { await api.forget(); } catch (_) { /* out of reach: the copy still goes */ }
     try { await caches.delete('fh-data-v1'); } catch (_) { /* no Cache API */ }
-    setLocked(true);
+    store.set('fh.league', '');
+    setStatus(null); setLeague(null); setJob(null); setNoLeague(true);
   };
   const pull = usePull(screen, () => refresh('quick'), !!league && !wide && !route.game && tab !== 'games'
     && !running);
 
-  if (locked) return html`<${Login} onDone=${loggedIn} />`;
+  if (noLeague || adding) return html`<${AddLeague} onAdded=${added} onCancel=${adding && !noLeague ? () => setAdding(false) : null} />`;
   if (wide) {
     // The PC layout: the sidebar, then the header and the screen. Games keeps its list, the chosen
     // game and the goal feed side by side, each scrolling on its own, as the Planner does.
@@ -465,7 +551,7 @@ function App() {
           <${Guard} key=${games ? 'games' : tab}>
           ${!league ? html`<div class="empty">Loading…</div>`
             : games ? html`<${Games} league=${league} version=${version} wide selected=${route.game || null} view=${route.view || 'summary'} />`
-              : tab === 'more' ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} />`
+              : tab === 'more' ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} onAdd=${() => setAdding(true)} onRemove=${remove} />`
                 : tab === 'players' ? html`<${Players} league=${league} version=${version} wide />`
                   : tab === 'plan' ? html`<${Plan} league=${league} version=${version} wide />`
                     : tab === 'matchup' ? html`<${Matchup} league=${league} version=${version} />`
@@ -499,7 +585,7 @@ function App() {
         <span>${pull >= PULL_PX ? 'Release to refresh' : 'Pull to refresh'}</span></div>`}
       <${Guard} key=${tab}>
       ${tab === 'more'
-        ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} />`
+        ? html`<${More} status=${status} league=${league} onLeague=${chooseLeague} version=${version} onLogout=${logout} onRefresh=${refresh} running=${running} onAdd=${() => setAdding(true)} onRemove=${remove} />`
         : tab === 'roster' && league
           ? html`<${Roster} league=${league} version=${version} />`
           : tab === 'players' && league
