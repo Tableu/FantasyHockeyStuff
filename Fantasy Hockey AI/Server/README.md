@@ -207,9 +207,37 @@ renewed on every call. More -> "Forget this browser" drops it, along with the sa
 Private ESPN cookies are encrypted with `league_key` in the same entry (league_secrets.py).
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are off.
 
-A test server keeps its users and leagues apart with `FH_STATE_DIR` (state/ by default: users/,
-leagues/, league_secrets.json, scheduled_jobs.json). It must never run on :8000 or plan a real
-league's name, because reports/<league>/ is shared with the Docker server.
+## Developing
+
+Change locally, check, then push. A push only runs the tests on GitHub; it never deploys.
+
+- **The dev server** (`compose.dev.yaml`) runs the live server's image and code on
+  http://127.0.0.1:8010/app/. It keeps its own users, leagues, secrets and plans under `dev/`
+  (gitignored) through `FH_STATE_DIR`, `FH_REPORTS_DIR` and `FH_LOGIN_SECRETS`, so nothing it does
+  reaches the live server's `state/` or `reports/`.
+
+      docker compose -f compose.dev.yaml -p fh-dev up -d                   # start
+      docker compose -f compose.dev.yaml -p fh-dev restart dev-server      # after a Python edit
+      docker compose -f compose.dev.yaml -p fh-dev --profile phone up -d   # plus its tunnel (DEV_TUNNEL_TOKEN in .env)
+
+  It has no daily pass and no scheduled jobs. Until the live server moves to the cloud, its taps'
+  data steps write the same feature files as the live container on this PC, and its Fleaflicker
+  reads come from the same address, so refresh it sparingly.
+- **The tests** (`tests/`, pytest) run offline in seconds. They need no platform, database, NHL
+  feed or data/: the saved platform answers in fixtures/settings/ stand in for the leagues, and the
+  planner, the goal watcher and the NHL schedule are stubbed. Everything they write goes to a
+  temporary folder. Install with `pip install -r requirements-dev.txt`, then run
+  `python -m pytest tests -q`.
+- **`python check.py`** runs three checks before a push: the tests, `sync_league_settings.py
+  --check`, and one rehearsal plan of beagles on fixtures/beagles/fake_league.json. The rehearsal
+  uses today's real models and features and saves to a temporary reports folder. `--fast` skips the
+  rehearsal.
+- **CI** (`.github/workflows/server-tests.yml`) builds the production image and runs the tests and
+  the settings check inside it on every push touching `Fantasy Hockey AI/`, so a dependency missing
+  from requirements.txt fails there.
+
+A server started by hand for testing must never run on :8000 or plan a real league's name, unless
+`FH_REPORTS_DIR` points it elsewhere: by default reports/<league>/ is shared with the Docker server.
 
 ## Running it
 

@@ -1,0 +1,46 @@
+# The dev server: the live server's image and code, with its own users, leagues, secrets and
+# plans under Server/dev/ (gitignored), so nothing it does reaches the live server's files.
+#
+#   docker compose -f compose.dev.yaml -p fh-dev up -d             http://127.0.0.1:8010/app/
+#   docker compose -f compose.dev.yaml -p fh-dev restart dev-server   after a Python edit (app files: just reload)
+#   docker compose -f compose.dev.yaml -p fh-dev --profile phone up -d   also its tunnel (dev. hostname)
+#   docker compose -f compose.dev.yaml -p fh-dev down
+#
+# No daily pass and no scheduled jobs: the nightly import and the other data jobs are the live
+# server's alone. Taps still run the data steps (snapshots, tonight's build). Until the live server
+# moves to the cloud those write the same ModelFeatures files and Live tables as the live container
+# on this PC (same inputs, same contents), and its Fleaflicker reads share this PC's address with
+# the live server's -- refresh sparingly. The database is the PC's NHLStats, which the live server
+# copies its own into every night.
+x-dev-paths: &dev-paths
+  FH_STATE_DIR: "/app/Fantasy Hockey AI/Server/dev/state"
+  FH_REPORTS_DIR: "/app/Fantasy Hockey AI/Server/dev/reports"
+  FH_LOGIN_SECRETS: "/app/Fantasy Hockey AI/Server/dev/secrets.json"
+
+services:
+  dev-server:
+    build: .
+    image: fantasy-hockey-server
+    cpus: 2
+    mem_limit: 1g
+    memswap_limit: 3g
+    environment:
+      <<: *dev-paths
+      NHLSTATS_DB_SERVER: host.docker.internal
+      TZ: America/Vancouver
+    volumes:
+      - ../..:/app
+    ports:
+      - "127.0.0.1:8010:8000"
+    working_dir: "/app/Fantasy Hockey AI/Server"
+    command: ["python", "server.py", "--host", "0.0.0.0", "--no-daily"]
+
+  # The phone: a second Cloudflare Tunnel (its own hostname, e.g. dev.<domain>, made in the
+  # Cloudflare dashboard to http://dev-server:8000), its token as DEV_TUNNEL_TOKEN in .env.
+  dev-tunnel:
+    profiles: ["phone"]
+    image: cloudflare/cloudflared:2025.9.1
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: "${DEV_TUNNEL_TOKEN:-}"     # empty: the tunnel alone fails to start
+    depends_on: [dev-server]

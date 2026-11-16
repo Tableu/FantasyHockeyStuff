@@ -4,17 +4,20 @@ Shared data locations (ModelFeatures' features, Projections' reports, Settings/)
 Core/'s `paths`, which Server/ imports through `corelayer`. This module is named `livepaths`,
 not `paths`, so it can never shadow that one (see corelayer.py).
 
-    reports/<league>/   that league's draft boards, draft-assistant view and daily plans (gitignored)
+    reports/<league>/   that league's draft boards, draft-assistant view and daily plans (gitignored;
+                        FH_REPORTS_DIR puts them elsewhere -- the dev server's and the tests' own,
+                        so they never write over the live server's)
     fixtures/   made-up leagues for exercising the tools before a league has rosters
 """
 
+import os
 from pathlib import Path
 
 import corelayer  # noqa: F401 -- Core/ on sys.path
 import paths as season_paths
 
 ENGINE_DIR = Path(__file__).resolve().parent
-REPORTS_DIR = ENGINE_DIR / "reports"
+REPORTS_DIR = Path(os.environ.get("FH_REPORTS_DIR") or ENGINE_DIR / "reports")
 FIXTURES_DIR = ENGINE_DIR / "fixtures"
 
 
